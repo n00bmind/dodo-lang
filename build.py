@@ -58,7 +58,7 @@ platform_win = Platform(
             '-wd5027',          # Move assignment implicitly deleted
             '-wd5045'          # Spectre mitigations
             ],
-        libs                  = ['user32.lib', 'gdi32.lib', 'winmm.lib', 'ole32.lib', 'opengl32.lib', 'shlwapi.lib'],
+        libs                  = [], #'user32.lib', 'gdi32.lib', 'winmm.lib', 'ole32.lib', 'opengl32.lib', 'shlwapi.lib'],
         common_linker_flags   = ['/opt:ref', '/incremental:no']
 )
 
@@ -214,7 +214,7 @@ if __name__ == '__main__':
             out_args.extend(platform.common_compiler_flags)
             out_args.extend(config.compiler_flags)
             out_args.append(os.path.join(srcpath, 'win32_platform.cpp'))
-            out_args.append('-Felauncher.exe')
+            out_args.append('-Fedo.exe')
             out_args.append('/link')
             out_args.extend(platform.common_linker_flags)
             out_args.extend(config.linker_flags)

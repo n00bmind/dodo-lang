@@ -12,6 +12,77 @@
 #include "datatypes.h"
 #include "string.h"
 
+#include "lexer.cpp"
+#include "mainloop.cpp"
+
+
+PlatformAPI globalPlatform;
+
+
+PLATFORM_PRINT(Win32Print)
+{
+    va_list args;
+    va_start( args, fmt );
+    vfprintf( stdout, fmt, args );
+    va_end( args );
+}
+
+PLATFORM_PRINT(Win32Error)
+{
+    va_list args;
+    va_start( args, fmt );
+    vfprintf( stderr, fmt, args );
+    va_end( args );
+}
+
+PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
+{
+    PlatformReadFileResult result = {};
+
+    HANDLE fileHandle = CreateFile( filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0 );
+    if( fileHandle != INVALID_HANDLE_VALUE )
+    {
+        LARGE_INTEGER fileSize;
+        if( GetFileSizeEx( fileHandle, &fileSize ) )
+        {
+            u32 fileSize32 = U32( (u64)fileSize.QuadPart );
+            result.contents = PUSH_SIZE( arena, fileSize32 + 1 );
+
+            if( result.contents )
+            {
+                DWORD bytesRead;
+                if( ReadFile( fileHandle, result.contents, fileSize32, &bytesRead, 0 )
+                    && (fileSize32 == bytesRead) )
+                {
+                    // Null-terminate to help when handling text files
+                    *((u8 *)result.contents + fileSize32) = '\0';
+                    result.contentSize = I32( fileSize32 + 1 );
+                }
+                else
+                {
+                    globalPlatform.Error( "ERROR: ReadFile failed for '%s'", filename );
+                    result.contents = 0;
+                }
+            }
+            else
+            {
+                globalPlatform.Error( "ERROR: Couldn't allocate buffer for file contents" );
+            }
+        }
+        else
+        {
+            globalPlatform.Error( "ERROR: Failed querying file size for '%s'", filename );
+        }
+
+        CloseHandle( fileHandle );
+    }
+    else
+    {
+        globalPlatform.Error( "ERROR: Failed opening file '%s' for reading", filename );
+    }
+
+    return result;
+}
 
 ASSERT_HANDLER(DefaultAssertHandler)
 {
@@ -23,33 +94,38 @@ ASSERT_HANDLER(DefaultAssertHandler)
 
 int main( int argCount, char const* args[] )
 {
-    void* baseAddress = (void*)GIGABYTES(2048);
+    // Init global platform
+    globalPlatform = {};
+    globalPlatform.Print = Win32Print;
+    globalPlatform.Error = Win32Error;
+    globalPlatform.ReadEntireFile = Win32ReadEntireFile;
+
+#if CFG_DEBUG
+    void* globalBaseAddress = (void*)GIGABYTES(2048);
+    void* tmpBaseAddress = (void*)GIGABYTES(3048);
+#else
+    void* globalBaseAddress = 0;
+    void* tmpBaseAddress = 0;
+#endif
     // TODO Use MEM_LARGE_PAGES and call AdjustTokenPrivileges when not in XP
     // TODO Reserve only and commit in chunks
-    sz globalMemorySize = GIGABYTES(2);
-    void* globalMemoryBlock = VirtualAlloc( baseAddress, globalMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
+    sz globalMemorySize = GIGABYTES(1);
+    void* globalMemoryBlock = VirtualAlloc( globalBaseAddress, globalMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
+    sz tmpMemorySize = GIGABYTES(1);
+    void* tmpMemoryBlock = VirtualAlloc( tmpBaseAddress, tmpMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
 
     MemoryArena globalArena;
     InitArena( &globalArena, globalMemoryBlock, globalMemorySize );
+    MemoryArena tmpArena;
+    InitArena( &tmpArena, tmpMemoryBlock, tmpMemorySize );
 
-#if 0
-    String argString( args );
-    BucketArray<String> result( &globalArena, 16 );
-    argString.Split( ' ', &result );
-
-    auto idx = result.First();
-    while( idx )
-    {
-        printf( "%s\n", (*idx).data );
-        idx.Next();
-    }
-#endif
     Array<String> argsList( &globalArena, argCount );
-    for( int i = 0; i < argCount; ++i )
-    {
+    // Skip exe path from args list
+    for( int i = 1; i < argCount; ++i )
         argsList.Push( String( args[i] ) );
-        printf( "%s\n", argsList.Last().data );
-    }
+
+
+    Run( argsList, &globalArena, &tmpArena );
 
     return 0;
 }
