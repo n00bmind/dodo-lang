@@ -1,4 +1,12 @@
 
+/////     BUFFER    /////
+
+struct Buffer
+{
+    void* data;
+    sz size;
+};
+
 /////     DYNAMIC ARRAY    /////
 
 template <typename T>

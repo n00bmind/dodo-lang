@@ -1,11 +1,5 @@
 
-struct PlatformReadFileResult
-{
-    void *contents;
-    i32 contentSize;
-};
-
-#define PLATFORM_READ_ENTIRE_FILE(name) PlatformReadFileResult name( char const* filename, MemoryArena* arena )
+#define PLATFORM_READ_ENTIRE_FILE(name) Buffer name( char const* filename, MemoryArena* arena )
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);

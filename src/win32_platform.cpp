@@ -8,8 +8,8 @@
 #include "common.h"
 #include "intrinsics.h"
 #include "memory.h"
-#include "platform.h"
 #include "datatypes.h"
+#include "platform.h"
 #include "string.h"
 
 #include "lexer.cpp"
@@ -37,7 +37,7 @@ PLATFORM_PRINT(Win32Error)
 
 PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
 {
-    PlatformReadFileResult result = {};
+    Buffer result = {};
 
     HANDLE fileHandle = CreateFile( filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0 );
     if( fileHandle != INVALID_HANDLE_VALUE )
@@ -46,22 +46,22 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
         if( GetFileSizeEx( fileHandle, &fileSize ) )
         {
             u32 fileSize32 = U32( (u64)fileSize.QuadPart );
-            result.contents = PUSH_SIZE( arena, fileSize32 + 1 );
+            result.data = PUSH_SIZE( arena, fileSize32 + 1 );
 
-            if( result.contents )
+            if( result.data )
             {
                 DWORD bytesRead;
-                if( ReadFile( fileHandle, result.contents, fileSize32, &bytesRead, 0 )
+                if( ReadFile( fileHandle, result.data, fileSize32, &bytesRead, 0 )
                     && (fileSize32 == bytesRead) )
                 {
                     // Null-terminate to help when handling text files
-                    *((u8 *)result.contents + fileSize32) = '\0';
-                    result.contentSize = I32( fileSize32 + 1 );
+                    *((u8 *)result.data + fileSize32) = '\0';
+                    result.size = fileSize32 + 1;
                 }
                 else
                 {
                     globalPlatform.Error( "ERROR: ReadFile failed for '%s'", filename );
-                    result.contents = 0;
+                    result.data = 0;
                 }
             }
             else

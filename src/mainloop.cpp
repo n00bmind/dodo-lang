@@ -9,7 +9,9 @@ void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* 
     }
 
     String inputFilename = argsList[0];
-    PlatformReadFileResult readResult = globalPlatform.ReadEntireFile( inputFilename.CString( tmpArena ), tmpArena );
+    char const* filename_str = inputFilename.CString( tmpArena );
+    // TODO Temp memory scopes
+    Buffer readResult = globalPlatform.ReadEntireFile( filename_str, tmpArena );
 
-    Parse( String( (char const*)readResult.contents, readResult.contentSize ) );
+    Parse( String( readResult ), filename_str );
 }
