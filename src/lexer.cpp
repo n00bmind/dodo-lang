@@ -1,26 +1,29 @@
+struct TokenTypeValue
+{
+    char const* shortName;
+    char const* displayName;
+};
+
+#define VALUES(x) \
+    x(Unknown,          ARGS( "???", "unknown" )) \
+    x(Identifier,       ARGS( "IDN", "identifier" )) \
+    x(StringLiteral,    ARGS( "STR", "string" )) \
+    x(NumericLiteral,   ARGS( "NUM", "number" )) \
+    x(Comment,          ARGS( "/*/", "comment" )) \
+    x(Spacing,          ARGS( "   ", "spacing" )) \
+    x(Newline,          ARGS( "NLN", "newline" )) \
+    x(EndOfStream,      ARGS( "EOS", "EOS" )) \
+
+STRUCT_ENUM_WITH_VALUES(TokenType, TokenTypeValue, VALUES)
+#undef VALUES
 
 struct Token
 {
-    enum : u32
-    {
-        Unknown = 0,
-
-        Identifier,
-        StringLiteral,
-        NumericLiteral,
-
-        Comment,
-        Spacing,
-        Newline,
-
-        EndOfStream
-    };
-
     String text;
     char const* filename;
     i32 lineNumber;
     i32 columnNumber;
-    u32 type; 
+    TokenType type; 
 
     //union   // Could parse values in-place
     //{
@@ -140,12 +143,12 @@ static Token GetTokenRaw( Lexer* lexer )
     {
         case '\0':
         {
-            token.type = Token::EndOfStream;
+            token.type = TokenType::EndOfStream;
         } break;
 
         case '"':
         {
-            token.type = Token::StringLiteral;
+            token.type = TokenType::StringLiteral;
 
             while( lexer->at[0] && lexer->at[0] != '"' )
             {
@@ -166,7 +169,7 @@ static Token GetTokenRaw( Lexer* lexer )
             // C++ style
             if( lexer->at[0] == '/' )
             {
-                token.type = Token::Comment;
+                token.type = TokenType::Comment;
                 lexer->Advance();
 
                 while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
@@ -175,7 +178,7 @@ static Token GetTokenRaw( Lexer* lexer )
             // C style
             else if( lexer->at[0] == '*' )
             {
-                token.type = Token::Comment;
+                token.type = TokenType::Comment;
                 lexer->Advance();
 
                 while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
@@ -201,14 +204,14 @@ static Token GetTokenRaw( Lexer* lexer )
         {
             if( IsSpacing( c ) )
             {
-                token.type = Token::Spacing;
+                token.type = TokenType::Spacing;
 
                 while( IsSpacing( lexer->at[0] ) )
                     lexer->Advance();
             }
             else if( IsNewline( c ) )
             {
-                token.type = Token::Newline;
+                token.type = TokenType::Newline;
 #if 0
                 // Account for double char end of lines
                 if( (c == '\r' && lexer->at[0] == '\n')
@@ -223,19 +226,19 @@ static Token GetTokenRaw( Lexer* lexer )
             }
             else if( IsAlpha( c ) )
             {
-                token.type = Token::Identifier;
+                token.type = TokenType::Identifier;
 
                 while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
                     lexer->Advance();
             }
             else if( IsNumeric( c ) )
             {
-                token.type = Token::NumericLiteral;
+                token.type = TokenType::NumericLiteral;
 
                 ParseNumber( lexer );
             }
             else
-                token.type = Token::Unknown;
+                token.type = TokenType::Unknown;
 
         } break;
     }
@@ -251,13 +254,13 @@ static Token GetToken( Lexer* lexer )
     while( true )
     {
         token = GetTokenRaw( lexer );
-        if( token.type == Token::Spacing ||
-            token.type == Token::Newline ||
-            token.type == Token::Comment )
+        if( token.type == TokenType::Spacing ||
+            token.type == TokenType::Newline ||
+            token.type == TokenType::Comment )
         {} // Ignore
         else
         {
-            if( token.type == Token::StringLiteral )
+            if( token.type == TokenType::StringLiteral )
             {
                 if( token.text.length && token.text.data[0] == '"' )
                 {
@@ -276,15 +279,14 @@ static Token GetToken( Lexer* lexer )
     return token;
 }
 
-static Token RequireToken( Lexer* lexer, u32 wantedType )
+static Token RequireToken( Lexer* lexer, TokenType const& wantedType )
 {
     Token token = GetToken( lexer );
-    // TODO 
-#if 0
+
     if( token.type != wantedType )
         ERROR( token, "Unexpected token type (wanted '%s', got '%s')",
-               TokenType::names[wantedType], TokenType::names[token.type] );
-#endif
+               TokenType::Values::names[wantedType], TokenType::Values::names[token.type] );
+
     return token;
 }
 
@@ -309,13 +311,13 @@ void Parse( String const& program, char const* filename )
     while( parsing )
     {
         Token token = GetToken( &lexer );
-        switch( token.type )
+        switch( token.type.index )
         {
             default:
             {
-                globalPlatform.Print( "%d - %.*s\n", token.type, token.text.length, token.text.data );
+                globalPlatform.Print( "%d - %.*s\n", token.type.value.shortName, token.text.length, token.text.data );
             } break;
-            case Token::EndOfStream:
+            case TokenType::EndOfStream.index:
             {
                 parsing = false;
             } break;

@@ -238,6 +238,7 @@ int main()
 
 */
 
+#define ARGS(...) { __VA_ARGS__ }
 #define _ENUM_BUILDER(x) static constexpr EnumName x() \
     { static EnumName _inst = { #x, (u32)Enum::x, ValueType() }; return _inst; }
 #define _ENUM_BUILDER_WITH_NAMES(x, n) static constexpr EnumName x() \
@@ -265,6 +266,7 @@ struct enumName                                                 \
     struct Values;                                              \
                                                                 \
 private:                                                        \
+    /* This is needed so indices can be auto assigned */        \
     enum class Enum : u32                                       \
     {                                                           \
         xValueList(_ENUM_ENTRY)                                 \
@@ -276,10 +278,10 @@ struct enumName::Values                                         \
     {                                                           \
         xValueList(_ENUM_NAME)                                  \
     };                                                          \
-    static constexpr const enumName items[] = {                 \
+    static constexpr enumName items[] = {                 \
         xValueList(_ENUM_ITEM)                                  \
     };                                                          \
-    static constexpr const int count = ARRAYCOUNT(items);       \
+    static constexpr int count = ARRAYCOUNT(items);       \
 };                                                              \
 
 #define STRUCT_ENUM(enumName, xValueList)                           _CREATE_ENUM(enumName, u32, xValueList, _ENUM_BUILDER)
