@@ -1,3 +1,6 @@
+namespace Lexer
+{
+    
 struct TokenTypeValue
 {
     char const* shortName;
@@ -16,6 +19,7 @@ struct TokenTypeValue
 
 STRUCT_ENUM_WITH_VALUES(TokenType, TokenTypeValue, VALUES)
 #undef VALUES
+
 
 struct Token
 {
@@ -143,12 +147,12 @@ static Token GetTokenRaw( Lexer* lexer )
     {
         case '\0':
         {
-            token.type = TokenType::EndOfStream;
+            token.type = TokenType::EndOfStream();
         } break;
 
         case '"':
         {
-            token.type = TokenType::StringLiteral;
+            token.type = TokenType::StringLiteral();
 
             while( lexer->at[0] && lexer->at[0] != '"' )
             {
@@ -169,7 +173,7 @@ static Token GetTokenRaw( Lexer* lexer )
             // C++ style
             if( lexer->at[0] == '/' )
             {
-                token.type = TokenType::Comment;
+                token.type = TokenType::Comment();
                 lexer->Advance();
 
                 while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
@@ -178,7 +182,7 @@ static Token GetTokenRaw( Lexer* lexer )
             // C style
             else if( lexer->at[0] == '*' )
             {
-                token.type = TokenType::Comment;
+                token.type = TokenType::Comment();
                 lexer->Advance();
 
                 while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
@@ -204,14 +208,14 @@ static Token GetTokenRaw( Lexer* lexer )
         {
             if( IsSpacing( c ) )
             {
-                token.type = TokenType::Spacing;
+                token.type = TokenType::Spacing();
 
                 while( IsSpacing( lexer->at[0] ) )
                     lexer->Advance();
             }
             else if( IsNewline( c ) )
             {
-                token.type = TokenType::Newline;
+                token.type = TokenType::Newline();
 #if 0
                 // Account for double char end of lines
                 if( (c == '\r' && lexer->at[0] == '\n')
@@ -226,19 +230,19 @@ static Token GetTokenRaw( Lexer* lexer )
             }
             else if( IsAlpha( c ) )
             {
-                token.type = TokenType::Identifier;
+                token.type = TokenType::Identifier();
 
                 while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
                     lexer->Advance();
             }
             else if( IsNumeric( c ) )
             {
-                token.type = TokenType::NumericLiteral;
+                token.type = TokenType::NumericLiteral();
 
                 ParseNumber( lexer );
             }
             else
-                token.type = TokenType::Unknown;
+                token.type = TokenType::Unknown();
 
         } break;
     }
@@ -254,13 +258,13 @@ static Token GetToken( Lexer* lexer )
     while( true )
     {
         token = GetTokenRaw( lexer );
-        if( token.type == TokenType::Spacing ||
-            token.type == TokenType::Newline ||
-            token.type == TokenType::Comment )
+        if( token.type == TokenType::Spacing() ||
+            token.type == TokenType::Newline() ||
+            token.type == TokenType::Comment() )
         {} // Ignore
         else
         {
-            if( token.type == TokenType::StringLiteral )
+            if( token.type == TokenType::StringLiteral() )
             {
                 if( token.text.length && token.text.data[0] == '"' )
                 {
@@ -285,7 +289,7 @@ static Token RequireToken( Lexer* lexer, TokenType const& wantedType )
 
     if( token.type != wantedType )
         ERROR( token, "Unexpected token type (wanted '%s', got '%s')",
-               TokenType::Values::names[wantedType], TokenType::Values::names[token.type] );
+               wantedType.value.displayName, token.type.value.displayName );
 
     return token;
 }
@@ -315,9 +319,9 @@ void Parse( String const& program, char const* filename )
         {
             default:
             {
-                globalPlatform.Print( "%d - %.*s\n", token.type.value.shortName, token.text.length, token.text.data );
+                globalPlatform.Print( "%s - %.*s\n", token.type.value.shortName, token.text.length, token.text.data );
             } break;
-            case TokenType::EndOfStream.index:
+            case TokenType::EndOfStream().index:
             {
                 parsing = false;
             } break;
@@ -327,3 +331,4 @@ void Parse( String const& program, char const* filename )
 
 #undef ERROR
 
+}

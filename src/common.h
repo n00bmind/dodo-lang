@@ -214,12 +214,12 @@ struct V
 };
 
 #define VALUES(x) \
-    x(None, {"a", 100}) \
-    x(Animation, {"b", 200}) \
-    x(Landscape, {"c", 300}) \
-    x(Audio, {"d", 400}) \
-    x(Network, {"e", 500}) \
-    x(Scripting, {"f", 600}) \
+    x(None, ARGS("a", 100)) \
+    x(Animation, ARGS("b", 200)) \
+    x(Landscape, ARGS("c", 300)) \
+    x(Audio, ARGS("d", 400)) \
+    x(Network, ARGS("e", 500)) \
+    x(Scripting, ARGS("f", 600)) \
 
 STRUCT_ENUM_WITH_VALUES(MemoryTag, V, VALUES)
 #undef VALUES
@@ -258,6 +258,8 @@ struct enumName                                                 \
                                                                 \
     bool operator ==( enumName const& other ) const             \
     { return index == other.index; }                            \
+    bool operator !=( enumName const& other ) const             \
+    { return index != other.index; }                            \
                                                                 \
     using EnumName = enumName;                                  \
     using ValueType = valueType;                                \
