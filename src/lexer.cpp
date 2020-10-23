@@ -8,7 +8,40 @@ struct TokenTypeValue
 };
 
 #define VALUES(x) \
-    x(Unknown,          ARGS( "???", "unknown" )) \
+    x(Unknown,      ARGS( "???", "unknown" )) \
+    \
+    x(Exclamation,  ARGS( " ! ", "!" )) \
+    x(Pound,        ARGS( " # ", "#" )) \
+    x(Dollar,       ARGS( " $ ", "$" )) \
+    x(Percent,      ARGS( " % ", "%" )) \
+    x(Ampersand,    ARGS( " & ", "&" )) \
+    x(SingleQuote,  ARGS( " ' ", "'" )) \
+    x(OpenParen,    ARGS( " ( ", "(" )) \
+    x(CloseParen,   ARGS( " ) ", ")" )) \
+    x(Asterisk,     ARGS( " * ", "*" )) \
+    x(Plus,         ARGS( " + ", "+" )) \
+    x(Comma,        ARGS( " , ", "," )) \
+    x(Minus,        ARGS( " - ", "-" )) \
+    x(Dot,          ARGS( " . ", "." )) \
+    x(Slash,        ARGS( " / ", "/" )) \
+    x(Colon,        ARGS( " : ", ":" )) \
+    x(Semicolon,    ARGS( " ; ", ";" )) \
+    x(LessThan,     ARGS( " < ", "<" )) \
+    x(Equal,        ARGS( " = ", "=" )) \
+    x(GreaterThan,  ARGS( " > ", ">" )) \
+    x(Question,     ARGS( " ? ", "?" )) \
+    x(At,           ARGS( " @ ", "@" )) \
+    x(OpenBracket,  ARGS( " [ ", "[" )) \
+    x(Backslash,    ARGS( " \\ ", "\\" )) \
+    x(CloseBracket, ARGS( " ] ", "]" )) \
+    x(Caret,        ARGS( " ^ ", "^" )) \
+    x(Underscore,   ARGS( " _ ", "_" )) \
+    x(BackTick,     ARGS( " ` ", "`" )) \
+    x(OpenBrace,    ARGS( " { ", "{" )) \
+    x(Pipe,         ARGS( " | ", "|" )) \
+    x(CloseBrace,   ARGS( " } ", "}" )) \
+    x(Tilde,        ARGS( " ~ ", "~" )) \
+    \
     x(Identifier,       ARGS( "IDN", "identifier" )) \
     x(StringLiteral,    ARGS( "STR", "string" )) \
     x(NumericLiteral,   ARGS( "NUM", "number" )) \
@@ -19,6 +52,8 @@ struct TokenTypeValue
 
 STRUCT_ENUM_WITH_VALUES(TokenType, TokenTypeValue, VALUES)
 #undef VALUES
+
+static int globalSymbolLUT[256] = {};
 
 
 struct Token
@@ -143,110 +178,116 @@ static Token GetTokenRaw( Lexer* lexer )
     char c = lexer->at[0];
     lexer->Advance();
 
-    switch( c )
+    // First use the lookup for symbols
+    int lookupIndex = globalSymbolLUT[c];
+    if( lookupIndex )
+        token.type = TokenType::Values::items[lookupIndex];
+    else
     {
-        case '\0':
+        switch( c )
         {
-            token.type = TokenType::EndOfStream();
-        } break;
-
-        case '"':
-        {
-            token.type = TokenType::StringLiteral();
-
-            while( lexer->at[0] && lexer->at[0] != '"' )
+            case '\0':
             {
-                // Skip escape sequences
-                if( lexer->at[0] == '\\' && lexer->at[1] )
+                token.type = TokenType::EndOfStream();
+            } break;
+
+            case '"':
+            {
+                token.type = TokenType::StringLiteral();
+
+                while( lexer->at[0] && lexer->at[0] != '"' )
                 {
-                    lexer->Advance();
-                }
-                lexer->Advance();
-            }
-            // Skip last quote
-            if( lexer->at[0] )
-                lexer->Advance();
-        }
-
-        case '/':
-        {
-            // C++ style
-            if( lexer->at[0] == '/' )
-            {
-                token.type = TokenType::Comment();
-                lexer->Advance();
-
-                while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
-                    lexer->Advance();
-            }
-            // C style
-            else if( lexer->at[0] == '*' )
-            {
-                token.type = TokenType::Comment();
-                lexer->Advance();
-
-                while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
-                {
-                    // NOTE This is slightly weird in that we potentially advance the line number before skipping over a multi-byte newline
-                    if( IsNewline( lexer->at[0] ) )
+                    // Skip escape sequences
+                    if( lexer->at[0] == '\\' && lexer->at[1] )
                     {
-                        AdvanceNewline( lexer, lexer->at[0], lexer->at[1] );
+                        lexer->Advance();
                     }
                     lexer->Advance();
                 }
-
+                // Skip last quote
                 if( lexer->at[0] )
-                    lexer->Advance( 2 );
-            }
-            else
-            {
-                // TODO
-            }
-        } break;
-
-        default:
-        {
-            if( IsSpacing( c ) )
-            {
-                token.type = TokenType::Spacing();
-
-                while( IsSpacing( lexer->at[0] ) )
                     lexer->Advance();
             }
-            else if( IsNewline( c ) )
+
+            case '/':
             {
-                token.type = TokenType::Newline();
+                // C++ style
+                if( lexer->at[0] == '/' )
+                {
+                    token.type = TokenType::Comment();
+                    lexer->Advance();
+
+                    while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
+                        lexer->Advance();
+                }
+                // C style
+                else if( lexer->at[0] == '*' )
+                {
+                    token.type = TokenType::Comment();
+                    lexer->Advance();
+
+                    while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
+                    {
+                        // NOTE This is slightly weird in that we potentially advance the line number before skipping over a multi-byte newline
+                        if( IsNewline( lexer->at[0] ) )
+                        {
+                            AdvanceNewline( lexer, lexer->at[0], lexer->at[1] );
+                        }
+                        lexer->Advance();
+                    }
+
+                    if( lexer->at[0] )
+                        lexer->Advance( 2 );
+                }
+                else
+                {
+                    // TODO
+                }
+            } break;
+
+            default:
+            {
+                if( IsSpacing( c ) )
+                {
+                    token.type = TokenType::Spacing();
+
+                    while( IsSpacing( lexer->at[0] ) )
+                        lexer->Advance();
+                }
+                else if( IsNewline( c ) )
+                {
+                    token.type = TokenType::Newline();
 #if 0
-                // Account for double char end of lines
-                if( (c == '\r' && lexer->at[0] == '\n')
-                    || (c == '\n' && lexer->at[0] == '\r') )
-                    lexer->Advance();
+                    // Account for double char end of lines
+                    if( (c == '\r' && lexer->at[0] == '\n')
+                        || (c == '\n' && lexer->at[0] == '\r') )
+                        lexer->Advance();
 
-                lexer->lineNumber++;
-                lexer->columnNumber = 1;
+                    lexer->lineNumber++;
+                    lexer->columnNumber = 1;
 #else
-                AdvanceNewline( lexer, c, lexer->at[0] );
+                    AdvanceNewline( lexer, c, lexer->at[0] );
 #endif
-            }
-            else if( IsAlpha( c ) )
-            {
-                token.type = TokenType::Identifier();
+                }
+                else if( IsAlpha( c ) )
+                {
+                    token.type = TokenType::Identifier();
 
-                while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
-                    lexer->Advance();
-            }
-            else if( IsNumeric( c ) )
-            {
-                token.type = TokenType::NumericLiteral();
+                    while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
+                        lexer->Advance();
+                }
+                else if( IsNumeric( c ) )
+                {
+                    token.type = TokenType::NumericLiteral();
 
-                ParseNumber( lexer );
-            }
-            else
-                token.type = TokenType::Unknown();
+                    ParseNumber( lexer );
+                }
+                else
+                    token.type = TokenType::Unknown();
 
-        } break;
+            } break;
+        }
     }
-
     token.text.length = I32( lexer->stream.data - token.text.data );
 
     return token;
@@ -307,9 +348,42 @@ static Token PeekToken( Lexer* lexer )
     //return token.type == wantedType;
 //}
 
-void Parse( String const& program, char const* filename )
+void Scan( String const& program, char const* filename )
 {
     Lexer lexer = Lexer( program, filename );
+
+    // Init symbol look up table
+    globalSymbolLUT['!'] = TokenType::Exclamation().index;
+    globalSymbolLUT['#'] = TokenType::Pound().index;
+    globalSymbolLUT['$'] = TokenType::Dollar().index;
+    globalSymbolLUT['%'] = TokenType::Percent().index;
+    globalSymbolLUT['&'] = TokenType::Ampersand().index;
+    globalSymbolLUT['\''] = TokenType::SingleQuote().index;
+    globalSymbolLUT['('] = TokenType::OpenParen().index;
+    globalSymbolLUT[')'] = TokenType::CloseParen().index;
+    globalSymbolLUT['*'] = TokenType::Asterisk().index;
+    globalSymbolLUT['+'] = TokenType::Plus().index;
+    globalSymbolLUT[','] = TokenType::Comma().index;
+    globalSymbolLUT['-'] = TokenType::Minus().index;
+    globalSymbolLUT['.'] = TokenType::Dot().index;
+    globalSymbolLUT['/'] = TokenType::Slash().index;
+    globalSymbolLUT[':'] = TokenType::Colon().index;
+    globalSymbolLUT[';'] = TokenType::Semicolon().index;
+    globalSymbolLUT['<'] = TokenType::LessThan().index;
+    globalSymbolLUT['='] = TokenType::Equal().index;
+    globalSymbolLUT['>'] = TokenType::GreaterThan().index;
+    globalSymbolLUT['?'] = TokenType::Question().index;
+    globalSymbolLUT['@'] = TokenType::At().index;
+    globalSymbolLUT['['] = TokenType::OpenBracket().index;
+    globalSymbolLUT['\\'] = TokenType::Backslash().index;
+    globalSymbolLUT[']'] = TokenType::CloseBracket().index;
+    globalSymbolLUT['^'] = TokenType::Caret().index;
+    globalSymbolLUT['_'] = TokenType::Underscore().index;
+    globalSymbolLUT['`'] = TokenType::BackTick().index;
+    globalSymbolLUT['{'] = TokenType::OpenBrace().index;
+    globalSymbolLUT['|'] = TokenType::Pipe().index;
+    globalSymbolLUT['}'] = TokenType::CloseBrace().index;
+    globalSymbolLUT['~'] = TokenType::Tilde().index;
 
     bool parsing = true;
     while( parsing )
@@ -331,4 +405,5 @@ void Parse( String const& program, char const* filename )
 
 #undef ERROR
 
-}
+} // namespace Lexer
+

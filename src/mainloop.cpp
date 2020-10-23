@@ -13,5 +13,5 @@ void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* 
     // TODO Temp memory scopes
     Buffer readResult = globalPlatform.ReadEntireFile( filename_str, tmpArena );
 
-    Lexer::Parse( String( readResult ), filename_str );
+    Lexer::Scan( String( readResult ), filename_str );
 }
