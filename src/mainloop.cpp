@@ -1,3 +1,12 @@
+#include "common.h"
+#include "intrinsics.h"
+#include "memory.h"
+#include "datatypes.h"
+#include "platform.h"
+#include "string.h"
+
+#include "lexer.cpp"
+#include "parser.cpp"
 
 void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* tmpArena )
 {
@@ -13,5 +22,5 @@ void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* 
     // TODO Temp memory scopes
     Buffer readResult = globalPlatform.ReadEntireFile( filename_str, tmpArena );
 
-    Lexer::Scan( String( readResult ), filename_str );
+    Parse( String( readResult ), filename_str );
 }

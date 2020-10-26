@@ -1,4 +1,4 @@
-namespace Lexer
+namespace Tk
 {
     
 struct TokenTypeValue
@@ -50,10 +50,12 @@ struct TokenTypeValue
     x(Newline,          ARGS( "NLN", "newline" )) \
     x(EndOfStream,      ARGS( "EOS", "EOS" )) \
 
-STRUCT_ENUM_WITH_VALUES(TokenType, TokenTypeValue, VALUES)
+STRUCT_ENUM_WITH_VALUES(Type, TokenTypeValue, VALUES)
 #undef VALUES
 
-static int globalSymbolLUT[256] = {};
+} // namespace Lexer
+
+static int globalSymbolLUT[128] = {};
 
 
 struct Token
@@ -62,7 +64,7 @@ struct Token
     char const* filename;
     i32 lineNumber;
     i32 columnNumber;
-    TokenType type; 
+    Tk::Type type; 
 
     //union   // Could parse values in-place
     //{
@@ -87,6 +89,39 @@ struct Lexer
         , lineNumber( 1 )
         , columnNumber( 1 )
     {
+        // Init symbol look up table
+        globalSymbolLUT['!'] = Tk::Type::Exclamation().index;
+        globalSymbolLUT['#'] = Tk::Type::Pound().index;
+        globalSymbolLUT['$'] = Tk::Type::Dollar().index;
+        globalSymbolLUT['%'] = Tk::Type::Percent().index;
+        globalSymbolLUT['&'] = Tk::Type::Ampersand().index;
+        globalSymbolLUT['\''] = Tk::Type::SingleQuote().index;
+        globalSymbolLUT['('] = Tk::Type::OpenParen().index;
+        globalSymbolLUT[')'] = Tk::Type::CloseParen().index;
+        globalSymbolLUT['*'] = Tk::Type::Asterisk().index;
+        globalSymbolLUT['+'] = Tk::Type::Plus().index;
+        globalSymbolLUT[','] = Tk::Type::Comma().index;
+        globalSymbolLUT['-'] = Tk::Type::Minus().index;
+        globalSymbolLUT['.'] = Tk::Type::Dot().index;
+        //globalSymbolLUT['/'] = Tk::Type::Slash().index;
+        globalSymbolLUT[':'] = Tk::Type::Colon().index;
+        globalSymbolLUT[';'] = Tk::Type::Semicolon().index;
+        globalSymbolLUT['<'] = Tk::Type::LessThan().index;
+        globalSymbolLUT['='] = Tk::Type::Equal().index;
+        globalSymbolLUT['>'] = Tk::Type::GreaterThan().index;
+        globalSymbolLUT['?'] = Tk::Type::Question().index;
+        globalSymbolLUT['@'] = Tk::Type::At().index;
+        globalSymbolLUT['['] = Tk::Type::OpenBracket().index;
+        globalSymbolLUT['\\'] = Tk::Type::Backslash().index;
+        globalSymbolLUT[']'] = Tk::Type::CloseBracket().index;
+        globalSymbolLUT['^'] = Tk::Type::Caret().index;
+        globalSymbolLUT['_'] = Tk::Type::Underscore().index;
+        globalSymbolLUT['`'] = Tk::Type::BackTick().index;
+        globalSymbolLUT['{'] = Tk::Type::OpenBrace().index;
+        globalSymbolLUT['|'] = Tk::Type::Pipe().index;
+        globalSymbolLUT['}'] = Tk::Type::CloseBrace().index;
+        globalSymbolLUT['~'] = Tk::Type::Tilde().index;
+
         Refill();
     }
 
@@ -176,24 +211,25 @@ static Token GetTokenRaw( Lexer* lexer )
     token.columnNumber = lexer->columnNumber;
 
     char c = lexer->at[0];
+    // TODO Remove this and go back to only advancing when necessary to increase the amount of advances by more than 1 char
     lexer->Advance();
 
     // First use the lookup for symbols
     int lookupIndex = globalSymbolLUT[c];
     if( lookupIndex )
-        token.type = TokenType::Values::items[lookupIndex];
+        token.type = Tk::Type::Values::items[lookupIndex];
     else
     {
         switch( c )
         {
             case '\0':
             {
-                token.type = TokenType::EndOfStream();
+                token.type = Tk::Type::EndOfStream();
             } break;
 
             case '"':
             {
-                token.type = TokenType::StringLiteral();
+                token.type = Tk::Type::StringLiteral();
 
                 while( lexer->at[0] && lexer->at[0] != '"' )
                 {
@@ -214,7 +250,7 @@ static Token GetTokenRaw( Lexer* lexer )
                 // C++ style
                 if( lexer->at[0] == '/' )
                 {
-                    token.type = TokenType::Comment();
+                    token.type = Tk::Type::Comment();
                     lexer->Advance();
 
                     while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
@@ -223,7 +259,7 @@ static Token GetTokenRaw( Lexer* lexer )
                 // C style
                 else if( lexer->at[0] == '*' )
                 {
-                    token.type = TokenType::Comment();
+                    token.type = Tk::Type::Comment();
                     lexer->Advance();
 
                     while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
@@ -249,14 +285,14 @@ static Token GetTokenRaw( Lexer* lexer )
             {
                 if( IsSpacing( c ) )
                 {
-                    token.type = TokenType::Spacing();
+                    token.type = Tk::Type::Spacing();
 
                     while( IsSpacing( lexer->at[0] ) )
                         lexer->Advance();
                 }
                 else if( IsNewline( c ) )
                 {
-                    token.type = TokenType::Newline();
+                    token.type = Tk::Type::Newline();
 #if 0
                     // Account for double char end of lines
                     if( (c == '\r' && lexer->at[0] == '\n')
@@ -271,19 +307,19 @@ static Token GetTokenRaw( Lexer* lexer )
                 }
                 else if( IsAlpha( c ) )
                 {
-                    token.type = TokenType::Identifier();
+                    token.type = Tk::Type::Identifier();
 
                     while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
                         lexer->Advance();
                 }
                 else if( IsNumeric( c ) )
                 {
-                    token.type = TokenType::NumericLiteral();
+                    token.type = Tk::Type::NumericLiteral();
 
                     ParseNumber( lexer );
                 }
                 else
-                    token.type = TokenType::Unknown();
+                    token.type = Tk::Type::Unknown();
 
             } break;
         }
@@ -299,13 +335,13 @@ static Token GetToken( Lexer* lexer )
     while( true )
     {
         token = GetTokenRaw( lexer );
-        if( token.type == TokenType::Spacing() ||
-            token.type == TokenType::Newline() ||
-            token.type == TokenType::Comment() )
+        if( token.type == Tk::Type::Spacing() ||
+            token.type == Tk::Type::Newline() ||
+            token.type == Tk::Type::Comment() )
         {} // Ignore
         else
         {
-            if( token.type == TokenType::StringLiteral() )
+            if( token.type == Tk::Type::StringLiteral() )
             {
                 if( token.text.length && token.text.data[0] == '"' )
                 {
@@ -324,7 +360,7 @@ static Token GetToken( Lexer* lexer )
     return token;
 }
 
-static Token RequireToken( Lexer* lexer, TokenType const& wantedType )
+static Token RequireToken( Lexer* lexer, Tk::Type const& wantedType )
 {
     Token token = GetToken( lexer );
 
@@ -348,42 +384,10 @@ static Token PeekToken( Lexer* lexer )
     //return token.type == wantedType;
 //}
 
-void Scan( String const& program, char const* filename )
+#if !CFG_RELEASE
+void DebugDumpScan( String const& program, char const* filename )
 {
     Lexer lexer = Lexer( program, filename );
-
-    // Init symbol look up table
-    globalSymbolLUT['!'] = TokenType::Exclamation().index;
-    globalSymbolLUT['#'] = TokenType::Pound().index;
-    globalSymbolLUT['$'] = TokenType::Dollar().index;
-    globalSymbolLUT['%'] = TokenType::Percent().index;
-    globalSymbolLUT['&'] = TokenType::Ampersand().index;
-    globalSymbolLUT['\''] = TokenType::SingleQuote().index;
-    globalSymbolLUT['('] = TokenType::OpenParen().index;
-    globalSymbolLUT[')'] = TokenType::CloseParen().index;
-    globalSymbolLUT['*'] = TokenType::Asterisk().index;
-    globalSymbolLUT['+'] = TokenType::Plus().index;
-    globalSymbolLUT[','] = TokenType::Comma().index;
-    globalSymbolLUT['-'] = TokenType::Minus().index;
-    globalSymbolLUT['.'] = TokenType::Dot().index;
-    globalSymbolLUT['/'] = TokenType::Slash().index;
-    globalSymbolLUT[':'] = TokenType::Colon().index;
-    globalSymbolLUT[';'] = TokenType::Semicolon().index;
-    globalSymbolLUT['<'] = TokenType::LessThan().index;
-    globalSymbolLUT['='] = TokenType::Equal().index;
-    globalSymbolLUT['>'] = TokenType::GreaterThan().index;
-    globalSymbolLUT['?'] = TokenType::Question().index;
-    globalSymbolLUT['@'] = TokenType::At().index;
-    globalSymbolLUT['['] = TokenType::OpenBracket().index;
-    globalSymbolLUT['\\'] = TokenType::Backslash().index;
-    globalSymbolLUT[']'] = TokenType::CloseBracket().index;
-    globalSymbolLUT['^'] = TokenType::Caret().index;
-    globalSymbolLUT['_'] = TokenType::Underscore().index;
-    globalSymbolLUT['`'] = TokenType::BackTick().index;
-    globalSymbolLUT['{'] = TokenType::OpenBrace().index;
-    globalSymbolLUT['|'] = TokenType::Pipe().index;
-    globalSymbolLUT['}'] = TokenType::CloseBrace().index;
-    globalSymbolLUT['~'] = TokenType::Tilde().index;
 
     bool parsing = true;
     while( parsing )
@@ -395,15 +399,14 @@ void Scan( String const& program, char const* filename )
             {
                 globalPlatform.Print( "%s - %.*s\n", token.type.value.shortName, token.text.length, token.text.data );
             } break;
-            case TokenType::EndOfStream().index:
+            case Tk::Type::EndOfStream().index:
             {
                 parsing = false;
             } break;
         }
     }
 }
+#endif
 
 #undef ERROR
-
-} // namespace Lexer
 

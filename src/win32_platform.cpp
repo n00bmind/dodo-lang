@@ -5,14 +5,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "common.h"
-#include "intrinsics.h"
-#include "memory.h"
-#include "datatypes.h"
-#include "platform.h"
-#include "string.h"
-
-#include "lexer.cpp"
 #include "mainloop.cpp"
 
 
