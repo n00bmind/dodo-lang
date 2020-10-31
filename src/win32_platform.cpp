@@ -98,7 +98,7 @@ ASSERT_HANDLER(DefaultAssertHandler)
     vsnprintf( buffer, ARRAYCOUNT(buffer), msg, args );
     va_end( args );
 
-    fprintf( stderr, "ASSERTION FAILED! :: '%s' (%s@%d)\n", buffer, file, line );
+    fprintf( stderr, "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
 }
 
 

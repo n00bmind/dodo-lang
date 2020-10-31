@@ -16,13 +16,12 @@
 
 #define HALT() (__debugbreak(), 1) //( (*(volatile int *)0x0A55 = 0) != 0 )
 #if !RELEASE
-constexpr bool Empty( char const* str = "" ) { return *str == 0; }
-#define ASSERT(expr, ...) ((void)( !(expr) && (globalAssertHandler( __FILE__, __LINE__, (Empty(#__VA_ARGS__) ? #expr : ""__VA_ARGS__) ), 1) \
-                                               && HALT()))
-//#define ASSERTM(expr, msg) ((void)( !(expr) && (globalAssertHandler( msg, __FILE__, __LINE__ ), 1) && HALT()))
+#define ASSERT(expr, ...) \
+    ((void)( !(expr) \
+             && (globalAssertHandler( __FILE__, __LINE__, IF_ELSE( HAS_ARGS(__VA_ARGS__) )( __VA_ARGS__ )( #expr ) ), 1) \
+             && HALT()))
 #else
 #define ASSERT(expr) ((void)0)
-#define ASSERTM(expr, msg) ((void)0)
 #endif
 
 #define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )

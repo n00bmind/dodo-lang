@@ -1,6 +1,7 @@
 #include <new>
 #include <math.h>
 
+#include "magic.h"
 #include "common.h"
 #include "platform.h"
 #include "intrinsics.h"
@@ -17,9 +18,6 @@ InternStringBuffer globalInternStrings;
 
 void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* tmpArena )
 {
-    int bla = 42;
-    ASSERT( false, "TEST MESSAGE", bla );
-
     // Parse arguments
     if( argsList.count == 0 )
     {
