@@ -11,6 +11,17 @@
 PlatformAPI globalPlatform;
 
 
+PLATFORM_ALLOC(Win32Alloc)
+{
+    void* result = VirtualAlloc( 0, sizeBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    return result;
+}
+
+PLATFORM_FREE(Win32Free)
+{
+    VirtualFree( memoryBlock, 0, MEM_RELEASE );
+}
+
 PLATFORM_PRINT(Win32Print)
 {
     va_list args;
@@ -80,7 +91,14 @@ ASSERT_HANDLER(DefaultAssertHandler)
 {
     // TODO Logging
     // TODO Stacktrace
-    printf( "ASSERTION FAILED! :: '%s' (%s@%d)\n", msg, file, line );
+    char buffer[256] = {};
+
+    va_list args;
+    va_start( args, msg );
+    vsnprintf( buffer, ARRAYCOUNT(buffer), msg, args );
+    va_end( args );
+
+    fprintf( stderr, "ASSERTION FAILED! :: '%s' (%s@%d)\n", buffer, file, line );
 }
 
 
@@ -88,9 +106,11 @@ int main( int argCount, char const* args[] )
 {
     // Init global platform
     globalPlatform = {};
+    globalPlatform.Alloc = Win32Alloc;
+    globalPlatform.Free = Win32Free;
+    globalPlatform.ReadEntireFile = Win32ReadEntireFile;
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
-    globalPlatform.ReadEntireFile = Win32ReadEntireFile;
 
 #if CFG_DEBUG
     void* globalBaseAddress = (void*)GIGABYTES(2048);

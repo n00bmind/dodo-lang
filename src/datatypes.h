@@ -1,12 +1,4 @@
 
-/////     BUFFER    /////
-
-struct Buffer
-{
-    void* data;
-    sz size;
-};
-
 /////     DYNAMIC ARRAY    /////
 
 template <typename T>
@@ -177,6 +169,12 @@ struct BucketArray
         Bucket *next;
         Bucket *prev;
 
+        Bucket()
+            : data( nullptr )
+            , count( 0 )
+            , capacity( 0 )
+        {}
+
         Bucket( MemoryArena* arena, i32 capacity_, MemoryParams params )
         {
             ASSERT( capacity_ > 0 );
@@ -287,11 +285,15 @@ struct BucketArray
     Bucket first;
     Bucket* last;
     Bucket* firstFree;
-    i32 count;
 
     MemoryArena* arena;
     MemoryParams memoryParams;
 
+    i32 count;
+
+
+    BucketArray()
+    {}
 
     BucketArray( MemoryArena* arena_, i32 bucketSize, MemoryParams params = DefaultMemoryParams() )
         : first( arena_, bucketSize, params )
@@ -356,6 +358,27 @@ struct BucketArray
     T Pop()
     {
         T result = Remove( { last, last->count - 1 } );
+        return result;
+    }
+
+    typedef bool (*Comparator)( T const& a, T const& b );
+
+    T* Find( T const& it, Comparator cmp )
+    {
+        T* result = nullptr;
+
+        auto idx = First();
+        while( idx )
+        {
+            if( cmp( it, *idx ) )
+                break;
+
+            idx.Next();
+        }
+
+        if( idx )
+            result = &*idx;
+
         return result;
     }
 
@@ -441,18 +464,6 @@ struct BucketArray
     {
         ASSERT( idx.IsValid() );
         return (T const&)idx;
-    }
-
-    // TODO Remove (use above?)
-    T& operator[]( int i )
-    {
-        // My love for C++ grows and grows unbounded
-        return (T&)At( i );
-    }
-
-    T const& operator[]( int i ) const
-    {
-        return At( i );
     }
 
 private:

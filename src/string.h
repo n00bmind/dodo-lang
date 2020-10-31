@@ -60,6 +60,17 @@ struct String
             result->Push( String( nextData, nextLength ) );
         }
     }
+
+    void CopyTo( char* dst ) const
+    {
+        strncpy( dst, data, Sz( length ) );
+    }
+
+    void CopyToNullTerminated( char* dst ) const
+    {
+        CopyTo( dst );
+        dst[length] = 0;
+    }
 };
 
 
@@ -96,5 +107,10 @@ bool IsNumber( char c )
 {
     bool result = (c >= '0' && c <= '9');
     return result;
+}
+
+bool StringsEqual( char const* a, char const* b )
+{
+    return strcmp( a, b ) == 0;
 }
 

@@ -7,7 +7,7 @@ struct TokenTypeValue
     char const* displayName;
 };
 
-#define VALUES(x) \
+#define TOKENS(x) \
     x(Unknown,      ARGS( "???", "unknown" )) \
     \
     x(Exclamation,  ARGS( " ! ", "!" )) \
@@ -50,12 +50,22 @@ struct TokenTypeValue
     x(Newline,          ARGS( "NLN", "newline" )) \
     x(EndOfStream,      ARGS( "EOS", "EOS" )) \
 
-STRUCT_ENUM_WITH_VALUES(Type, TokenTypeValue, VALUES)
-#undef VALUES
+STRUCT_ENUM_WITH_VALUES(Type, TokenTypeValue, TOKENS)
+#undef TOKENS
 
 } // namespace Lexer
 
-static int globalSymbolLUT[128] = {};
+#define KEYWORDS(x ) \
+    x( None,    "" ) \
+    x( Struct,  "struct" ) \
+    x( Enum,    "enum" ) \
+
+STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
+#undef KEYWORDS
+
+
+internal int globalSymbolLUT[128];
+internal char const* globalKeywords[Keyword::Values::count];
 
 
 struct Token
@@ -66,12 +76,42 @@ struct Token
     i32 columnNumber;
     Tk::Type type; 
 
-    //union   // Could parse values in-place
-    //{
-        //f32 f32;
-        //i32 i32;
-    //}
+    union
+    {
+        f64 f64;
+        u64 u64;
+        char const* ident;  // Interned
+    };
 };
+
+
+internal bool InternsAreEqual( InternString const& a, InternString const& b )
+{
+    return a.hash == b.hash
+        && StringsEqual( a.data, b.data );
+}
+
+internal char const* Intern( String const& string )
+{
+    char const* result = nullptr;
+    InternString intern = { string.data, string.length, Hash32( string.data, string.length ) };
+
+    InternString* entry = globalInternStrings.entries.Find( intern, InternsAreEqual );
+    if( entry )
+        result = entry->data;
+    else
+    {
+        char* stringData = PUSH_STRING( &globalInternStrings.arena, string.length + 1 );
+        string.CopyToNullTerminated( stringData );
+
+        intern.data = stringData;
+        globalInternStrings.entries.Push( intern );
+
+        result = intern.data;
+    }
+    
+    return result;
+}
 
 struct Lexer
 {
@@ -122,6 +162,12 @@ struct Lexer
         globalSymbolLUT['}'] = Tk::Type::CloseBrace().index;
         globalSymbolLUT['~'] = Tk::Type::Tilde().index;
 
+        // Intern keywords
+        for( Keyword const& k : Keyword::Values::items )
+        {
+            globalKeywords[k.index] = Intern( String( k.name ) );
+        }
+
         Refill();
     }
 
@@ -164,7 +210,7 @@ private:
     }
 };
 
-static void Error( Lexer* lexer, Token onToken, char const* fmt, ... )
+internal void Error( Lexer* lexer, Token onToken, char const* fmt, ... )
 {
     va_list arg_list;
     va_start( arg_list, fmt );
@@ -179,19 +225,19 @@ static void Error( Lexer* lexer, Token onToken, char const* fmt, ... )
 #define ERROR( token, msg, ... ) Error( lexer, token, "%s(%d,%d): "msg, \
                                         token.filename, token.lineNumber, token.columnNumber, ##__VA_ARGS__ );
 
-static bool IsNumeric( char c )
+internal bool IsNumeric( char c )
 {
     // TODO
     //NOT_IMPLEMENTED
     return false;
 }
 
-static void ParseNumber( Lexer* lexer )
+internal void ParseNumber( Lexer* lexer )
 {
 
 }
 
-static void AdvanceNewline( Lexer* lexer, char c0, char c1 )
+internal void AdvanceNewline( Lexer* lexer, char c0, char c1 )
 {
     // Account for double char end of lines
     if( (c0 == '\r' && c1 == '\n')
@@ -202,7 +248,7 @@ static void AdvanceNewline( Lexer* lexer, char c0, char c1 )
     lexer->columnNumber = 1;
 }
 
-static Token GetTokenRaw( Lexer* lexer )
+internal Token GetTokenRaw( Lexer* lexer )
 {
     Token token = {};
     token.text = lexer->stream;
@@ -283,6 +329,7 @@ static Token GetTokenRaw( Lexer* lexer )
 
             default:
             {
+                // TODO Move the first char of these to the outer switch for speed?
                 if( IsSpacing( c ) )
                 {
                     token.type = Tk::Type::Spacing();
@@ -293,17 +340,7 @@ static Token GetTokenRaw( Lexer* lexer )
                 else if( IsNewline( c ) )
                 {
                     token.type = Tk::Type::Newline();
-#if 0
-                    // Account for double char end of lines
-                    if( (c == '\r' && lexer->at[0] == '\n')
-                        || (c == '\n' && lexer->at[0] == '\r') )
-                        lexer->Advance();
-
-                    lexer->lineNumber++;
-                    lexer->columnNumber = 1;
-#else
                     AdvanceNewline( lexer, c, lexer->at[0] );
-#endif
                 }
                 else if( IsAlpha( c ) )
                 {
@@ -311,6 +348,9 @@ static Token GetTokenRaw( Lexer* lexer )
 
                     while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
                         lexer->Advance();
+
+                    int length = I32( lexer->stream.data - token.text.data );
+                    token.ident = Intern( String( token.text.data, length ) );
                 }
                 else if( IsNumeric( c ) )
                 {
@@ -329,7 +369,7 @@ static Token GetTokenRaw( Lexer* lexer )
     return token;
 }
 
-static Token GetToken( Lexer* lexer )
+internal Token GetToken( Lexer* lexer )
 {
     Token token;
     while( true )
@@ -360,7 +400,7 @@ static Token GetToken( Lexer* lexer )
     return token;
 }
 
-static Token RequireToken( Lexer* lexer, Tk::Type const& wantedType )
+internal Token RequireToken( Lexer* lexer, Tk::Type const& wantedType )
 {
     Token token = GetToken( lexer );
 
@@ -371,18 +411,23 @@ static Token RequireToken( Lexer* lexer, Tk::Type const& wantedType )
     return token;
 }
 
-static Token PeekToken( Lexer* lexer )
+internal Token PeekToken( Lexer* lexer )
 {
     Lexer temp = *lexer;
     Token result = GetToken( &temp );
     return result;
 }
 
-//static bool OptionalToken( Lexer* lexer, u32 wantedType )
+//internal bool OptionalToken( Lexer* lexer, u32 wantedType )
 //{
     //Token token = GetToken( lexer );
     //return token.type == wantedType;
 //}
+
+internal bool MatchKeyword( Token const& token, Keyword const& k )
+{
+    return token.ident == globalKeywords[ k.index ];
+}
 
 #if !CFG_RELEASE
 void DebugDumpScan( String const& program, char const* filename )

@@ -1,24 +1,5 @@
 
-enum class Keyword
-{
-    None = 0,
-    Struct,
-    Enum,
-
-    COUNT
-};
-
-static bool globalParsing = true;
-
-Keyword FindKeyword( Token const& token )
-{
-    // TODO Intern strings
-    if( token.ident < (int)Keyword::COUNT )
-    {
-
-    }
-    return Keyword::None;
-}
+internal bool globalParsing = true;
 
 void ParseStruct( Lexer* lexer )
 {
@@ -57,39 +38,38 @@ void Parse( String const& program, char const* filename )
     while( globalParsing )
     {
         Token token = GetToken( &lexer );
-        if( token.type == Tk::Type::EndOfStream() )
-            break;
-        else if( token.type == Tk::Type::Identifier() )
+        switch( token.type.index )
         {
-            if( Keyword kw = FindKeyword( token ) )
+            case Tk::Type::EndOfStream().index:
+                break;
+
+            case Tk::Type::Identifier().index:
             {
-                switch( kw )
+                if( MatchKeyword( token, Keyword::Struct() ) )
                 {
-                    case Keyword::Struct:
-                    {
-                        Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
-                        RequireToken( &lexer, Tk::Type::OpenBrace() );
+                    Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
+                    RequireToken( &lexer, Tk::Type::OpenBrace() );
 
-                        ParseStruct( &lexer );
-                    } break;
-                    case Keyword::Enum:
-                    {
-                        Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
-                        RequireToken( &lexer, Tk::Type::OpenBrace() );
-
-                        ParseEnum( &lexer );
-                    } break;
+                    ParseStruct( &lexer );
                 }
-            }
-            else
+                else if( MatchKeyword( token, Keyword::Enum() ) )
+                {
+                    Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
+                    RequireToken( &lexer, Tk::Type::OpenBrace() );
+
+                    ParseEnum( &lexer );
+                }
+                else
+                {
+                    // Declaring var or function
+                    ParseDeclaration( &lexer );
+                }
+            } break;
+
+            default:
             {
-                // Declaring var or function
-                ParseDeclaration( &lexer );
-            }
-        }
-        else
-        {
-            // TODO Error
+                // TODO Error
+            } break;
         }
     }
 }

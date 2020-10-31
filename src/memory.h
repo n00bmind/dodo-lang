@@ -34,14 +34,25 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // TODO ASAP Add a tag per allocation (even the same arena can contain different stuff)
 #define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), ## __VA_ARGS__ )
 #define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), ## __VA_ARGS__ )
+#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), ## __VA_ARGS__ )
 #define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, ## __VA_ARGS__ )
 
 #define INIT(address) new (address)
 
 
 ///// STATIC MEMORY ARENA
-// Linear memory arena of a fixed initial size
-// Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested)
+// Linear memory arena that can grow in pages of a certain size
+// Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested, similar to a stack allocator)
+
+static const sz DefaultArenaPageSize = MEGABYTES( 1 );
+
+struct MemoryArenaHeader
+{
+    u8 *base;
+    sz size;
+    sz used;
+    u8 _pad[40];
+};
 
 struct MemoryArena
 {
@@ -49,7 +60,11 @@ struct MemoryArena
     sz size;
     sz used;
 
-    u32 tempCount;
+    // This is always zero for fixed-size mode
+    sz pageSize;
+    i32 pageCount;
+
+    i32 tempCount;
 };
 
 enum MemoryFlags
@@ -62,27 +77,59 @@ enum MemoryFlags
 struct MemoryParams
 {
     u32 flags;
-    u32 alignment;
+    u16 alignment;
+    u16 tag;
 };
 
+// Initialize an arena of a fixed size on the given block of memory
 inline void
 InitArena( MemoryArena *arena, void *base, sz size )
 {
+    *arena = {};
     arena->base = (u8*)base;
     arena->size = size;
-    arena->used = 0;
-    arena->tempCount = 0;
+}
+
+// Initialize an arena that grows dynamically in pages of the given size
+inline void
+InitArena( MemoryArena* arena, sz pageSize = DefaultArenaPageSize )
+{
+    ASSERT( pageSize );
+    
+    *arena = {};
+    arena->pageSize = pageSize;
+}
+
+internal MemoryArenaHeader*
+GetArenaHeader( MemoryArena* arena )
+{
+    MemoryArenaHeader* result = (MemoryArenaHeader*)arena->base - 1;
+    return result;
+}
+
+internal void
+FreeLastPage( MemoryArena* arena )
+{
+    void* freePage = arena->base;
+
+    // Restore previous page's info
+    MemoryArenaHeader* header = GetArenaHeader( arena );
+    arena->base = header->base;
+    arena->size = header->size;
+    arena->used = header->used;
+
+    globalPlatform.Free( freePage );
+    --arena->pageCount;
 }
 
 inline void
-ClearArena( MemoryArena* arena, bool clearToZero = true )
+ClearArena( MemoryArena* arena )
 {
-    arena->used = 0;
-    // TODO We should properly track this and invalidate existing TemporaryMemory blocks
-    arena->tempCount = 0;
+    while( arena->pageCount > 0 )
+        FreeLastPage( arena );
 
-    if( clearToZero )
-        PZERO( arena->base, arena->size );
+    sz pageSize = arena->pageSize;
+    InitArena( arena, pageSize );
 }
 
 inline sz
@@ -115,7 +162,7 @@ NoClear()
 }
 
 inline MemoryParams
-Aligned( u32 alignment )
+Aligned( u16 alignment )
 {
     MemoryParams result = DefaultMemoryParams();
     result.alignment = alignment;
@@ -133,7 +180,6 @@ Temporary()
 inline void *
 _PushSize( MemoryArena *arena, sz size, MemoryParams params = DefaultMemoryParams() )
 {
-    ASSERT( arena->used + size <= arena->size );
     if( !(params.flags & MemoryFlags_TemporaryMemory) )
         // Need to pass temp memory flag if the arena has an ongoing temp memory block
         ASSERT( arena->tempCount == 0 );
@@ -144,12 +190,45 @@ _PushSize( MemoryArena *arena, sz size, MemoryParams params = DefaultMemoryParam
 
     if( params.alignment )
     {
-        result = AlignUp( block, params.alignment );
+        result = Align( block, params.alignment );
         waste = Sz( (u8*)result - (u8*)block );
     }
 
-    arena->used += size + waste;
+    sz actualSize = size + waste;
+    if( arena->used + actualSize > arena->size )
+    {
+        ASSERT( arena->pageSize, "Fixed-size arena cannot fit requested size" );
 
+        // NOTE We require headers to not change the cache alignment of a page
+        ASSERT( sizeof(MemoryArenaHeader) == 64 );
+        // Save current page info in next page's header
+        MemoryArenaHeader headerInfo = {};
+        headerInfo.base = arena->base;
+        headerInfo.size = arena->size;
+        headerInfo.used = arena->used;
+
+        ASSERT( arena->pageSize > sizeof(MemoryArenaHeader) );
+        sz pageSize = Max( actualSize + sizeof(MemoryArenaHeader), arena->pageSize );
+        arena->base = (u8*)globalPlatform.Alloc( pageSize, 0 ) + sizeof(MemoryArenaHeader);
+        arena->size = pageSize - sizeof(MemoryArenaHeader);
+        arena->used = 0;
+        ++arena->pageCount;
+
+        MemoryArenaHeader* header = GetArenaHeader( arena );
+        *header = headerInfo;
+
+        // Assume it's already aligned
+        if( params.alignment )
+            ASSERT( Align( arena->base, params.alignment ) == arena->base );
+
+        result = arena->base;
+        waste = 0;
+    }
+
+    actualSize = size + waste;
+    arena->used += actualSize;
+
+    // Have already moved up the block's pointer, so just clear the requested size
     if( params.flags & MemoryFlags_ClearToZero )
         PZERO( result, size );
 
@@ -159,9 +238,17 @@ _PushSize( MemoryArena *arena, sz size, MemoryParams params = DefaultMemoryParam
 inline MemoryArena
 MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = DefaultMemoryParams() )
 {
+    ASSERT( arena->tempCount == 0 );
+
+    // FIXME Do something so this gets invalidated if the parent arena gets cleared
+    // Maybe just create a separate (inherited) struct containing a pointer to the parent and assert their pageCount is never less than ours?
+
+    // Sub-arenas cannot grow
     MemoryArena result = {};
     result.base = (u8*)PUSH_SIZE( arena, size, params );
     result.size = size;
+    // Register the pageCount of our parent
+    result.pageCount = arena->pageCount;
 
     return result;
 }
@@ -170,15 +257,17 @@ MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = DefaultMemoryPa
 struct TemporaryMemory
 {
     MemoryArena *arena;
+    u8* baseRecord;
     sz usedRecord;
 };
 
 inline TemporaryMemory
 BeginTemporaryMemory( MemoryArena *arena )
 {
-    TemporaryMemory result;
+    TemporaryMemory result = {};
 
     result.arena = arena;
+    result.baseRecord = arena->base;
     result.usedRecord = arena->used;
 
     ++arena->tempCount;
@@ -190,6 +279,11 @@ inline void
 EndTemporaryMemory( TemporaryMemory& tempMem )
 {
     MemoryArena *arena = tempMem.arena;
+    // Find the arena page where the temp memory block started
+    while( arena->base != tempMem.baseRecord )
+    {
+        FreeLastPage( arena );
+    }
 
     ASSERT( arena->used >= tempMem.usedRecord );
     arena->used = tempMem.usedRecord;
@@ -250,6 +344,7 @@ FindBlockForSize( MemoryBlock* sentinel, sz size )
     MemoryBlock* result = nullptr;
 
     // TODO Best match block! (find smallest that fits)
+    // TODO Could also continue search where we last left it, for ring-type allocation patterns
     for( MemoryBlock* block = sentinel->next; block != sentinel; block = block->next )
     {
         if( block->size >= size && !(block->flags & MemoryBlockFlags::Used) )

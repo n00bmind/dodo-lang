@@ -16,14 +16,16 @@
 
 #define HALT() (__debugbreak(), 1) //( (*(volatile int *)0x0A55 = 0) != 0 )
 #if !RELEASE
-#define ASSERT(expr) ((void)( !(expr) && (globalAssertHandler( #expr, __FILE__, __LINE__ ), 1) && HALT()))
-#define ASSERTM(expr, msg) ((void)( !(expr) && (globalAssertHandler( msg, __FILE__, __LINE__ ), 1) && HALT()))
+constexpr bool Empty( char const* str = "" ) { return *str == 0; }
+#define ASSERT(expr, ...) ((void)( !(expr) && (globalAssertHandler( __FILE__, __LINE__, (Empty(#__VA_ARGS__) ? #expr : ""__VA_ARGS__) ), 1) \
+                                               && HALT()))
+//#define ASSERTM(expr, msg) ((void)( !(expr) && (globalAssertHandler( msg, __FILE__, __LINE__ ), 1) && HALT()))
 #else
 #define ASSERT(expr) ((void)0)
 #define ASSERTM(expr, msg) ((void)0)
 #endif
 
-#define ASSERT_HANDLER(name) void name( const char* msg, const char* file, int line )
+#define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )
 typedef ASSERT_HANDLER(AssertHandlerFunc);
 
 ASSERT_HANDLER(DefaultAssertHandler);
@@ -201,6 +203,15 @@ Sz( i64 value )
 }
 
 
+/////     BUFFER    /////
+
+struct Buffer
+{
+    void* data;
+    sz size;
+};
+
+
 /////     STRUCT ENUM    /////
 // TODO Combine with the ideas in https://blog.paranoidcoding.com/2010/11/18/discriminated-unions-in-c.html to create a similar
 // TAGGED_UNION for discriminated unions
@@ -287,8 +298,8 @@ struct enumName::Values                                         \
 };                                                              \
 
 #define STRUCT_ENUM(enumName, xValueList)                           _CREATE_ENUM(enumName, i32, xValueList, _ENUM_BUILDER)
+#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                _CREATE_ENUM(enumName, i32, xValueList, _ENUM_BUILDER_WITH_NAMES)
 #define STRUCT_ENUM_WITH_TYPE(enumName, valueType, xValueList)      _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_BUILDER)
-#define STRUCT_ENUM_WITH_NAMES(enumName, valueType, xValueList)     _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_BUILDER_WITH_NAMES)
 #define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)    _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_BUILDER_WITH_VALUES)
 
 
