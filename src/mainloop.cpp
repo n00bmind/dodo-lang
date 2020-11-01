@@ -10,11 +10,15 @@
 #include "datatypes.h"
 #include "string.h"
 #include "lexer.h"
+#include "ast.h"
 
 InternStringBuffer globalInternStrings;
+bool globalRunning = true;
 
 #include "lexer.cpp"
 #include "parser.cpp"
+
+
 
 void Run( Array<String> const& argsList, MemoryArena* globalArena, MemoryArena* tmpArena )
 {

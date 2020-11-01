@@ -1,10 +1,11 @@
 
-internal bool globalParsing = true;
-
 void ParseStruct( Lexer* lexer )
 {
+    if( !lexer->IsValid() )
+        return;
+
     Token token = GetToken( lexer );
-    while( token.type != Tk::Type::CloseBrace() );
+    while( token.kind != TokenKind::CloseBrace() );
     {
 
         token = GetToken( lexer );
@@ -13,8 +14,11 @@ void ParseStruct( Lexer* lexer )
 
 void ParseEnum( Lexer* lexer )
 {
+    if( !lexer->IsValid() )
+        return;
+
     Token token = GetToken( lexer );
-    while( token.type != Tk::Type::CloseBrace() );
+    while( token.kind != TokenKind::CloseBrace() );
     {
 
         token = GetToken( lexer );
@@ -23,8 +27,11 @@ void ParseEnum( Lexer* lexer )
 
 void ParseDeclaration( Lexer* lexer )
 {
+    if( !lexer->IsValid() )
+        return;
+
     Token token = GetToken( lexer );
-    while( token.type != Tk::Type::Semicolon() );
+    while( token.kind != TokenKind::Semicolon() );
     {
 
         token = GetToken( lexer );
@@ -35,27 +42,27 @@ void Parse( String const& program, char const* filename )
 {
     Lexer lexer = Lexer( program, filename );
 
-    while( globalParsing )
+    while( globalRunning )
     {
         Token token = GetToken( &lexer );
-        switch( token.type.index )
+        switch( token.kind.index )
         {
-            case Tk::Type::EndOfStream().index:
+            case TokenKind::EndOfStream().index:
                 break;
 
-            case Tk::Type::Identifier().index:
+            case TokenKind::Identifier().index:
             {
                 if( MatchKeyword( token, Keyword::Struct() ) )
                 {
-                    Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
-                    RequireToken( &lexer, Tk::Type::OpenBrace() );
+                    Token ident = RequireToken( &lexer, TokenKind::Identifier() );
+                    RequireToken( &lexer, TokenKind::OpenBrace() );
 
                     ParseStruct( &lexer );
                 }
                 else if( MatchKeyword( token, Keyword::Enum() ) )
                 {
-                    Token ident = RequireToken( &lexer, Tk::Type::Identifier() );
-                    RequireToken( &lexer, Tk::Type::OpenBrace() );
+                    Token ident = RequireToken( &lexer, TokenKind::Identifier() );
+                    RequireToken( &lexer, TokenKind::OpenBrace() );
 
                     ParseEnum( &lexer );
                 }

@@ -1,5 +1,6 @@
 rr.time
 bin/
+.vs/
 .session.vim
 *.swp
 *.rdbg

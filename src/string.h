@@ -109,8 +109,8 @@ bool IsNumber( char c )
     return result;
 }
 
-bool StringsEqual( char const* a, char const* b )
+bool StringsEqual( String const& a, String const& b )
 {
-    return strcmp( a, b ) == 0;
+    return a.length == b.length && strncmp( a.data, b.data, Sz( a.length ) ) == 0;
 }
 
