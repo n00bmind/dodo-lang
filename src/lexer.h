@@ -1,76 +1,104 @@
+#include "common.h"
 
-struct TokenTypeValue
+struct TokenKindValue
 {
     char const* shortName;
-    char const* displayName;
+    u32 flags;
 };
 
 #define TOKENS(x) \
-    x(Unknown,      ARGS( "???", "unknown" )) \
+    x(Unknown,          "unknown",      ( "???", 0 )) \
     \
-    x(Exclamation,  ARGS( " ! ", "!" )) \
-    x(Pound,        ARGS( " # ", "#" )) \
-    x(Dollar,       ARGS( " $ ", "$" )) \
-    x(Percent,      ARGS( " % ", "%" )) \
-    x(Ampersand,    ARGS( " & ", "&" )) \
-    x(SingleQuote,  ARGS( " ' ", "'" )) \
-    x(OpenParen,    ARGS( " ( ", "(" )) \
-    x(CloseParen,   ARGS( " ) ", ")" )) \
-    x(Asterisk,     ARGS( " * ", "*" )) \
-    x(Plus,         ARGS( " + ", "+" )) \
-    x(Comma,        ARGS( " , ", "," )) \
-    x(Minus,        ARGS( " - ", "-" )) \
-    x(Dot,          ARGS( " . ", "." )) \
-    x(Slash,        ARGS( " / ", "/" )) \
-    x(Colon,        ARGS( " : ", ":" )) \
-    x(Semicolon,    ARGS( " ; ", ";" )) \
-    x(LessThan,     ARGS( " < ", "<" )) \
-    x(Equal,        ARGS( " = ", "=" )) \
-    x(GreaterThan,  ARGS( " > ", ">" )) \
-    x(Question,     ARGS( " ? ", "?" )) \
-    x(At,           ARGS( " @ ", "@" )) \
-    x(OpenBracket,  ARGS( " [ ", "[" )) \
-    x(Backslash,    ARGS( " \\ ", "\\" )) \
-    x(CloseBracket, ARGS( " ] ", "]" )) \
-    x(Caret,        ARGS( " ^ ", "^" )) \
-    x(Underscore,   ARGS( " _ ", "_" )) \
-    x(BackTick,     ARGS( " ` ", "`" )) \
-    x(OpenBrace,    ARGS( " { ", "{" )) \
-    x(Pipe,         ARGS( " | ", "|" )) \
-    x(CloseBrace,   ARGS( " } ", "}" )) \
-    x(Tilde,        ARGS( " ~ ", "~" )) \
+    x(Exclamation,      "!",            ( " ! ", 0 )) \
+    x(Pound,            "#",            ( " # ", 0 )) \
+    x(Dollar,           "$",            ( " $ ", 0 )) \
+    x(Percent,          "%",            ( " % ", 0 )) \
+    x(Ampersand,        "&",            ( " & ", 0 )) \
+    x(SingleQuote,      "'",            ( " ' ", 0 )) \
+    x(OpenParen,        "(",            ( " ( ", 0 )) \
+    x(CloseParen,       ")",            ( " ) ", 0 )) \
+    x(Asterisk,         "*",            ( " * ", 0 )) \
+    x(Plus,             "+",            ( " + ", 0 )) \
+    x(Comma,            ",",            ( " , ", 0 )) \
+    x(Minus,            "-",            ( " - ", 0 )) \
+    x(Dot,              ".",            ( " . ", 0 )) \
+    x(Slash,            "/",            ( " / ", 0 )) \
+    x(Colon,            ":",            ( " : ", 0 )) \
+    x(Semicolon,        ";",            ( " ; ", 0 )) \
+    x(LessThan,         "<",            ( " < ", 0 )) \
+    x(Equal,            "=",            ( " = ", 0 )) \
+    x(GreaterThan,      ">",            ( " > ", 0 )) \
+    x(Question,         "?",            ( " ? ", 0 )) \
+    x(At,               "@",            ( " @ ", 0 )) \
+    x(OpenBracket,      "[",            ( " [ ", 0 )) \
+    x(Backslash,        "\\",           ( " \\ ", 0 )) \
+    x(CloseBracket,     "]",            ( " ] ", 0 )) \
+    x(Caret,            "^",            ( " ^ ", 0 )) \
+    x(Underscore,       "_",            ( " _ ", 0 )) \
+    x(BackTick,         "`",            ( " ` ", 0 )) \
+    x(OpenBrace,        "{",            ( " { ", 0 )) \
+    x(Pipe,             "|",            ( " | ", 0 )) \
+    x(CloseBrace,       "}",            ( " } ", 0 )) \
+    x(Tilde,            "~",            ( " ~ ", 0 )) \
     \
-    x(Identifier,       ARGS( "IDN", "identifier" )) \
-    x(StringLiteral,    ARGS( "STR", "string" )) \
-    x(NumericLiteral,   ARGS( "NUM", "number" )) \
-    x(Comment,          ARGS( "/*/", "comment" )) \
-    x(Spacing,          ARGS( "   ", "spacing" )) \
-    x(Newline,          ARGS( "NLN", "newline" )) \
-    x(EndOfStream,      ARGS( "EOS", "EOS" )) \
+    x(Name,             "identifier",   ( "IDN", 0 )) \
+    x(Keyword,          "keyword",      ( "KWD", 0 )) \
+    x(StringLiteral,    "string",       ( "STR", 0 )) \
+    x(IntLiteral,       "integer",      ( "INT", 0 )) \
+    x(FloatLiteral,     "float",        ( "FLT", 0 )) \
+    x(Comment,          "comment",      ( "/*/", 0 )) \
+    x(Spacing,          "spacing",      ( "   ", 0 )) \
+    x(Newline,          "newline",      ( "NLN", 0 )) \
+    x(EndOfStream,      "EOS",          ( "EOS", 0 )) \
 
-STRUCT_ENUM_WITH_VALUES(TokenKind, TokenTypeValue, TOKENS)
+STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
 #undef TOKENS
 
-struct Token
+
+struct SourcePos
 {
-    String text;
     char const* filename;
     i32 lineNumber;
     i32 columnNumber;
-    TokenKind kind; 
+};
+
+struct Token
+{
+    // TODO 
+    enum Flags
+    {
+        None        = 0,
+        PostfixOp   = 0x1,
+        UnaryOp     = 0x2,
+        AddOp       = 0x4,
+        MulOp       = 0x8,
+        CmpOp       = 0x10,
+    };
+
+    SourcePos pos;
+    String text;
+    TokenKind::Enum kind; 
 
     union
     {
-        f64 f64;
-        u64 u64;
         char const* ident;  // Interned
+        f64 floatValue;
+        u64 intValue;
     };
 };
 
 struct InternString
 {
-    String str;
+    enum Flags : u16
+    {
+        None = 0,
+        Keyword = 0x1,
+    };
+    
+    char const* data;
     u32 hash;
+    i16 length;
+    Flags flags;
 };
 
 struct InternStringBuffer

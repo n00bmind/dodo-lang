@@ -32,10 +32,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 // TODO ASAP Add a tag per allocation (even the same arena can contain different stuff)
-#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), ## __VA_ARGS__ )
-#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), ## __VA_ARGS__ )
-#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), ## __VA_ARGS__ )
-#define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, ## __VA_ARGS__ )
+#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), alignof(char), ## __VA_ARGS__ )
+#define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, DefaultMemoryAlignment, ## __VA_ARGS__ )
 
 #define INIT(address) new (address)
 
@@ -45,6 +45,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 // Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested, similar to a stack allocator)
 
 static const sz DefaultArenaPageSize = MEGABYTES( 1 );
+static const sz DefaultMemoryAlignment = alignof(u64);
 
 struct MemoryArenaHeader
 {
@@ -178,7 +179,7 @@ Temporary()
 }
 
 inline void *
-_PushSize( MemoryArena *arena, sz size, MemoryParams params = DefaultMemoryParams() )
+_PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = DefaultMemoryParams() )
 {
     if( !(params.flags & MemoryFlags_TemporaryMemory) )
         // Need to pass temp memory flag if the arena has an ongoing temp memory block
@@ -188,9 +189,12 @@ _PushSize( MemoryArena *arena, sz size, MemoryParams params = DefaultMemoryParam
     void* result = block;
     sz waste = 0;
 
-    if( params.alignment )
+    sz align = params.alignment;
+    if( !align)
+        align = minAlignment;
+    if( align )
     {
-        result = Align( block, params.alignment );
+        result = Align( block, align );
         waste = Sz( (u8*)result - (u8*)block );
     }
 

@@ -1,9 +1,4 @@
 
-struct SourcePos
-{
-
-};
-
 struct TypeSpec
 {
     enum class Kind

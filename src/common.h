@@ -80,6 +80,8 @@ typedef double f64;
 typedef size_t sz;
 
 #define U8MAX UINT8_MAX
+#define I16MAX INT16_MAX
+#define I16MIN INT16_MIN
 #define I32MAX INT32_MAX
 #define I32MIN INT32_MIN
 #define U16MAX UINT16_MAX
@@ -95,6 +97,13 @@ typedef size_t sz;
 #define F64MIN DBL_MIN
 #define F64INF (f64)INFINITY
 
+
+INLINE i16
+I16( i32 value )
+{
+    ASSERT( I16MIN <= value && value <= I16MAX );
+    return (i16)value;
+}
 
 INLINE i32
 I32( sz value )
@@ -224,20 +233,27 @@ struct V
 };
 
 #define VALUES(x) \
-    x(None, ARGS("a", 100)) \
-    x(Animation, ARGS("b", 200)) \
-    x(Landscape, ARGS("c", 300)) \
-    x(Audio, ARGS("d", 400)) \
-    x(Network, ARGS("e", 500)) \
-    x(Scripting, ARGS("f", 600)) \
+    x(None,         ("a", 100)) \
+    x(Animation,    ("b", 200)) \
+    x(Landscape,    ("c", 300)) \
+    x(Audio,        ("d", 400)) \
+    x(Network,      ("e", 500)) \
+    x(Scripting,    ("f", 600)) \
 
+// Values must go in () even if they're a single primitive type!
 STRUCT_ENUM_WITH_VALUES(MemoryTag, V, VALUES)
 #undef VALUES
 
 int main()
 {
-    MemoryTag const& t = MemoryTag::Audio();
-    V const& value = MemoryTag::Landscape().value;
+    // Can be used as normal
+    int index = MemoryTag::Audio;
+    
+    // But also
+    MemoryTag const& t = MemoryTag::Values::Audio;
+    ASSERT( t.index == index );
+
+    V const& value = MemoryTag::Landscape.value;
 
     for( int i = 0; i < MemoryTag::Values::count; ++i )
     {
@@ -245,61 +261,60 @@ int main()
         std::cout << "sVal: " << t.value.sVal << "\tiVal: " << t.value.iVal << std::endl;
     }
 }
-
 */
 
-#define ARGS(...) { __VA_ARGS__ }
-#define _ENUM_BUILDER(x) static constexpr EnumName x() \
-    { static EnumName _inst = { #x, (i32)Enum::x, ValueType() }; return _inst; }
-#define _ENUM_BUILDER_WITH_NAMES(x, n) static constexpr EnumName x() \
-    { static EnumName _inst = { n, (i32)Enum::x, ValueType() }; return _inst; }
-#define _ENUM_BUILDER_WITH_VALUES(x, v) static constexpr EnumName x() \
-    { static EnumName _inst = { #x, (i32)Enum::x, v }; return _inst; }
-#define _ENUM_ENTRY(x, ...) x,
-#define _ENUM_NAME(x, ...) x().name,
-#define _ENUM_ITEM(x, ...) x(),
+#define _ENUM_ARGS(...)         { __VA_ARGS__ }
+#define _ENUM_ENTRY(x, ...)     x,
+#define _ENUM_NAME(x, ...)      items[EnumName::x].name,
+#define _ENUM_REF(x, ...)       static constexpr EnumName const& x = items[EnumName::x];
+#define _ENUM_ITEM(x)                           { #x, ValueType(), (i32)EnumName::x },
+#define _ENUM_ITEM_WITH_NAMES(x, n)             {  n, ValueType(), (i32)EnumName::x },
+#define _ENUM_ITEM_WITH_VALUES(x, v)            { #x, _ENUM_ARGS v, (i32)EnumName::x },
+#define _ENUM_ITEM_WITH_NAMES_VALUES(x, n, v)   {  n, _ENUM_ARGS v, (i32)EnumName::x },
 
-#define _CREATE_ENUM(enumName, valueType, xValueList, xBuilder) \
-struct enumName                                                 \
-{                                                               \
-    char const* name;                                           \
-    i32 index;                                                  \
-    valueType value;                                            \
-                                                                \
-    bool operator ==( enumName const& other ) const             \
-    { return index == other.index; }                            \
-    bool operator !=( enumName const& other ) const             \
-    { return index != other.index; }                            \
-                                                                \
-    using EnumName = enumName;                                  \
-    using ValueType = valueType;                                \
-    xValueList(xBuilder)                                        \
-                                                                \
-    struct Values;                                              \
-                                                                \
-private:                                                        \
-    /* This is needed so indices can be auto assigned */        \
-    enum class Enum : i32                                       \
-    {                                                           \
-        xValueList(_ENUM_ENTRY)                                 \
-    };                                                          \
-};                                                              \
-struct enumName::Values                                         \
-{                                                               \
-    static constexpr char const* const names[] =                \
-    {                                                           \
-        xValueList(_ENUM_NAME)                                  \
-    };                                                          \
-    static constexpr enumName items[] = {                 \
-        xValueList(_ENUM_ITEM)                                  \
-    };                                                          \
-    static constexpr int count = ARRAYCOUNT(items);       \
-};                                                              \
 
-#define STRUCT_ENUM(enumName, xValueList)                           _CREATE_ENUM(enumName, i32, xValueList, _ENUM_BUILDER)
-#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                _CREATE_ENUM(enumName, i32, xValueList, _ENUM_BUILDER_WITH_NAMES)
-#define STRUCT_ENUM_WITH_TYPE(enumName, valueType, xValueList)      _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_BUILDER)
-#define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)    _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_BUILDER_WITH_VALUES)
+#define _CREATE_ENUM(enumName, valueType, xValueList, xBuilder)            \
+struct enumName                                                            \
+{                                                                          \
+    enum Enum : i32                                                        \
+    {                                                                      \
+        xValueList(_ENUM_ENTRY)                                            \
+    };                                                                     \
+                                                                           \
+    char const* name;                                                      \
+    valueType value;                                                       \
+    i32 index;                                                             \
+                                                                           \
+    bool operator ==( enumName const& other ) const                        \
+    { return index == other.index; }                                       \
+    bool operator !=( enumName const& other ) const                        \
+    { return index != other.index; }                                       \
+                                                                           \
+    /* Need to define this separately so the base type is fully defined */ \
+    struct Values;                                                         \
+};                                                                         \
+struct enumName::Values                                                    \
+{                                                                          \
+    using EnumName = enumName;                                             \
+    using ValueType = valueType;                                           \
+                                                                           \
+    static constexpr enumName items[] =                                    \
+    {                                                                      \
+        xValueList(xBuilder)                                               \
+    };                                                                     \
+    static constexpr char const* const names[] =                           \
+    {                                                                      \
+        xValueList(_ENUM_NAME)                                             \
+    };                                                                     \
+    static constexpr int count = ARRAYCOUNT(items);                        \
+                                                                           \
+    xValueList(_ENUM_REF)                                                  \
+};                                                                         \
+
+#define STRUCT_ENUM(enumName, xValueList)                               _CREATE_ENUM(enumName, i32, xValueList, _ENUM_ITEM)
+#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                    _CREATE_ENUM(enumName, i32, xValueList, _ENUM_ITEM_WITH_NAMES)
+#define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)        _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_ITEM_WITH_VALUES)
+#define STRUCT_ENUM_WITH_NAMES_VALUES(enumName, valueType, xValueList)  _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_ITEM_WITH_NAMES_VALUES)
 
 
 

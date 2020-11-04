@@ -112,32 +112,13 @@ int main( int argCount, char const* args[] )
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
 
-#if CFG_DEBUG
-    void* globalBaseAddress = (void*)GIGABYTES(2048);
-    void* tmpBaseAddress = (void*)GIGABYTES(3048);
-#else
-    void* globalBaseAddress = 0;
-    void* tmpBaseAddress = 0;
-#endif
-    // TODO Use MEM_LARGE_PAGES and call AdjustTokenPrivileges when not in XP
-    // TODO Reserve only and commit in chunks
-    sz globalMemorySize = GIGABYTES(1);
-    void* globalMemoryBlock = VirtualAlloc( globalBaseAddress, globalMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
-    sz tmpMemorySize = GIGABYTES(1);
-    void* tmpMemoryBlock = VirtualAlloc( tmpBaseAddress, tmpMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
-
-    MemoryArena globalArena;
-    InitArena( &globalArena, globalMemoryBlock, globalMemorySize );
-    MemoryArena tmpArena;
-    InitArena( &tmpArena, tmpMemoryBlock, tmpMemorySize );
 
     Array<String> argsList( &globalArena, argCount );
     // Skip exe path from args list
     for( int i = 1; i < argCount; ++i )
         argsList.Push( String( args[i] ) );
 
-
-    Run( argsList, &globalArena, &tmpArena );
+    Run( argsList );
 
     return 0;
 }

@@ -55,7 +55,9 @@ ________________________________________________________________________________
 
 - 'using' in structs, to encourage composition (and for subtyping too).
 
-- Inline assembly ofc
+- Inline assembly ofc (!)
+
+- A way to declare an enum as a "flags" bitfield, with correct automatic values and convenient operations to test/set
 
 ________________________________________________________________________________ 
 
