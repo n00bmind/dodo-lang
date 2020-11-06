@@ -112,6 +112,8 @@ int main( int argCount, char const* args[] )
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
 
+    InitArena( &globalArena, MEGABYTES(16) );
+    InitArena( &globalTmpArena, MEGABYTES(16) );
 
     Array<String> argsList( &globalArena, argCount );
     // Skip exe path from args list

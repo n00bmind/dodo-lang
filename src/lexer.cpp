@@ -1,8 +1,5 @@
-//#include "common.h"
 
-#if 1
 #define KEYWORDS(x ) \
-    x( None,    "" ) \
     x( Struct,  "struct" ) \
     x( Enum,    "enum" ) \
     x( Sizeof,  "sizeof" ) \
@@ -10,52 +7,6 @@
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
 
-#else
-struct Keyword
-{
-    enum Enum : i32
-    {
-        None, Struct, Enum, Sizeof,
-    };
-
-    char const* name;
-    i32 value;
-    i32 index;
-
-    bool operator ==( Keyword const& other ) const { return index == other.index; }
-    bool operator !=( Keyword const& other ) const { return index != other.index; }
-    struct Values;
-};
-struct Keyword::Values
-{
-    using EnumName = Keyword;
-    using ValueType = i32;
-
-    static constexpr Keyword items[] =
-    {
-        { "", ValueType(), (i32)EnumName::None },
-        { "struct", ValueType(), (i32)EnumName::Struct },
-        { "enum", ValueType(), (i32)EnumName::Enum },
-        { "sizeof", ValueType(), (i32)EnumName::Sizeof },
-    }; 
-    static constexpr char const* const names[] = 
-    { 
-        items[EnumName::None].name, 
-        items[EnumName::Struct].name, 
-        items[EnumName::Enum].name,
-        items[EnumName::Sizeof].name,
-    };
-    static constexpr int count = (sizeof(items) / sizeof((items)[0]));
-
-    static constexpr EnumName const& None = items[EnumName::None];
-    static constexpr EnumName const& Struct = items[EnumName::Struct];
-    static constexpr EnumName const& Enum = items[EnumName::Enum];
-    static constexpr EnumName const& Sizeof = items[EnumName::Sizeof];
-};
-
-#endif
-
-internal int globalSymbolLUT[128];
 internal char const* globalKeywords[Keyword::Values::count];
 
 
@@ -66,7 +17,7 @@ internal bool InternsAreEqual( InternString const& a, InternString const& b )
         && StringsEqual( String( a.data, a.length ), String( b.data, b.length ) );
 }
 
-internal InternString* Intern( String const& string )
+internal InternString* Intern( String const& string, u16 flags = 0 )
 {
     InternString* result = nullptr;
     InternString intern = { string.data, Hash32( string.data, string.length ), I16( string.length ) };
@@ -80,6 +31,7 @@ internal InternString* Intern( String const& string )
         string.CopyToNullTerminated( stringData );
 
         intern.data = stringData;
+        intern.flags = flags;
         result = globalInternStrings.entries.Push( intern );
     }
     
@@ -91,93 +43,39 @@ struct Lexer
     SourcePos pos;
     Token token;
     String stream;
-    char at[2];
 
     bool error;
 
+    Lexer()
+    {}
     Lexer( String const& input, char const* filename_ )
         : stream( input )
+        , error( false )
     {
         pos = { filename_, 1, 1 };
-
-        // Init symbol look up table
-        globalSymbolLUT['!'] = TokenKind::Exclamation;
-        globalSymbolLUT['#'] = TokenKind::Pound;
-        globalSymbolLUT['$'] = TokenKind::Dollar;
-        globalSymbolLUT['%'] = TokenKind::Percent;
-        globalSymbolLUT['&'] = TokenKind::Ampersand;
-        globalSymbolLUT['\''] = TokenKind::SingleQuote;
-        globalSymbolLUT['('] = TokenKind::OpenParen;
-        globalSymbolLUT[')'] = TokenKind::CloseParen;
-        globalSymbolLUT['*'] = TokenKind::Asterisk;
-        globalSymbolLUT['+'] = TokenKind::Plus;
-        globalSymbolLUT[','] = TokenKind::Comma;
-        globalSymbolLUT['-'] = TokenKind::Minus;
-        globalSymbolLUT['.'] = TokenKind::Dot;
-        //globalSymbolLUT['/'] = TokenKind::Slash;
-        globalSymbolLUT[':'] = TokenKind::Colon;
-        globalSymbolLUT[';'] = TokenKind::Semicolon;
-        globalSymbolLUT['<'] = TokenKind::LessThan;
-        globalSymbolLUT['='] = TokenKind::Equal;
-        globalSymbolLUT['>'] = TokenKind::GreaterThan;
-        globalSymbolLUT['?'] = TokenKind::Question;
-        globalSymbolLUT['@'] = TokenKind::At;
-        globalSymbolLUT['['] = TokenKind::OpenBracket;
-        globalSymbolLUT['\\'] = TokenKind::Backslash;
-        globalSymbolLUT[']'] = TokenKind::CloseBracket;
-        globalSymbolLUT['^'] = TokenKind::Caret;
-        globalSymbolLUT['_'] = TokenKind::Underscore;
-        globalSymbolLUT['`'] = TokenKind::BackTick;
-        globalSymbolLUT['{'] = TokenKind::OpenBrace;
-        globalSymbolLUT['|'] = TokenKind::Pipe;
-        globalSymbolLUT['}'] = TokenKind::CloseBrace;
-        globalSymbolLUT['~'] = TokenKind::Tilde;
+        token = {};
 
         // Intern keywords
         for( Keyword const& k : Keyword::Values::items )
         {
-            globalKeywords[k.index] = Intern( String( k.name ) )->data;
+            InternString* intern = Intern( String( k.name ), InternString::Keyword );
+            globalKeywords[k.index] = intern->data;
         }
-
-        Refill();
     }
 
     void Advance( int count = 1 )
     {
-        if( count > stream.length )
-            count = stream.length;
+        ASSERT( count <= stream.length );
 
         stream.length -= count;
         stream.data += count;
 
         pos.columnNumber += count;
-
-        Refill();
     }
 
     bool IsValid()
     {
         return !error;
-    }
-
-private:
-    void Refill()
-    {
-        if( stream.length == 0 )
-        {
-            at[0] = 0;
-            at[1] = 0;
-        }
-        else if( stream.length == 1 )
-        {
-            at[0] = stream.data[0];
-            at[1] = 0;
-        }
-        else
-        {
-            at[0] = stream.data[0];
-            at[1] = stream.data[1];
-        }
     }
 };
 
@@ -196,16 +94,14 @@ internal void Error( Lexer* lexer, Token const& onToken, char const* fmt, ... )
 #define PARSE_ERROR( token, msg, ... ) Error( lexer, token, "%s(%d,%d): "msg, \
                                         token.pos.filename, token.pos.lineNumber, token.pos.columnNumber, ##__VA_ARGS__ );
 
-internal bool IsNumeric( char c )
+internal void ScanInt( Lexer* lexer )
 {
-    // TODO
-    //NOT_IMPLEMENTED
-    return false;
+    // TODO 
 }
 
-internal void ParseNumber( Lexer* lexer )
+internal void ScanFloat( Lexer* lexer )
 {
-
+    // TODO 
 }
 
 internal void AdvanceNewline( Lexer* lexer, char c0, char c1 )
@@ -221,123 +117,265 @@ internal void AdvanceNewline( Lexer* lexer, char c0, char c1 )
 
 internal Token NextTokenRaw( Lexer* lexer )
 {
+    char const*& stream = lexer->stream.data;
+
     Token token = {};
     token.text = lexer->stream;
     token.pos = lexer->pos;
 
-    char c = lexer->at[0];
-    // TODO Remove this and go back to only advancing when necessary to increase the amount of advances by more than 1 char
-    lexer->Advance();
-
-    // First use the lookup for symbols
-    int lookupIndex = globalSymbolLUT[c];
-    if( lookupIndex )
-        token.kind = (TokenKind::Enum)lookupIndex;
-    else
+    switch( stream[0] )
     {
-        switch( c )
+        case '\0':
         {
-            case '\0':
-            {
-                token.kind = TokenKind::EndOfStream;
-            } break;
+            token.kind = TokenKind::EndOfStream;
+        } break;
 
-            case '"':
-            {
-                token.kind = TokenKind::StringLiteral;
+        case '\r': case '\n':
+        {
+            char c0 = stream[0];
+            char c1 = stream[1];
 
-                while( lexer->at[0] && lexer->at[0] != '"' )
+            token.kind = TokenKind::Newline;
+            lexer->Advance();
+
+            AdvanceNewline( lexer, c0, c1 );
+        } break;
+
+#define CASE(c) case c:
+
+#define SPACING(x) x(' ') x('\t') x('\f') x('\v')
+        SPACING(CASE)
+        {
+            lexer->Advance();
+            token.kind = TokenKind::Spacing;
+            while( IsSpacing( stream[0] ) )
+                lexer->Advance();
+        } break;
+#undef SPACING
+
+#define DIGITS(x) x('0') x('1') x('2') x('3') x('4') x('5') x('6') x('7') x('8') x('9')
+        DIGITS(CASE)
+        {
+            char const* c = stream + 1;
+            while( IsNumber( *c ) )
+                c++;
+
+            if( *c == '.' || *c == 'e' || *c == 'E' )
+                ScanFloat( lexer );
+            else
+                ScanInt( lexer );
+        } break;
+#undef DIGITS
+
+#define IDENT(x) \
+        x('a') x('b') x('c') x('d') x('e') x('f') x('g') x('h') x('i') x('j') x('k') x('l') x('m') \
+        x('n') x('o') x('p') x('q') x('r') x('s') x('t') x('u') x('v') x('w') x('x') x('y') x('z') \
+        x('A') x('B') x('C') x('D') x('E') x('F') x('G') x('H') x('I') x('J') x('K') x('L') x('M') \
+        x('N') x('O') x('P') x('Q') x('R') x('S') x('T') x('U') x('V') x('W') x('X') x('Y') x('Z') x('_')
+        IDENT(CASE)
+        {
+            token.kind = TokenKind::Name;
+            lexer->Advance();
+
+            while( IsAlpha( stream[0] ) || IsNumber( stream[0] ) || stream[0] == '_' )
+                lexer->Advance();
+
+            int length = I32( lexer->stream.data - token.text.data );
+            InternString* intern = Intern( String( token.text.data, length ) );
+            token.ident = intern->data;
+
+            if( intern->flags & InternString::Keyword )
+                token.kind = TokenKind::Keyword;
+        } break;
+#undef IDENT
+
+#undef CASE
+        // TODO Chars
+        case '"':
+        {
+            lexer->Advance();
+            token.kind = TokenKind::StringLiteral;
+
+            while( stream[0] && stream[0] != '"' )
+            {
+                // TODO 
+                // Skip escape sequences
+                if( stream[0] == '\\' && stream[1] )
                 {
-                    // Skip escape sequences
-                    if( lexer->at[0] == '\\' && lexer->at[1] )
-                    {
-                        lexer->Advance();
-                    }
                     lexer->Advance();
                 }
-                // Skip last quote
-                if( lexer->at[0] )
+                lexer->Advance();
+            }
+            // Skip last quote
+            if( stream[0] )
+                lexer->Advance();
+        } break;
+
+        case '/':
+        {
+            // C++ style comment
+            if( stream[1] == '/' )
+            {
+                token.kind = TokenKind::Comment;
+                lexer->Advance( 2 );
+
+                while( stream[0] && !IsNewline( stream[0] ) )
                     lexer->Advance();
             }
-
-            case '/':
+            // C style comment
+            else if( stream[1] == '*' )
             {
-                // C++ style
-                if( lexer->at[0] == '/' )
-                {
-                    token.kind = TokenKind::Comment;
-                    lexer->Advance();
+                token.kind = TokenKind::Comment;
+                lexer->Advance( 2 );
 
-                    while( lexer->at[0] && !IsNewline( lexer->at[0] ) )
-                        lexer->Advance();
-                }
-                // C style
-                else if( lexer->at[0] == '*' )
+                while( stream[0] && !(stream[0] == '*' && stream[1] == '/') )
                 {
-                    token.kind = TokenKind::Comment;
-                    lexer->Advance();
-
-                    while( lexer->at[0] && !(lexer->at[0] == '*' && lexer->at[1] == '/') )
+                    // NOTE This is slightly weird in that we potentially advance the line number before skipping over a multi-byte newline
+                    if( IsNewline( stream[0] ) )
                     {
-                        // NOTE This is slightly weird in that we potentially advance the line number before skipping over a multi-byte newline
-                        if( IsNewline( lexer->at[0] ) )
-                        {
-                            AdvanceNewline( lexer, lexer->at[0], lexer->at[1] );
-                        }
-                        lexer->Advance();
+                        AdvanceNewline( lexer, stream[0], stream[1] );
                     }
-
-                    if( lexer->at[0] )
-                        lexer->Advance( 2 );
+                    lexer->Advance();
                 }
-                else
-                {
-                    // TODO
-                }
-            } break;
 
-            default:
+                if( stream[0] )
+                    lexer->Advance( 2 );
+            }
+            else
             {
-                // TODO Move the first char of these to the outer switch for speed?
-                if( IsSpacing( c ) )
+                token.kind = TokenKind::Slash;
+                lexer->Advance();
+
+                if( stream[0] == '=' )
                 {
-                    token.kind = TokenKind::Spacing;
-
-                    while( IsSpacing( lexer->at[0] ) )
-                        lexer->Advance();
+                    token.kind = TokenKind::DivAssign;
+                    lexer->Advance();
                 }
-                else if( IsNewline( c ) )
+            }
+        } break;
+
+        case '.':
+        {
+            if( IsNumber( stream[1] ) )
+                ScanFloat( lexer );
+            else
+            {
+                token.kind = TokenKind::Dot;
+                lexer->Advance();
+            }
+        } break;
+
+        case '<':
+        {
+            token.kind = TokenKind::LessThan;
+            lexer->Advance();
+            if( stream[0] == '<' )
+            {
+                token.kind = TokenKind::LeftShift;
+                lexer->Advance();
+                if( stream[0] == '=' )
                 {
-                    token.kind = TokenKind::Newline;
-                    AdvanceNewline( lexer, c, lexer->at[0] );
+                    token.kind = TokenKind::LShiftAssign;
+                    lexer->Advance();
                 }
-                else if( IsAlpha( c ) )
+            }
+            else if( stream[0] == '=' )
+            {
+                token.kind = TokenKind::LTEqual;
+                lexer->Advance();
+            }
+        } break;
+
+        case '>':
+        {
+            token.kind = TokenKind::GreaterThan;
+            lexer->Advance();
+            if( stream[0] == '>' )
+            {
+                token.kind = TokenKind::RightShift;
+                lexer->Advance();
+                if( stream[0] == '=' )
                 {
-                    token.kind = TokenKind::Name;
-
-                    while( IsAlpha( lexer->at[0] ) || IsNumber( lexer->at[0] ) || lexer->at[0] == '_' )
-                        lexer->Advance();
-
-                    int length = I32( lexer->stream.data - token.text.data );
-                    InternString* intern = Intern( String( token.text.data, length ) );
-                    token.ident = intern->data;
-
-                    if( intern->flags & InternString::Keyword )
-                        token.kind = TokenKind::Keyword;
+                    token.kind = TokenKind::RShiftAssign;
+                    lexer->Advance();
                 }
-                // TODO 
-                //else if( IsNumeric( c ) )
-                //{
-                    //token.kind = TokenKind::NumericLiteral;
+            }
+            else if( stream[0] == '=' )
+            {
+                token.kind = TokenKind::GTEqual;
+                lexer->Advance();
+            }
+        } break;
 
-                    //ParseNumber( lexer );
-                //}
-                else
-                    token.kind = TokenKind::Unknown;
+#define CASE1(c1, k1)                      \
+        case c1:                       \
+                                       token.kind = k1;           \
+        lexer->Advance();          \
+        break;
 
-            } break;
-        }
+#define CASE2(c1, k1, c2, k2)              \
+        case c1:                       \
+                                       token.kind = k1;           \
+        lexer->Advance();          \
+        if( stream[0] == c2 )      \
+        {                          \
+            token.kind = k2;       \
+            lexer->Advance();      \
+        }                          \
+        break;
+
+#define CASE3(c1, k1, c2, k2, c3, k3)      \
+        case c1:                       \
+                                       token.kind = k1;           \
+        lexer->Advance();          \
+        if( stream[0] == c2 )      \
+        {                          \
+            token.kind = k2;       \
+            lexer->Advance();      \
+        }                          \
+        else if( stream[0] == c3 ) \
+        {                          \
+            token.kind = k3;       \
+            lexer->Advance();      \
+        }                          \
+        break;
+
+        CASE1( '(', TokenKind::OpenParen );
+        CASE1( ')', TokenKind::CloseParen );
+        CASE1( '[', TokenKind::OpenBracket );
+        CASE1( ']', TokenKind::CloseBracket );
+        CASE1( '{', TokenKind::OpenBrace );
+        CASE1( '}', TokenKind::CloseBrace );
+        CASE1( ',', TokenKind::Comma );
+        CASE1( '@', TokenKind::At );
+        CASE1( '#', TokenKind::Pound );
+        CASE1( '?', TokenKind::Question );
+        CASE1( ';', TokenKind::Semicolon );
+        CASE1( '~', TokenKind::Tilde );
+        CASE2( '=', TokenKind::Assign, '=', TokenKind::Equal );
+        CASE2( '!', TokenKind::Exclamation, '=', TokenKind::NotEqual );
+        CASE2( ':', TokenKind::Colon, '=', TokenKind::ColonAssign );
+        CASE2( '+', TokenKind::Plus, '=', TokenKind::PlusAssign );
+        CASE2( '-', TokenKind::Minus, '=', TokenKind::MinusAssign );
+        CASE2( '*', TokenKind::Asterisk, '=', TokenKind::MulAssign );
+        CASE2( '%', TokenKind::Percent, '=', TokenKind::ModAssign );
+        CASE2( '^', TokenKind::Caret, '=', TokenKind::XorAssign );
+        CASE3( '&', TokenKind::Ampersand, '=', TokenKind::AndAssign, '&', TokenKind::LogicAnd );
+        CASE3( '|', TokenKind::Pipe, '=', TokenKind::OrAssign, '|', TokenKind::LogicOr );
+
+#undef CASE1
+#undef CASE2
+#undef CASE3
+
+        default:
+        {
+            token.kind = TokenKind::Unknown;
+            PARSE_ERROR( token, "Invalid token '%c', skipping", stream[0] );
+
+            lexer->Advance();
+        } break;
     }
+
     token.text.length = I32( lexer->stream.data - token.text.data );
 
     return token;

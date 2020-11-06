@@ -74,13 +74,13 @@ struct String
 };
 
 
-bool IsNewline( char c )
+INLINE bool IsNewline( char c )
 {
     bool result = (c == '\n' || c == '\r' );
     return result;
 }
 
-bool IsSpacing( char c )
+INLINE bool IsSpacing( char c )
 {
     bool result = (c == ' ' ||
                 c == '\t' ||
@@ -89,21 +89,21 @@ bool IsSpacing( char c )
     return result;
 }
 
-bool IsWhitespace( char c )
+INLINE bool IsWhitespace( char c )
 {
     bool result = IsSpacing( c )
         || IsNewline( c );
     return result;
 }
 
-bool IsAlpha( char c )
+INLINE bool IsAlpha( char c )
 {
     bool result = (c >= 'a' && c <= 'z')
         || (c >= 'A' && c <= 'Z' );
     return result;
 }
 
-bool IsNumber( char c )
+INLINE bool IsNumber( char c )
 {
     bool result = (c >= '0' && c <= '9');
     return result;

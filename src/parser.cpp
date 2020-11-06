@@ -1,7 +1,32 @@
+TypeSpec* NewTypeSpec( SourcePos const& pos, TypeSpec::Kind kind )
+{
+    TypeSpec* result = PUSH_STRUCT( &globalArena, TypeSpec );
+    result->pos = pos;
+    result->kind = TypeSpec::Name;
+
+    return result;
+}
+
+TypeSpec* NewNameTypeSpec( SourcePos const& pos, char const* name )
+{
+    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Name );
+    result->name = name;
+
+    return result;
+}
+
+TypeSpec* NewPtrTypeSpec( SourcePos const& pos, TypeSpec* ofType )
+{
+    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Pointer );
+    result->base = ofType;
+
+    return result;
+}
+
 TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
 {
-    Token token = NextToken( lexer );
-    SourcePos pos = token.pos;
+    Token const& token = lexer->token;
+    SourcePos const& pos = token.pos;
 
     if( MatchToken( TokenKind::Name, token ) )
     {
@@ -38,24 +63,123 @@ TypeSpec* ParseTypeSpec( Lexer* lexer )
     return type;
 }
  
-
-struct CompoundField
+Expr* NewExpr( SourcePos const& pos, Expr::Kind kind )
 {
-    enum Kind
-    {
-        Name,
-        Index,
-    };
+    Expr* result = PUSH_STRUCT( &globalArena, Expr );
+    result->pos = pos;
+    result->kind = kind;
 
-    SourcePos pos;
-    union
-    {
-        char const* name;
-        Expr* index;
-    };
-    Expr *initValue;
-    Kind kind;
-};
+    return result;
+}
+
+Expr* NewCompoundExpr( SourcePos const& pos, BucketArray<CompoundField> const& fields )
+{
+    Expr* result = NewExpr( pos, Expr::Compound );
+    new( &result->compound.fields ) Array<CompoundField>( &globalArena, fields.count );
+    fields.CopyTo( &result->compound.fields );
+
+    return result;
+}
+
+Expr* NewNameExpr( SourcePos const& pos, char const* name )
+{
+    Expr* result = NewExpr( pos, Expr::Name );
+    result->name = name;
+
+    return result;
+}
+
+Expr* NewIntExpr( SourcePos const &pos, u64 value, Token::LiteralMod modifier )
+{
+    Expr* result = NewExpr( pos, Expr::Int );
+    result->literal.intValue = value;
+    result->literal.modifier = modifier;
+
+    return result;
+}
+
+Expr* NewFloatExpr( SourcePos const &pos, f64 value, Token::LiteralMod modifier )
+{
+    Expr* result = NewExpr( pos, Expr::Float );
+    result->literal.floatValue = value;
+    result->literal.modifier = modifier;
+
+    return result;
+}
+
+Expr* NewStringExpr( SourcePos const &pos, String const& value, Token::LiteralMod modifier )
+{
+    Expr* result = NewExpr( pos, Expr::Str );
+    result->literal.strValue = value;
+    result->literal.modifier = modifier;
+
+    return result;
+}
+
+Expr* NewSizeofExpr( SourcePos const& pos, Expr* expr )
+{
+    Expr* result = NewExpr( pos, Expr::Sizeof );
+    result->sizeof_.expr = expr;
+
+    return result;
+}
+
+Expr* NewCallExpr( SourcePos const& pos, Expr* expr, BucketArray<Expr*> const& args )
+{
+    Expr* result = NewExpr( pos, Expr::Call );
+    result->call.func = expr;
+    new( &result->call.args ) Array<Expr*>( &globalArena, args.count );
+    args.CopyTo( &result->call.args );
+
+    return result;
+}
+
+Expr* NewIndexExpr( SourcePos const& pos, Expr* base, Expr* index )
+{
+    Expr* result = NewExpr( pos, Expr::Index );
+    result->index.base = base;
+    result->index.index = index;
+
+    return result;
+}
+
+Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name )
+{
+    Expr* result = NewExpr( pos, Expr::Field );
+    result->field.base = base;
+    result->field.name = name;
+
+    return result;
+}
+
+Expr* NewUnaryExpr( SourcePos const& pos, TokenKind::Enum op, Expr* expr )
+{
+    Expr* result = NewExpr( pos, Expr::Unary );
+    result->unary.expr = expr;
+    result->unary.op = op;
+
+    return result;
+}
+
+Expr* NewBinaryExpr( SourcePos const& pos, TokenKind::Enum op, Expr* left, Expr* right )
+{
+    Expr* result = NewExpr( pos, Expr::Binary );
+    result->binary.left = left;
+    result->binary.right = right;
+    result->binary.op = op;
+
+    return result;
+}
+
+Expr* NewTernaryExpr( SourcePos const& pos, Expr* cond, Expr* thenExpr, Expr* elseExpr )
+{
+    Expr* result = NewExpr( pos, Expr::Ternary );
+    result->ternary.cond = cond;
+    result->ternary.thenExpr = thenExpr;
+    result->ternary.elseExpr = elseExpr;
+
+    return result;
+}
 
 Expr* ParseExpr( Lexer* lexer );
 
@@ -70,7 +194,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
         NextToken( lexer );
         Expr* indexExpr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseBracket, lexer );
-        RequireToken( TokenKind::Equal, lexer );
+        RequireToken( TokenKind::Assign, lexer );
         Expr* valueExpr = ParseExpr( lexer );
 
         if( lexer->IsValid() )
@@ -86,7 +210,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
     {
         char const* name = token.ident;
         NextToken( lexer );
-        RequireToken( TokenKind::Equal, lexer );
+        RequireToken( TokenKind::Assign, lexer );
         Expr* valueExpr = ParseExpr( lexer );
 
         if( lexer->IsValid() )
@@ -133,19 +257,16 @@ Expr* ParseBaseExpr( Lexer* lexer )
     }
     else if( MatchToken( TokenKind::IntLiteral, token ) )
     {
-        u64 val = token.intValue;
-        // TODO Modifiers
-        expr = NewIntExpr( pos, val );
+        expr = NewIntExpr( pos, token.intValue, token.mod );
     }
     else if( MatchToken( TokenKind::FloatLiteral, token ) )
     {
         f64 val = token.floatValue;
-        expr = NewFloatExpr( pos, val );
+        expr = NewFloatExpr( pos, token.floatValue, token.mod );
     }
     else if( MatchToken( TokenKind::StringLiteral, token ) )
     {
-        String val = token.text;
-        expr = NewStringExpr( TokenKind::StringLiteral, val );
+        expr = NewStringExpr( pos, token.text, token.mod );
     }
     else if( MatchKeyword( Keyword::Sizeof, token ) )
     {
@@ -171,7 +292,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
         advance = false;
     }
     else
-        PARSE_ERROR( token, "Unexpected token '%s' in expression", token.kind.displayName );
+        PARSE_ERROR( token, "Unexpected token '%s' in expression", TokenKind::Values::names[ token.kind ] );
 
     if( advance && lexer->IsValid() )
         NextToken( lexer );
@@ -182,7 +303,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
 Expr* ParsePostfixExpr( Lexer* lexer )
 {
     Expr* expr = ParseBaseExpr( lexer );
-    while( lexer->token.kind.HasFlag( Token::Flags::PostfixOp ) )
+    while( lexer->token.HasFlag( TokenFlags::PostfixOp ) )
     {
         SourcePos pos = lexer->token.pos;
         if( MatchToken( TokenKind::OpenParen, lexer->token ) )
@@ -205,12 +326,14 @@ Expr* ParsePostfixExpr( Lexer* lexer )
         {
             Expr* index = ParseExpr( lexer );
             RequireToken( TokenKind::CloseBracket, lexer );
-            expr = NewIndexExpr( pos, expr, index );
+            if( lexer->IsValid() )
+                expr = NewIndexExpr( pos, expr, index );
         }
         else if( MatchToken( TokenKind::Dot, lexer->token ) )
         {
             Token field = RequireToken( TokenKind::Name, lexer );
-            expr = NewFieldExpr( pos, expr, field.ident );
+            if( lexer->IsValid() )
+                expr = NewFieldExpr( pos, expr, field.ident );
         }
     }
     
@@ -219,7 +342,7 @@ Expr* ParsePostfixExpr( Lexer* lexer )
 
 Expr* ParseUnaryExpr( Lexer* lexer )
 {
-    if( lexer->token.kind.HasFlag( Token::Flags::UnaryOp ) )
+    if( lexer->token.HasFlag( TokenFlags::UnaryOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
@@ -228,13 +351,13 @@ Expr* ParseUnaryExpr( Lexer* lexer )
         return NewUnaryExpr( pos, op, ParseUnaryExpr( lexer ) );
     }
     else
-        return ParseBaseExpr( lexer );
+        return ParsePostfixExpr( lexer );
 }
 
 Expr* ParseMulExpr( Lexer* lexer )
 {
     Expr* expr = ParseUnaryExpr( lexer );
-    while( lexer->token.kind.HasFlag( Token::Flags::MulOp ) )
+    while( lexer->token.HasFlag( TokenFlags::MulOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
@@ -249,7 +372,7 @@ Expr* ParseMulExpr( Lexer* lexer )
 Expr* ParseAddExpr( Lexer* lexer )
 {
     Expr* expr = ParseMulExpr( lexer );
-    while( lexer->token.kind.HasFlag( Token::Flags::AddOp ) )
+    while( lexer->token.HasFlag( TokenFlags::AddOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
@@ -264,7 +387,7 @@ Expr* ParseAddExpr( Lexer* lexer )
 Expr* ParseCmpExpr( Lexer* lexer )
 {
     Expr* expr = ParseAddExpr( lexer );
-    while( lexer->token.kind.HasFlag( Token::Flags::CmpOp ) )
+    while( lexer->token.HasFlag( TokenFlags::CmpOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
@@ -326,7 +449,7 @@ Expr* ParseExpr( Lexer* lexer )
 }
 
 
-Decl* ParseStruct( SourcePos const& pos, Lexer* lexer )
+Decl* ParseStructDecl( SourcePos const& pos, Lexer* lexer )
 {
 #if 0
     if( !lexer->IsValid() )
@@ -342,7 +465,7 @@ Decl* ParseStruct( SourcePos const& pos, Lexer* lexer )
     return nullptr;
 }
 
-Decl* ParseEnum( SourcePos const& pos, Lexer* lexer )
+Decl* ParseEnumDecl( SourcePos const& pos, Lexer* lexer )
 {
 #if 0
     if( !lexer->IsValid() )
@@ -367,9 +490,9 @@ Decl* ParseDecl( Lexer* lexer )
     if( MatchToken( TokenKind::Keyword, token ) )
     {
         if( MatchKeyword( Keyword::Struct, token ) )
-            return ParseStruct( pos, lexer );
+            return ParseStructDecl( pos, lexer );
         else if( MatchKeyword( Keyword::Enum, token ) )
-            return ParseEnum( pos, lexer );
+            return ParseEnumDecl( pos, lexer );
     }
     else
     {
@@ -390,14 +513,16 @@ Decl* ParseDecl( Lexer* lexer )
         {
             type = ParseTypeSpec( lexer );
             token = NextToken( lexer );
-            if( MatchToken( TokenKind::Equal, lexer->token ) )
+            if( MatchToken( TokenKind::Assign, lexer->token ) )
                 expr = ParseExpr( lexer );
         }
         RequireToken( TokenKind::Semicolon, lexer );
 
         if( lexer->IsValid() )
         {
+#if 0
             return NewVarDecl( pos, name, type, expr, isConst );
+#endif
         }
     }
 

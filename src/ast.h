@@ -1,7 +1,7 @@
 
 struct TypeSpec
 {
-    enum class Kind
+    enum Kind
     {
         None,
         Name,
@@ -13,24 +13,45 @@ struct TypeSpec
     };
     
     SourcePos pos;
+    TypeSpec* base;
     Kind kind;
 
     union
     {
-        String name;
+        char const* name;
         //...
     };
 };
 
 
+struct Expr;
+
+struct CompoundField
+{
+    enum Kind
+    {
+        Name,
+        Index,
+    };
+
+    SourcePos pos;
+    union
+    {
+        char const* name;
+        Expr* index;
+    };
+    Expr *initValue;
+    Kind kind;
+};
+
 struct Expr
 {
-    enum class Kind
+    enum Kind
     {
         None,
         Paren,
         Int,
-        Real,
+        Float,
         Str,
         Name,
         Cast,
@@ -38,7 +59,7 @@ struct Expr
         Index,
         Field,
         Compound,
-        Unay,
+        Unary,
         Binary,
         Ternary,
         Sizeof,
@@ -51,26 +72,31 @@ struct Expr
 
     union
     {
+        char const* name;
         struct
         {
             Expr* expr;
         } paren;
-        union
+        struct
         {
-            u64 intValue;
-            f64 floatValue;
-            String strValue;
+            union
+            {
+                u64 intValue;
+                f64 floatValue;
+                String strValue;
+            };
+            Token::LiteralMod modifier;
         } literal;
         struct
         {
             Expr* expr;
-            TokenKind op;
+            TokenKind::Enum op;
         } unary;
         struct
         {
             Expr* left;
             Expr* right;
-            TokenKind op;
+            TokenKind::Enum op;
         } binary;
         struct
         {
@@ -81,8 +107,26 @@ struct Expr
         struct
         {
             Array<Expr*> args;
-            Expr* expr;
+            Expr* func;
         } call;
+        struct
+        {
+            Expr* base;
+            Expr* index;
+        } index;
+        struct
+        {
+            Expr* base;
+            char const* name;
+        } field;
+        struct
+        {
+            Expr* expr;
+        } sizeof_;
+        struct
+        {
+            Array<CompoundField> fields;
+        } compound;
     };
 };
 
@@ -192,7 +236,7 @@ struct Stmt
         {
             Expr* left;
             Expr* right;
-            TokenKind op;
+            TokenKind::Enum op;
         } assign;
         struct
         {

@@ -1,4 +1,3 @@
-#include "common.h"
 
 struct TokenKindValue
 {
@@ -6,40 +5,71 @@ struct TokenKindValue
     u32 flags;
 };
 
+enum TokenFlags : u32
+{
+    Tk_None     = 0,
+    PostfixOp   = 0x1,
+    UnaryOp     = 0x2,
+    AddOp       = 0x4,
+    MulOp       = 0x8,
+    CmpOp       = 0x10,
+    AssignOp    = 0x20,
+};
+
 #define TOKENS(x) \
     x(Unknown,          "unknown",      ( "???", 0 )) \
     \
-    x(Exclamation,      "!",            ( " ! ", 0 )) \
+    x(Exclamation,      "!",            ( " ! ", UnaryOp )) \
     x(Pound,            "#",            ( " # ", 0 )) \
     x(Dollar,           "$",            ( " $ ", 0 )) \
-    x(Percent,          "%",            ( " % ", 0 )) \
-    x(Ampersand,        "&",            ( " & ", 0 )) \
+    x(Percent,          "%",            ( " % ", MulOp )) \
+    x(Ampersand,        "&",            ( " & ", UnaryOp | MulOp )) \
     x(SingleQuote,      "'",            ( " ' ", 0 )) \
-    x(OpenParen,        "(",            ( " ( ", 0 )) \
+    x(OpenParen,        "(",            ( " ( ", PostfixOp )) \
     x(CloseParen,       ")",            ( " ) ", 0 )) \
-    x(Asterisk,         "*",            ( " * ", 0 )) \
-    x(Plus,             "+",            ( " + ", 0 )) \
+    x(Asterisk,         "*",            ( " * ", UnaryOp | MulOp )) \
+    x(Plus,             "+",            ( " + ", UnaryOp | AddOp )) \
     x(Comma,            ",",            ( " , ", 0 )) \
-    x(Minus,            "-",            ( " - ", 0 )) \
-    x(Dot,              ".",            ( " . ", 0 )) \
-    x(Slash,            "/",            ( " / ", 0 )) \
+    x(Minus,            "-",            ( " - ", UnaryOp | AddOp )) \
+    x(Dot,              ".",            ( " . ", PostfixOp )) \
+    x(Slash,            "/",            ( " / ", MulOp )) \
     x(Colon,            ":",            ( " : ", 0 )) \
     x(Semicolon,        ";",            ( " ; ", 0 )) \
-    x(LessThan,         "<",            ( " < ", 0 )) \
-    x(Equal,            "=",            ( " = ", 0 )) \
-    x(GreaterThan,      ">",            ( " > ", 0 )) \
+    x(LessThan,         "<",            ( " < ", CmpOp )) \
+    x(Assign,           "=",            ( " = ", AssignOp )) \
+    x(GreaterThan,      ">",            ( " > ", CmpOp )) \
     x(Question,         "?",            ( " ? ", 0 )) \
     x(At,               "@",            ( " @ ", 0 )) \
-    x(OpenBracket,      "[",            ( " [ ", 0 )) \
+    x(OpenBracket,      "[",            ( " [ ", PostfixOp )) \
     x(Backslash,        "\\",           ( " \\ ", 0 )) \
     x(CloseBracket,     "]",            ( " ] ", 0 )) \
-    x(Caret,            "^",            ( " ^ ", 0 )) \
+    x(Caret,            "^",            ( " ^ ", AddOp )) \
     x(Underscore,       "_",            ( " _ ", 0 )) \
     x(BackTick,         "`",            ( " ` ", 0 )) \
     x(OpenBrace,        "{",            ( " { ", 0 )) \
-    x(Pipe,             "|",            ( " | ", 0 )) \
+    x(Pipe,             "|",            ( " | ", AddOp )) \
     x(CloseBrace,       "}",            ( " } ", 0 )) \
-    x(Tilde,            "~",            ( " ~ ", 0 )) \
+    x(Tilde,            "~",            ( " ~ ", UnaryOp )) \
+    \
+    x(LeftShift,        "<<",           ( "<< ", MulOp )) \
+    x(RightShift,       ">>",           ( ">> ", MulOp )) \
+    x(Equal,            "==",           ( "== ", CmpOp )) \
+    x(NotEqual,         "!=",           ( "!= ", CmpOp )) \
+    x(LTEqual,          "<=",           ( "<= ", CmpOp )) \
+    x(GTEqual,          ">=",           ( ">= ", CmpOp )) \
+    x(LogicAnd,         "&&",           ( "&& ", 0 )) \
+    x(LogicOr,          "||",           ( "|| ", 0 )) \
+    x(ColonAssign,      ":=",           ( ":= ", AssignOp )) \
+    x(PlusAssign,       "+=",           ( "+= ", AssignOp )) \
+    x(MinusAssign,      "-=",           ( "-= ", AssignOp )) \
+    x(MulAssign,        "*=",           ( "*= ", AssignOp )) \
+    x(DivAssign,        "/=",           ( "/= ", AssignOp )) \
+    x(ModAssign,        "%=",           ( "%= ", AssignOp )) \
+    x(OrAssign,         "|=",           ( "|= ", AssignOp )) \
+    x(AndAssign,        "&=",           ( "&= ", AssignOp )) \
+    x(XorAssign,        "^=",           ( "^= ", AssignOp )) \
+    x(LShiftAssign,     "<<=",          ( "<<=", AssignOp )) \
+    x(RShiftAssign,     ">>=",          ( ">>=", AssignOp )) \
     \
     x(Name,             "identifier",   ( "IDN", 0 )) \
     x(Keyword,          "keyword",      ( "KWD", 0 )) \
@@ -64,15 +94,9 @@ struct SourcePos
 
 struct Token
 {
-    // TODO 
-    enum Flags
+    enum LiteralMod : u32
     {
-        None        = 0,
-        PostfixOp   = 0x1,
-        UnaryOp     = 0x2,
-        AddOp       = 0x4,
-        MulOp       = 0x8,
-        CmpOp       = 0x10,
+        Hex         = 0x1,
     };
 
     SourcePos pos;
@@ -85,6 +109,12 @@ struct Token
         f64 floatValue;
         u64 intValue;
     };
+    LiteralMod mod;
+
+    bool HasFlag( TokenFlags f )
+    {
+        return (TokenKind::Values::items[ kind ].value.flags & (u32)f) != 0;
+    }
 };
 
 struct InternString
@@ -98,7 +128,7 @@ struct InternString
     char const* data;
     u32 hash;
     i16 length;
-    Flags flags;
+    u16 flags;
 };
 
 struct InternStringBuffer

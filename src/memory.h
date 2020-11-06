@@ -126,6 +126,9 @@ FreeLastPage( MemoryArena* arena )
 inline void
 ClearArena( MemoryArena* arena )
 {
+    if( arena->base == nullptr )
+        return;
+
     while( arena->pageCount > 0 )
         FreeLastPage( arena );
 
@@ -240,7 +243,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
 }
 
 inline MemoryArena
-MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = DefaultMemoryParams() )
+MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = NoClear() )
 {
     ASSERT( arena->tempCount == 0 );
 
@@ -257,7 +260,6 @@ MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = DefaultMemoryPa
     return result;
 }
 
-// TODO Improve on this. Make Begin/End calls happen inside the constructor/destructor for this struct
 struct TemporaryMemory
 {
     MemoryArena *arena;
@@ -295,6 +297,19 @@ EndTemporaryMemory( TemporaryMemory& tempMem )
     ASSERT( arena->tempCount > 0 );
     --arena->tempCount;
 }
+
+struct ScopedTmpMemory
+{
+    TemporaryMemory mem;
+    ScopedTmpMemory( MemoryArena* arena )
+    {
+        mem = BeginTemporaryMemory( arena );
+    }
+    ~ScopedTmpMemory()
+    {
+        EndTemporaryMemory( mem );
+    }
+};
 
 inline void
 CheckTemporaryBlocks( MemoryArena *arena )
