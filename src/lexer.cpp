@@ -8,6 +8,8 @@ STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
 
 internal char const* globalKeywords[Keyword::Values::count];
+internal int charToDigit[256];
+internal int escapeToChar[256];
 
 
 
@@ -61,6 +63,44 @@ struct Lexer
             InternString* intern = Intern( String( k.name ), InternString::Keyword );
             globalKeywords[k.index] = intern->data;
         }
+
+        // Escape sequences
+        SET( escapeToChar, -1 );
+        escapeToChar['0'] = '\0';
+        escapeToChar['\''] = '\'';
+        escapeToChar['"'] = '"';
+        escapeToChar['\\'] = '\\';
+        escapeToChar['n'] = '\n';
+        escapeToChar['r'] = '\r';
+        escapeToChar['t'] = '\t';
+        escapeToChar['v'] = '\v';
+        escapeToChar['b'] = '\b';
+        escapeToChar['a'] = '\a';
+
+        // Digit table
+        SET( charToDigit, -1 );
+        charToDigit['0'] = 0;
+        charToDigit['1'] = 1;
+        charToDigit['2'] = 2;
+        charToDigit['3'] = 3;
+        charToDigit['4'] = 4;
+        charToDigit['5'] = 5;
+        charToDigit['6'] = 6;
+        charToDigit['7'] = 7;
+        charToDigit['8'] = 8;
+        charToDigit['9'] = 9;
+        charToDigit['a'] = 10; 
+        charToDigit['b'] = 11; 
+        charToDigit['c'] = 12; 
+        charToDigit['d'] = 13; 
+        charToDigit['e'] = 14; 
+        charToDigit['f'] = 15; 
+        charToDigit['A'] = 10;
+        charToDigit['B'] = 11;
+        charToDigit['C'] = 12;
+        charToDigit['D'] = 13;
+        charToDigit['E'] = 14;
+        charToDigit['F'] = 15;
     }
 
     void Advance( int count = 1 )
@@ -79,7 +119,7 @@ struct Lexer
     }
 };
 
-internal void Error( Lexer* lexer, Token const& onToken, char const* fmt, ... )
+internal void Error( Lexer* lexer, char const* fmt, ... )
 {
     va_list arg_list;
     va_start( arg_list, fmt );
@@ -91,17 +131,97 @@ internal void Error( Lexer* lexer, Token const& onToken, char const* fmt, ... )
     globalRunning = false;
 }
 
-#define PARSE_ERROR( token, msg, ... ) Error( lexer, token, "%s(%d,%d): "msg, \
-                                        token.pos.filename, token.pos.lineNumber, token.pos.columnNumber, ##__VA_ARGS__ );
+#define PARSE_ERROR( token, msg, ... ) Error( lexer, "%s(%d,%d): Error: "msg"\n", \
+                                        (token).pos.filename, (token).pos.lineNumber, (token).pos.columnNumber, ##__VA_ARGS__ )
 
-internal void ScanInt( Lexer* lexer )
+internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod mod = Token::None )
 {
-    // TODO 
+    int base = 10;
+    switch( mod )
+    {
+        case Token::None:           break;
+        case Token::Binary:         base = 2; break;
+        case Token::Octal:          base = 8; break;
+        case Token::Hexadecimal:    base = 16; break;
+        default:
+            PARSE_ERROR( *token, "Unsupported literal modifier flags (0x%x)", mod );
+            return;
+    }
+
+    u64 val = 0;
+    for( int i = 0; i < length; ++i )
+    {
+        char c = lexer->stream.data[i];
+        int digit = charToDigit[ c ];
+
+        if( digit == -1 )
+        {
+            PARSE_ERROR( *token, "Expected digit, found '%c'", c );
+            return;
+        }
+        if( digit >= base )
+        {
+            PARSE_ERROR( *token, "Invalid digit '%c' for base %d", c, base );
+            return;
+        }
+        if( val > (U64MAX - digit)/base )
+        {
+            PARSE_ERROR( *token, "Integer literal overflow" );
+            return;
+        }
+
+        val = val * base + digit;
+    }
+
+    token->kind = TokenKind::IntLiteral;
+    token->intValue = val;
+    token->mod = mod;
+
+    lexer->Advance( length );
 }
 
-internal void ScanFloat( Lexer* lexer )
+internal void ScanFloat( Lexer* lexer, Token* token )
 {
-    // TODO 
+    char const* c = lexer->stream.data;
+    while( IsNumber( *c ) )
+        c++;
+    
+    if( *c == '.' )
+    {
+        c++;
+        while( IsNumber( *c ) )
+            c++;
+    }
+    if( *c == 'e' || *c == 'E' )
+    {
+        c++;
+        if( *c == '+' || *c == '-' )
+            c++;
+        if( !IsNumber( *c ) )
+        {
+            PARSE_ERROR( *token, "Expected number after float literal exponent, found '%c'", *c );
+            return;
+        }
+        while( IsNumber( *c ) )
+            c++;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    f64 val = strtod( lexer->stream.data, &end );
+
+    if( (val == 0.0 && end == nullptr) ||
+        (val == HUGE_VAL && errno) )
+        PARSE_ERROR( *token, "Invalid floating point literal" );
+    else
+    {
+        ASSERT( end == c, "Float literal parsed incorrectly" );
+
+        token->kind = TokenKind::FloatLiteral;
+        token->floatValue = val;
+
+        lexer->Advance( I32(end - lexer->stream.data) );
+    }
 }
 
 internal void AdvanceNewline( Lexer* lexer, char c0, char c1 )
@@ -156,14 +276,49 @@ internal Token NextTokenRaw( Lexer* lexer )
 #define DIGITS(x) x('0') x('1') x('2') x('3') x('4') x('5') x('6') x('7') x('8') x('9')
         DIGITS(CASE)
         {
-            char const* c = stream + 1;
-            while( IsNumber( *c ) )
-                c++;
+            Token::LiteralMod mod = Token::None;
 
-            if( *c == '.' || *c == 'e' || *c == 'E' )
-                ScanFloat( lexer );
+            if( stream[0] == '0' )
+            {
+                if( stream[1] == 'b' )
+                    mod = Token::Binary;
+                else if( stream[1] == 'o' )
+                    mod = Token::Octal;
+                else if( stream[1] == 'x' )
+                    mod = Token::Hexadecimal;
+            }
+
+            if( mod )
+            {
+                lexer->Advance( 2 );
+                char const* c = stream;
+
+                while( IsNumber( *c ) || IsAlpha( *c ) )
+                    c++;
+
+                int length = I32(c - stream);
+                if( length > 0 )
+                {
+                    ScanInt( lexer, &token, length, mod );
+                }
+                else
+                    PARSE_ERROR( token, "Integer prefix must be followed by one or more digits" );
+            }
             else
-                ScanInt( lexer );
+            {
+                char const* c = stream + 1;
+
+                while( IsNumber( *c ) )
+                    c++;
+
+                if( *c == '.' || *c == 'e' || *c == 'E' )
+                    ScanFloat( lexer, &token );
+                else
+                {
+                    int length = I32(c - stream);
+                    ScanInt( lexer, &token, length );
+                }
+            }
         } break;
 #undef DIGITS
 
@@ -191,24 +346,47 @@ internal Token NextTokenRaw( Lexer* lexer )
 
 #undef CASE
         // TODO Chars
-        case '"':
+        case '\'':
         {
             lexer->Advance();
             token.kind = TokenKind::StringLiteral;
 
-            while( stream[0] && stream[0] != '"' )
+            ScopedTmpMemory tmp( &globalTmpArena );
+            BucketArray<char> strValue( &globalTmpArena, 16, Temporary() );
+
+            // TODO Multiline strings
+            while( stream[0] && stream[0] != '\'' )
             {
-                // TODO 
-                // Skip escape sequences
-                if( stream[0] == '\\' && stream[1] )
+                char c = stream[0];
+
+                if( c == '\n' || c == '\r' )
                 {
-                    lexer->Advance();
+                    PARSE_ERROR( token, "String literal cannot contain newline" );
+                    break;
                 }
+                else if( c == '\\' )
+                {
+                    c = stream[1];
+
+                    // TODO Unicode
+                    int val = escapeToChar[ c ];
+                    if( val == -1 )
+                    {
+                        PARSE_ERROR( token, "Invalid escape sequence in string literal '%c'", c );
+                        break;
+                    }
+
+                    c = I8( val );
+                }
+
+                strValue.Push( c );
                 lexer->Advance();
             }
             // Skip last quote
             if( stream[0] )
                 lexer->Advance();
+
+            token.strValue.CopyFrom( strValue, &globalArena );
         } break;
 
         case '/':
@@ -257,7 +435,7 @@ internal Token NextTokenRaw( Lexer* lexer )
         case '.':
         {
             if( IsNumber( stream[1] ) )
-                ScanFloat( lexer );
+                ScanFloat( lexer, &token );
             else
             {
                 token.kind = TokenKind::Dot;

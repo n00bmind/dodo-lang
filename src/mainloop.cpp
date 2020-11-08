@@ -23,7 +23,7 @@ bool globalRunning = true;
 
 static char const* testTokenStrings[] =
 {
-    "fact\n(\"num\", )//this is a comment\na.b <<=11234> 1.234 {}*: sizeof*= &= &&/*another comment*/\r\n\tstruct",
+    "fact\n('num\v', 0x2a)//this is a comment\na.b .111<<=11234> 1.234E-100abc {}*: sizeof*=0o52 &= &&/*another comment*/\r\n\tstruct 0b101010",
 };
 static char const* testExprStrings[] =
 {
@@ -57,22 +57,36 @@ void RunTests()
         ASSERT_TOKEN(Name);
         ASSERT_TOKEN(OpenParen);
         ASSERT_TOKEN(StringLiteral);
+        ASSERT( StringsEqual( token.strValue, "num\v" ) );
         ASSERT_TOKEN(Comma);
+        ASSERT_TOKEN(IntLiteral);
+        ASSERT( token.intValue == 42 && token.mod == Token::Hexadecimal );
         ASSERT_TOKEN(CloseParen);
         ASSERT_TOKEN(Name);
         ASSERT_TOKEN(Dot);
         ASSERT_TOKEN(Name);
+        ASSERT_TOKEN(FloatLiteral);
+        ASSERT( token.floatValue == 0.111 );
         ASSERT_TOKEN(LShiftAssign);
+        ASSERT_TOKEN(IntLiteral);
+        ASSERT( token.intValue == 11234 );
         ASSERT_TOKEN(GreaterThan);
+        ASSERT_TOKEN(FloatLiteral);
+        ASSERT( token.floatValue == 1.234e-100 );
+        ASSERT_TOKEN(Name);                         // NOTE This should probably be an error!
         ASSERT_TOKEN(OpenBrace);
         ASSERT_TOKEN(CloseBrace);
         ASSERT_TOKEN(Asterisk);
         ASSERT_TOKEN(Colon);
         ASSERT_TOKEN(Keyword);
         ASSERT_TOKEN(MulAssign);
+        ASSERT_TOKEN(IntLiteral);
+        ASSERT( token.intValue == 42 && token.mod == Token::Octal );
         ASSERT_TOKEN(AndAssign);
         ASSERT_TOKEN(LogicAnd);
         ASSERT_TOKEN(Keyword);
+        ASSERT_TOKEN(IntLiteral);
+        ASSERT( token.intValue == 42 && token.mod == Token::Binary );
     }
 #undef ASSERT_TOKEN
 

@@ -51,10 +51,13 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 #define GIGABYTES(value) (MEGABYTES((u64)value)*1024)
 
 #define COPY(source, dest) memcpy( &dest, &source, sizeof(dest) )
+#define SET(dest, value) memset( &dest, value, sizeof(dest) )
+#define ZERO(dest) memset( &dest, 0, sizeof(dest) )
 #define EQUAL(source, dest) (memcmp( &source, &dest, sizeof(source) ) == 0)
 #define PCOPY(source, dest, size) memcpy( dest, source, size )
 #define PSET(dest, value, size) memset( dest, value, size )
 #define PZERO(dest, size) memset( dest, 0, size )
+#define PEQUAL(source, dest, size) (memcmp( source, dest, size ) == 0)
 
 
 #if _MSC_VER
@@ -79,6 +82,8 @@ typedef double f64;
 
 typedef size_t sz;
 
+#define I8MIN INT8_MIN
+#define I8MAX INT8_MAX
 #define U8MAX UINT8_MAX
 #define I16MAX INT16_MAX
 #define I16MIN INT16_MIN
@@ -86,7 +91,7 @@ typedef size_t sz;
 #define I32MIN INT32_MIN
 #define U16MAX UINT16_MAX
 #define U32MAX UINT32_MAX
-#define U64MAX UINT64_MAX
+#define U64MAX UINT64_MAX // ULLONG_MAX?
 #define I64MAX INT64_MAX
 #define I64MIN INT64_MIN
 
@@ -97,6 +102,13 @@ typedef size_t sz;
 #define F64MIN DBL_MIN
 #define F64INF (f64)INFINITY
 
+
+INLINE i8
+I8( i32 value )
+{
+    ASSERT( I8MIN <= value && value <= I8MAX );
+    return (i8)value;
+}
 
 INLINE i16
 I16( i32 value )

@@ -96,7 +96,10 @@ struct Token
 {
     enum LiteralMod : u32
     {
-        Hex         = 0x1,
+        None        = 0,
+        Hexadecimal = 0x1,
+        Octal       = 0x2,
+        Binary      = 0x4,
     };
 
     SourcePos pos;
@@ -105,11 +108,20 @@ struct Token
 
     union
     {
-        char const* ident;  // Interned
+        String strValue;
         f64 floatValue;
         u64 intValue;
+        char const* ident;  // Interned
     };
     LiteralMod mod;
+
+    Token()
+        : pos()
+        , text()
+        , kind(TokenKind::Unknown)
+        , strValue()
+        , mod(None)
+    {}
 
     bool HasFlag( TokenFlags f )
     {

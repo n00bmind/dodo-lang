@@ -266,7 +266,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
     }
     else if( MatchToken( TokenKind::StringLiteral, token ) )
     {
-        expr = NewStringExpr( pos, token.text, token.mod );
+        expr = NewStringExpr( pos, token.strValue, token.mod );
     }
     else if( MatchKeyword( Keyword::Sizeof, token ) )
     {

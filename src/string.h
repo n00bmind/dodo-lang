@@ -71,6 +71,13 @@ struct String
         CopyTo( dst );
         dst[length] = 0;
     }
+
+    void CopyFrom( BucketArray<char> const& src, MemoryArena* arena )
+    {
+        length = src.count;
+        data = PUSH_STRING( arena, length );
+        src.CopyTo( (char*)data, length );
+    }
 };
 
 
@@ -114,3 +121,8 @@ bool StringsEqual( String const& a, String const& b )
     return a.length == b.length && strncmp( a.data, b.data, Sz( a.length ) ) == 0;
 }
 
+// NOTE Unsafe!
+bool StringsEqual( String const& a, char const* b )
+{
+    return b[ a.length ] == 0 && strncmp( a.data, b, Sz( a.length ) ) == 0;
+}
