@@ -30,12 +30,22 @@ PLATFORM_PRINT(Win32Print)
     va_end( args );
 }
 
+PLATFORM_PRINT_VA(Win32PrintVA)
+{
+    vfprintf( stdout, fmt, args );
+}
+
 PLATFORM_PRINT(Win32Error)
 {
     va_list args;
     va_start( args, fmt );
     vfprintf( stderr, fmt, args );
     va_end( args );
+}
+
+PLATFORM_PRINT_VA(Win32ErrorVA)
+{
+    vfprintf( stderr, fmt, args );
 }
 
 PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
@@ -111,6 +121,8 @@ int main( int argCount, char const* args[] )
     globalPlatform.ReadEntireFile = Win32ReadEntireFile;
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
+    globalPlatform.PrintVA = Win32PrintVA;
+    globalPlatform.ErrorVA = Win32ErrorVA;
 
     InitArena( &globalArena, MEGABYTES(16) );
     InitArena( &globalTmpArena, MEGABYTES(16) );

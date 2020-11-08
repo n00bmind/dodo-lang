@@ -21,19 +21,6 @@ bool globalRunning = true;
 #include "parser.cpp"
 
 
-static char const* testTokenStrings[] =
-{
-    "fact\n('num\v', 0x2a)//this is a comment\na.b .111<<=11234> 1.234E-100abc {}*: sizeof*=0o52 &= &&/*another comment*/\r\n\tstruct 0b101010",
-};
-static char const* testExprStrings[] =
-{
-    "a+b",
-};
-static char const* testDeclStrings[] =
-{
-    "a: int = 42;",
-};
-
 void InitTestMemory()
 {
     ClearArena( &globalArena );
@@ -46,6 +33,10 @@ void InitTestMemory()
 
 void RunTests()
 {
+    static char const* testTokenStrings[] =
+    {
+        "fact\n('num\v', 0x2a)//this is a comment\na.b .111<<=11234> 1.234E-100abc {}*: sizeof*=0o52 &= &&/*another comment*/\r\n\tstruct 0b101010",
+    };
 #define ASSERT_TOKEN(k) \
         token = NextToken( &lexer ); \
         ASSERT( token.kind == TokenKind::k );
@@ -90,6 +81,20 @@ void RunTests()
     }
 #undef ASSERT_TOKEN
 
+    struct TestString
+    {
+        char const* expr;
+        char const* sExpr;
+    }; 
+    static TestString testExprStrings[] =
+    {
+        { "a.val+b[5]+10", "(+ (+ (. a val) ([] b 5)) 10)" },
+        { "func('test!', {1.5, 3.0})", "(call func ('test!', ({} 1.5, 3)))" },
+        { "a*b+c", "(+ (* a b) c)" },
+        { "a+b*c", "(+ a (* b c))" },
+        { "(a+b)*-c", "(* (+ a b) (- c))" },
+        { "a && b || c ? (&func)() : &func", "((|| (&& a b) c) ? (call (& func) ()) : (& func))" },
+    };
     {
         int i = 0;
         Lexer lexer;
@@ -97,13 +102,29 @@ void RunTests()
 
         InitTestMemory();
 
-        lexer = Lexer( String( testExprStrings[i++] ), "" );
-        NextToken( &lexer );
-        expr = ParseExpr( &lexer );
-        ASSERT( expr->kind == Expr::Binary );
+        for( TestString const& t : testExprStrings )
+        {
+            char buf[256] = {};
 
-        int a = 42;
+            lexer = Lexer( String( t.expr ), "" );
+            NextToken( &lexer );
+            expr = ParseExpr( &lexer );
+
+            char* outBuf = buf;
+            sz len = ARRAYCOUNT(buf);
+            DebugPrintSExpr( expr, outBuf, len );
+
+            globalPlatform.Print( "%s\n", buf );
+            ASSERT( StringsEqual( t.sExpr, buf ) );
+        }
+
+        __debugbreak();
     }
+
+static char const* testDeclStrings[] =
+{
+    "a: int = 42;",
+};
 
 }
 

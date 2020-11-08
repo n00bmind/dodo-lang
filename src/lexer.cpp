@@ -3,6 +3,7 @@
     x( Struct,  "struct" ) \
     x( Enum,    "enum" ) \
     x( Sizeof,  "sizeof" ) \
+    x( Return,  "return" ) \
 
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
@@ -124,11 +125,15 @@ internal void Error( Lexer* lexer, char const* fmt, ... )
     va_list arg_list;
     va_start( arg_list, fmt );
 
-    vfprintf( stderr, fmt, arg_list );
+    globalPlatform.ErrorVA( fmt, arg_list );
     va_end( arg_list );
 
     lexer->error = true;
     globalRunning = false;
+
+#if DEBUG
+    __debugbreak();
+#endif
 }
 
 #define PARSE_ERROR( token, msg, ... ) Error( lexer, "%s(%d,%d): Error: "msg"\n", \
@@ -235,11 +240,12 @@ internal void AdvanceNewline( Lexer* lexer, char c0, char c1 )
     lexer->pos.columnNumber = 1;
 }
 
-internal Token NextTokenRaw( Lexer* lexer )
+internal void NextTokenRaw( Lexer* lexer )
 {
+    Token& token = lexer->token;
     char const*& stream = lexer->stream.data;
 
-    Token token = {};
+    token = {};
     token.text = lexer->stream;
     token.pos = lexer->pos;
 
@@ -555,8 +561,6 @@ internal Token NextTokenRaw( Lexer* lexer )
     }
 
     token.text.length = I32( lexer->stream.data - token.text.data );
-
-    return token;
 }
 
 Token const& NextToken( Lexer* lexer )
@@ -564,7 +568,7 @@ Token const& NextToken( Lexer* lexer )
     Token& token = lexer->token;
     while( true )
     {
-        token = NextTokenRaw( lexer );
+        NextTokenRaw( lexer );
         if( token.kind == TokenKind::Spacing ||
             token.kind == TokenKind::Newline ||
             token.kind == TokenKind::Comment )
@@ -590,21 +594,16 @@ Token const& NextToken( Lexer* lexer )
     return token;
 }
 
-Token RequireToken( TokenKind::Enum wantedType, Lexer* lexer )
+internal Token PeekToken( Lexer* lexer )
 {
-    Token token = NextToken( lexer );
-
-    if( token.kind != wantedType )
-    {
-        PARSE_ERROR( token, "Unexpected token type (wanted '%s', got '%s')",
-               TokenKind::Values::names[wantedType], TokenKind::Values::names[token.kind] );
-    }
-
-    return token;
+    Lexer temp = *lexer;
+    Token result = NextToken( &temp );
+    return result;
 }
 
-void EnsureToken( TokenKind::Enum wantedKind, Token const& token, Lexer* lexer )
+void RequireToken( TokenKind::Enum wantedKind, Lexer* lexer )
 {
+    Token const& token = lexer->token;
     if( token.kind != wantedKind )
     {
         PARSE_ERROR( token, "Unexpected token type (wanted '%s', got '%s')",
@@ -620,13 +619,6 @@ bool MatchToken( TokenKind::Enum wantedKind, Token const& token )
 bool MatchKeyword( int kw, Token const& token )
 {
     return token.ident == globalKeywords[ kw ];
-}
-
-internal Token PeekToken( Lexer* lexer )
-{
-    Lexer temp = *lexer;
-    Token result = NextToken( &temp );
-    return result;
 }
 
 #if !CFG_RELEASE

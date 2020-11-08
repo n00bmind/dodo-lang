@@ -9,6 +9,8 @@ typedef PLATFORM_FREE(PlatformFree);
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);
+#define PLATFORM_PRINT_VA(name) void name( const char *fmt, va_list args )
+typedef PLATFORM_PRINT_VA(PlatformPrintVAFunc);
 
 
 #define PLATFORM_PATH_MAX 1024
@@ -20,6 +22,8 @@ struct PlatformAPI
     PlatformReadEntireFileFunc* ReadEntireFile;
     PlatformPrintFunc* Print;
     PlatformPrintFunc* Error;
+    PlatformPrintVAFunc* PrintVA;
+    PlatformPrintVAFunc* ErrorVA;
 
 #if 0
 #if !RELEASE

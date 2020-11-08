@@ -30,6 +30,7 @@ struct CompoundField
 {
     enum Kind
     {
+        Default,
         Name,
         Index,
     };
@@ -49,7 +50,6 @@ struct Expr
     enum Kind
     {
         None,
-        Paren,
         Int,
         Float,
         Str,
@@ -63,8 +63,8 @@ struct Expr
         Binary,
         Ternary,
         Sizeof,
-        Typeof,
-        OffsetOf,
+        //Typeof,
+        //OffsetOf,
     };
 
     SourcePos pos;

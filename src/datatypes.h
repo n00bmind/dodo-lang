@@ -34,6 +34,11 @@ struct Array
         capacity = bufferCount;
     }
 
+    inline T*       begin()         { return data; }
+    inline const T* begin() const   { return data; }
+    inline T*       end()           { return data + count; }
+    inline const T* end() const     { return data + count; }
+
     void Resize( i32 new_count )
     {
         ASSERT( new_count >= 0 && new_count <= capacity );

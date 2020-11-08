@@ -126,3 +126,8 @@ bool StringsEqual( String const& a, char const* b )
 {
     return b[ a.length ] == 0 && strncmp( a.data, b, Sz( a.length ) ) == 0;
 }
+
+bool StringsEqual( char const* a, char const* b )
+{
+    return strcmp( a, b ) == 0;
+}

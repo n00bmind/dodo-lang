@@ -181,6 +181,9 @@ Expr* NewTernaryExpr( SourcePos const& pos, Expr* cond, Expr* thenExpr, Expr* el
     return result;
 }
 
+// NOTE All ParseXXXExpr() functions leave the token "cursor" at the next immediate token after the expression
+// (This is required as sometimes we don't know whether an expression has finished until we find a token that's not part of it)
+// (I guess we could PeekToken() in those cases, but this seems simpler?)
 Expr* ParseExpr( Lexer* lexer );
 
 CompoundField ParseCompoundFieldExpr( Lexer* lexer )
@@ -194,7 +197,9 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
         NextToken( lexer );
         Expr* indexExpr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseBracket, lexer );
+        NextToken( lexer );
         RequireToken( TokenKind::Assign, lexer );
+        NextToken( lexer );
         Expr* valueExpr = ParseExpr( lexer );
 
         if( lexer->IsValid() )
@@ -206,18 +211,25 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
             result.kind = CompoundField::Index;
         }
     }
-    else if( MatchToken( TokenKind::Name, token ) )
-    {
-        char const* name = token.ident;
-        NextToken( lexer );
-        RequireToken( TokenKind::Assign, lexer );
-        Expr* valueExpr = ParseExpr( lexer );
-
-        if( lexer->IsValid() )
-            result = { pos, name, valueExpr, CompoundField::Name };
-    }
     else
-        PARSE_ERROR( token, "Unrecognized initializer type in compound literal. Must be either a field name or an index" );
+    {
+        Expr* expr = ParseExpr( lexer );
+        if( MatchToken( TokenKind::Assign, token ) )
+        {
+            if( expr->kind == Expr::Name )
+            {
+                NextToken( lexer );
+                Expr* valueExpr = ParseExpr( lexer );
+
+                if( lexer->IsValid() )
+                    result = { pos, expr->name, valueExpr, CompoundField::Name };
+            }
+            else
+                PARSE_ERROR( token, "Unrecognized initializer type in compound literal. Must be either a field name or an index" );
+        }
+        else
+            result = { pos, nullptr, expr, CompoundField::Default };
+    }
 
     return result;
 }
@@ -228,6 +240,7 @@ Expr* ParseCompoundExpr( Lexer* lexer )
     BucketArray<CompoundField> fields( &globalTmpArena, 16 );
 
     RequireToken( TokenKind::OpenBrace, lexer );
+    NextToken( lexer );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
         CompoundField field = ParseCompoundFieldExpr( lexer );
@@ -235,8 +248,10 @@ Expr* ParseCompoundExpr( Lexer* lexer )
 
         if( !MatchToken( TokenKind::Comma, lexer->token ) )
             break;
+        NextToken( lexer );
     }
     RequireToken( TokenKind::CloseBrace, lexer );
+    NextToken( lexer );
 
     Expr* expr = nullptr;
     if( lexer->IsValid() )
@@ -272,9 +287,9 @@ Expr* ParseBaseExpr( Lexer* lexer )
     {
         NextToken( lexer );
         RequireToken( TokenKind::OpenParen, lexer );
+        NextToken( lexer );
         Expr* typeExpr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseParen, lexer );
-        advance = false;
 
         if( lexer->IsValid() )
             expr = NewSizeofExpr( pos, typeExpr );
@@ -289,10 +304,15 @@ Expr* ParseBaseExpr( Lexer* lexer )
         NextToken( lexer );
         expr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseParen, lexer );
-        advance = false;
     }
     else
-        PARSE_ERROR( token, "Unexpected token '%s' in expression", TokenKind::Values::names[ token.kind ] );
+    {
+        char const* desc = TokenKind::Values::names[ token.kind ];
+        if( token.kind == TokenKind::Name || token.kind == TokenKind::Keyword )
+            desc = token.ident;
+
+        PARSE_ERROR( token, "Unexpected token '%s' in expression", desc );
+    }
 
     if( advance && lexer->IsValid() )
         NextToken( lexer );
@@ -303,9 +323,11 @@ Expr* ParseBaseExpr( Lexer* lexer )
 Expr* ParsePostfixExpr( Lexer* lexer )
 {
     Expr* expr = ParseBaseExpr( lexer );
+
     while( lexer->token.HasFlag( TokenFlags::PostfixOp ) )
     {
         SourcePos pos = lexer->token.pos;
+
         if( MatchToken( TokenKind::OpenParen, lexer->token ) )
         {
             BucketArray<Expr*> args( &globalTmpArena, 16 );
@@ -315,7 +337,10 @@ Expr* ParsePostfixExpr( Lexer* lexer )
             {
                 args.Push( ParseExpr( lexer ) );
                 while( MatchToken( TokenKind::Comma, lexer->token ) )
+                {
+                    NextToken( lexer );
                     args.Push( ParseExpr( lexer ) );
+                }
             }
             RequireToken( TokenKind::CloseParen, lexer );
 
@@ -324,17 +349,23 @@ Expr* ParsePostfixExpr( Lexer* lexer )
         }
         else if( MatchToken( TokenKind::OpenBracket, lexer->token ) )
         {
+            NextToken( lexer );
             Expr* index = ParseExpr( lexer );
             RequireToken( TokenKind::CloseBracket, lexer );
+
             if( lexer->IsValid() )
                 expr = NewIndexExpr( pos, expr, index );
         }
         else if( MatchToken( TokenKind::Dot, lexer->token ) )
         {
-            Token field = RequireToken( TokenKind::Name, lexer );
+            Token field = NextToken( lexer );
+            RequireToken( TokenKind::Name, lexer );
+
             if( lexer->IsValid() )
                 expr = NewFieldExpr( pos, expr, field.ident );
         }
+
+        NextToken( lexer );
     }
     
     return expr;
@@ -346,8 +377,8 @@ Expr* ParseUnaryExpr( Lexer* lexer )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
-        NextToken( lexer );
 
+        NextToken( lexer );
         return NewUnaryExpr( pos, op, ParseUnaryExpr( lexer ) );
     }
     else
@@ -357,12 +388,13 @@ Expr* ParseUnaryExpr( Lexer* lexer )
 Expr* ParseMulExpr( Lexer* lexer )
 {
     Expr* expr = ParseUnaryExpr( lexer );
+
     while( lexer->token.HasFlag( TokenFlags::MulOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
-        NextToken( lexer );
 
+        NextToken( lexer );
         expr = NewBinaryExpr( pos, op, expr, ParseUnaryExpr( lexer ) );
     }
 
@@ -372,12 +404,13 @@ Expr* ParseMulExpr( Lexer* lexer )
 Expr* ParseAddExpr( Lexer* lexer )
 {
     Expr* expr = ParseMulExpr( lexer );
+
     while( lexer->token.HasFlag( TokenFlags::AddOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
-        NextToken( lexer );
 
+        NextToken( lexer );
         expr = NewBinaryExpr( pos, op, expr, ParseMulExpr( lexer ) );
     }
 
@@ -387,12 +420,13 @@ Expr* ParseAddExpr( Lexer* lexer )
 Expr* ParseCmpExpr( Lexer* lexer )
 {
     Expr* expr = ParseAddExpr( lexer );
+
     while( lexer->token.HasFlag( TokenFlags::CmpOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
-        NextToken( lexer );
 
+        NextToken( lexer );
         expr = NewBinaryExpr( pos, op, expr, ParseAddExpr( lexer ) );
     }
 
@@ -402,6 +436,7 @@ Expr* ParseCmpExpr( Lexer* lexer )
 Expr* ParseAndExpr( Lexer* lexer )
 {
     Expr* expr = ParseCmpExpr( lexer );
+
     while( MatchToken( TokenKind::LogicAnd, lexer->token ) )
     {
         SourcePos pos = lexer->token.pos;
@@ -416,6 +451,7 @@ Expr* ParseAndExpr( Lexer* lexer )
 Expr* ParseOrExpr( Lexer* lexer )
 {
     Expr* expr = ParseAndExpr( lexer );
+
     while( MatchToken( TokenKind::LogicOr, lexer->token ) )
     {
         SourcePos pos = lexer->token.pos;
@@ -430,11 +466,15 @@ Expr* ParseOrExpr( Lexer* lexer )
 Expr* ParseTernaryExpr( Lexer* lexer )
 {
     Expr* expr = ParseOrExpr( lexer );
+
     if( MatchToken( TokenKind::Question, lexer->token ) )
     {
         NextToken( lexer );
         Expr* thenExpr = ParseTernaryExpr( lexer );
+
         RequireToken( TokenKind::Colon, lexer );
+
+        NextToken( lexer );
         Expr* elseExpr = ParseTernaryExpr( lexer );
 
         if( lexer->IsValid() )
@@ -447,6 +487,117 @@ Expr* ParseExpr( Lexer* lexer )
 {
     return ParseTernaryExpr( lexer );
 }
+
+#define APPEND(fmt, ...) \
+{ \
+    len = snprintf( outBuf, maxLen, fmt, ##__VA_ARGS__ ); \
+    outBuf += len; \
+    maxLen -= len; \
+} 
+
+void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
+{
+    int len = 0;
+    switch( expr->kind )
+    {
+        case Expr::Int:
+        {
+            APPEND( "%llu", expr->literal.intValue );
+        } break;
+        case Expr::Float:
+        {
+            APPEND( "%.16g", expr->literal.floatValue );
+        } break;
+        case Expr::Str:
+        {
+            APPEND( "'%.*s'", expr->literal.strValue.length, expr->literal.strValue.data );
+        } break;
+        case Expr::Name:
+        {
+            APPEND( "%s", expr->name );
+        } break;
+        case Expr::Call:
+        {
+            APPEND( "(call " );
+            DebugPrintSExpr( expr->call.func, outBuf, maxLen );
+            APPEND( " (" );
+            for( int i = 0; i < expr->call.args.count; ++i )
+            {
+                if( i )
+                    APPEND( ", " );
+                DebugPrintSExpr( expr->call.args[i], outBuf, maxLen );
+            }
+            APPEND( "))" );
+        } break;
+        case Expr::Index:
+        {
+            APPEND( "([] " );
+            DebugPrintSExpr( expr->index.base, outBuf, maxLen );
+            APPEND( " " );
+            DebugPrintSExpr( expr->index.index, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Expr::Field:
+        {
+            APPEND( "(. " );
+            DebugPrintSExpr( expr->field.base, outBuf, maxLen );
+            APPEND( " %s)", expr->field.name );
+        } break;
+        case Expr::Compound:
+        {
+            APPEND( "({} " );
+            int i = 0;
+            for( CompoundField const& f : expr->compound.fields )
+            {
+                if( i++ )
+                    APPEND( ", " );
+                if( f.kind == CompoundField::Index )
+                {
+                    APPEND( "[" );
+                    DebugPrintSExpr( f.index, outBuf, maxLen );
+                    APPEND( "]: " );
+                }
+                else if( f.kind == CompoundField::Name )
+                {
+                    APPEND( "%s: ", f.name );
+                }
+                DebugPrintSExpr( f.initValue, outBuf, maxLen );
+            }
+            APPEND( ")" );
+        } break;
+        case Expr::Unary:
+        {
+            APPEND( "(%s ", TokenKind::Values::names[ expr->unary.op ] );
+            DebugPrintSExpr( expr->unary.expr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Expr::Binary:
+        {
+            APPEND( "(%s ", TokenKind::Values::names[ expr->binary.op ] );
+            DebugPrintSExpr( expr->binary.left, outBuf, maxLen );
+            APPEND( " " );
+            DebugPrintSExpr( expr->binary.right, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Expr::Ternary:
+        {
+            APPEND( "(" );
+            DebugPrintSExpr( expr->ternary.cond, outBuf, maxLen );
+            APPEND( " ? " );
+            DebugPrintSExpr( expr->ternary.thenExpr, outBuf, maxLen );
+            APPEND( " : " );
+            DebugPrintSExpr( expr->ternary.elseExpr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Expr::Sizeof:
+        {
+            APPEND( "(sizeof " );
+            DebugPrintSExpr( expr->sizeof_.expr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+    }
+}
+#undef APPEND
 
 
 Decl* ParseStructDecl( SourcePos const& pos, Lexer* lexer )
@@ -497,7 +648,7 @@ Decl* ParseDecl( Lexer* lexer )
     else
     {
         // Try parsing a var / const
-        EnsureToken( TokenKind::Name, token, lexer );
+        RequireToken( TokenKind::Name, lexer );
         char const* name = token.ident;
         RequireToken( TokenKind::Colon, lexer );
 
