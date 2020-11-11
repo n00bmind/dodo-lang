@@ -59,6 +59,8 @@ ________________________________________________________________________________
 
 - A way to declare an enum as a "flags" bitfield, with correct automatic values and convenient operations to test/set
 
+- A way to tag pure functions?
+
 ________________________________________________________________________________ 
 
 

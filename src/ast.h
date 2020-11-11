@@ -1,3 +1,4 @@
+struct Expr;
 
 struct TypeSpec
 {
@@ -8,8 +9,8 @@ struct TypeSpec
         Func,
         Array,
         Pointer,
-        Const,
-        Tuple,
+        //String,       // This is basically the same as an array of byte. Could just be an alias?
+        //Tuple,      // ?
     };
     
     SourcePos pos;
@@ -18,13 +19,18 @@ struct TypeSpec
 
     union
     {
-        char const* name;
-        //...
+        struct
+        {
+            ::Array<TypeSpec*> args;
+            TypeSpec* returnType;
+            // TODO 
+            //bool hasVarargs;
+        } func;
+        ::Array<char const*> names;
+        Expr* arraySize;
     };
 };
 
-
-struct Expr;
 
 struct CompoundField
 {
@@ -134,43 +140,61 @@ struct Expr
 struct StmtList;
 
 
-struct FuncArgDecl
+struct FuncArg
 {
     SourcePos pos;
-    String name;
+    char const* name;
     TypeSpec* type;
 };
 
 struct EnumItem
 {
     SourcePos pos;
-    String name;
+    char const* name;
     Expr* initValue;
+    u32 index;
 };
+
+struct Decl;
 
 struct AggregateItem
 {
+    enum Kind
+    {
+        Field,
+        SubAggregate,
+    };
+
     SourcePos pos;
-    String name;
-    TypeSpec* type;
+    Kind kind;
+    union
+    {
+        struct
+        {
+            Array<char const*> names;
+            TypeSpec* type;
+        };
+        // TODO Make this just a normal aggregate Decl with an 'owner' pointing to the enclosing aggregate?
+        Decl* subAggregate;
+    };
 };
 
 struct Decl
 {
-    enum class Kind
+    enum Kind
     {
         None,
         Enum,
         Struct,
         Union,
         Var,
-        Const,  //?
+        //Const,  //?
         Func,
         Import, //?
     };
 
     SourcePos pos;
-    String name;
+    char const* name;
     Kind kind;
 
     union
@@ -192,10 +216,11 @@ struct Decl
         } var;
         struct
         {
-            Array<FuncArgDecl> args;
-            TypeSpec* returnType;
             // TODO Lambdas?
-            // Varargs
+            // TODO Varargs
+            // TODO Multiple return types
+            Array<FuncArg> args;
+            TypeSpec* returnType;
             StmtList* body;
         } func;
     };
@@ -263,6 +288,11 @@ struct Stmt
 struct StmtList
 {
     SourcePos pos;
+    // TODO Test with a big enough parsed file what happens when we make Stmt be pointers instead of inline inside the array..
+    // Does that increase cache efficiency or reduce it?
+    // When each Stmt is a pointer, it will live pretty close in memory to the Expr etc. that form it, however when they're
+    // inline they're reallocated at the very end of the StmtList that contains them (to make them all contiguous), so in this
+    // case the optimum solution could well be counter intuitive.
     Array<Stmt> stmts;
 };
 

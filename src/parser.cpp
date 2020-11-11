@@ -2,15 +2,16 @@ TypeSpec* NewTypeSpec( SourcePos const& pos, TypeSpec::Kind kind )
 {
     TypeSpec* result = PUSH_STRUCT( &globalArena, TypeSpec );
     result->pos = pos;
-    result->kind = TypeSpec::Name;
+    result->kind = kind;
 
     return result;
 }
 
-TypeSpec* NewNameTypeSpec( SourcePos const& pos, char const* name )
+TypeSpec* NewNameTypeSpec( SourcePos const& pos, BucketArray<char const*> const& names )
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Name );
-    result->name = name;
+    new( &result->names ) Array<char const*>( &globalArena, names.count );
+    names.CopyTo( &result->names );
 
     return result;
 }
@@ -23,28 +24,110 @@ TypeSpec* NewPtrTypeSpec( SourcePos const& pos, TypeSpec* ofType )
     return result;
 }
 
+TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<TypeSpec*> const& args, TypeSpec* returnType )
+{
+    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Func );
+    new( &result->func.args ) Array<TypeSpec*>( &globalArena, args.count );
+    args.CopyTo( &result->func.args );
+    result->func.returnType = returnType;
+
+    return result;
+}
+
+TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size )
+{
+    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Array );
+    result->base = ofType;
+    result->arraySize = size;
+
+    return result;
+}
+
+// NOTE All ParseXXX() functions leave the token "cursor" at the next immediate token after the expression
+// (This is required as sometimes we don't know whether an expression has finished until we find a token that's not part of it)
+// (I guess we could PeekToken() in those cases, but this seems simpler?)
+Expr* ParseExpr( Lexer* lexer );
+TypeSpec* ParseTypeSpec( Lexer* lexer );
+
 TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
 {
+    TypeSpec* type = nullptr;
+
     Token const& token = lexer->token;
-    SourcePos const& pos = token.pos;
+    SourcePos pos = token.pos;
 
     if( MatchToken( TokenKind::Name, token ) )
     {
-        return NewNameTypeSpec( pos, token.ident );
+        BucketArray<char const*> names( &globalTmpArena, 8 );
+
+        names.Push( token.ident );
+        NextToken( lexer );
+        while( MatchToken( TokenKind::Dot, token ) )
+        {
+            NextToken( lexer );
+            RequireToken( TokenKind::Name, lexer );
+
+            names.Push( token.ident );
+            NextToken( lexer );
+        }
+
+        if( lexer->IsValid() )
+            type = NewNameTypeSpec( pos, names );
+    }
+    else if( MatchToken( TokenKind::OpenParen, token ) )
+    {
+        // Function type
+        BucketArray<TypeSpec*> args( &globalTmpArena, 8 );
+
+        NextToken( lexer );
+        while( !MatchToken( TokenKind::CloseParen, token ) )
+        {
+            TypeSpec* arg = ParseTypeSpec( lexer );
+            if( !MatchToken( TokenKind::Comma, token ) )
+                break;
+            NextToken( lexer );
+        }
+        RequireToken( TokenKind::CloseParen, lexer );
+
+        TypeSpec* returnType = nullptr;
+        if( MatchToken( TokenKind::RightArrow, token ) )
+        {
+            NextToken( lexer );
+            returnType = ParseTypeSpec( lexer );
+        }
+
+        // TODO Capture / closure / restrict
+
+        if( lexer->IsValid() )
+            type = NewFuncTypeSpec( pos, args, returnType );
     }
 
-    return nullptr;
+    return type;
 }
 
 TypeSpec* ParseTypeSpec( Lexer* lexer )
 {
-    Token const& token = lexer->token;
-    SourcePos const& pos = lexer->token.pos;
-
     TypeSpec* type = nullptr;
+
+    Token const& token = lexer->token;
+    SourcePos pos = token.pos;
+
     if( MatchToken( TokenKind::OpenBracket, token ) )
     {
+        Expr* size = nullptr;
 
+        NextToken( lexer );
+        if( !MatchToken( TokenKind::CloseBracket, token ) )
+        {
+            size = ParseExpr( lexer );
+        }
+        RequireToken( TokenKind::CloseBracket, lexer );
+
+        NextToken( lexer );
+        TypeSpec* ofType = ParseTypeSpec( lexer );
+
+        if( lexer->IsValid() )
+            type = NewArrayTypeSpec( pos, ofType, size );
     }
     else if( MatchToken( TokenKind::Asterisk, token ) )
     {
@@ -181,15 +264,10 @@ Expr* NewTernaryExpr( SourcePos const& pos, Expr* cond, Expr* thenExpr, Expr* el
     return result;
 }
 
-// NOTE All ParseXXXExpr() functions leave the token "cursor" at the next immediate token after the expression
-// (This is required as sometimes we don't know whether an expression has finished until we find a token that's not part of it)
-// (I guess we could PeekToken() in those cases, but this seems simpler?)
-Expr* ParseExpr( Lexer* lexer );
-
 CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 {
     Token const& token = lexer->token;
-    SourcePos const& pos = lexer->token.pos;
+    SourcePos pos = lexer->token.pos;
 
     CompoundField result = {};
     if( MatchToken( TokenKind::OpenBracket, token ) )
@@ -236,7 +314,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 
 Expr* ParseCompoundExpr( Lexer* lexer )
 {
-    SourcePos const& pos = lexer->token.pos;
+    SourcePos pos = lexer->token.pos;
     BucketArray<CompoundField> fields( &globalTmpArena, 16 );
 
     RequireToken( TokenKind::OpenBrace, lexer );
@@ -262,7 +340,7 @@ Expr* ParseCompoundExpr( Lexer* lexer )
 Expr* ParseBaseExpr( Lexer* lexer )
 {
     Token const& token = lexer->token;
-    SourcePos const& pos = token.pos;
+    SourcePos pos = token.pos;
 
     bool advance = true;
     Expr* expr = nullptr;
@@ -488,6 +566,392 @@ Expr* ParseExpr( Lexer* lexer )
     return ParseTernaryExpr( lexer );
 }
 
+
+AggregateItem NewSubAggregate( SourcePos const& pos, Decl* subAggregate )
+{
+    AggregateItem result = {};
+    result.pos = pos;
+    result.kind = AggregateItem::SubAggregate;
+    result.subAggregate = subAggregate;
+
+    return result;
+}
+
+AggregateItem NewAggregateField( SourcePos const& pos, BucketArray<char const*> const& names, TypeSpec* type )
+{
+    AggregateItem result = {};
+    result.pos = pos;
+    result.kind = AggregateItem::Field;
+    new( &result.names ) Array<char const*>( &globalArena, names.count );
+    names.CopyTo( &result.names );
+    result.type = type;
+
+    return result;
+}
+
+Decl* ParseEnumDecl( Lexer* lexer );
+Decl* ParseAggregateDecl( Lexer* lexer, int kind );
+
+AggregateItem ParseAggregateItemDecl( Lexer* lexer )
+{
+    SourcePos pos = lexer->pos;
+    AggregateItem result = {};
+
+    if( MatchKeyword( Keyword::Enum, lexer->token ) )
+    {
+        Decl* subAggregate = ParseEnumDecl( lexer );
+        result = NewSubAggregate( pos, subAggregate );
+    }
+    else if( MatchKeyword( Keyword::Struct, lexer->token ) )
+    {
+        Decl* subAggregate = ParseAggregateDecl( lexer, Keyword::Struct );
+        result = NewSubAggregate( pos, subAggregate );
+    }
+    else
+    {
+        // Parse field(s)
+        BucketArray<char const*> names( &globalTmpArena, 16 );
+        
+        RequireToken( TokenKind::Name, lexer );
+        names.Push( lexer->token.ident );
+
+        NextToken( lexer );
+        while( MatchToken( TokenKind::Comma, lexer->token ) )
+        {
+            NextToken( lexer );
+            RequireToken( TokenKind::Name, lexer );
+            names.Push( lexer->token.ident );
+            
+            NextToken( lexer );
+        }
+        RequireToken( TokenKind::Colon, lexer );
+
+        NextToken( lexer );
+        TypeSpec* type = ParseTypeSpec( lexer );
+        RequireToken( TokenKind::Semicolon, lexer );
+        NextToken( lexer );
+
+        // TODO Parse this as several separate items with the same type instead?
+        if( lexer->IsValid() )
+            result = NewAggregateField( pos, names, type );
+    }
+
+    return result;
+}
+
+Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name )
+{
+    Decl* result = PUSH_STRUCT( &globalArena, Decl );
+    result->pos = pos;
+    result->name = name;
+    result->kind = kind;
+
+    return result;
+}
+
+Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, BucketArray<AggregateItem> const& items )
+{
+    Decl::Kind declKind = Decl::None;
+    switch( kind )
+    {
+        case Keyword::Struct: declKind = Decl::Struct; break;
+        //case Keyword::Union: declKind = Decl::Union break;
+    }
+
+    Decl* result = nullptr;
+    if( declKind != Decl::None )
+    {
+        result = NewDecl( pos, declKind, name );
+        new( &result->aggregate.items ) Array<AggregateItem>( &globalArena, items.count );
+        items.CopyTo( &result->aggregate.items );
+    }
+
+    return result;
+}
+
+Decl* ParseAggregateDecl( Lexer* lexer, int kind )
+{
+    SourcePos pos = lexer->pos;
+    
+    Token token = NextToken( lexer );
+    RequireToken( TokenKind::Name, lexer );
+    char const* name = token.ident;
+
+    NextToken( lexer );
+    RequireToken( TokenKind::OpenBrace, lexer );
+    NextToken( lexer );
+
+    BucketArray<AggregateItem> items( &globalTmpArena, 16 );
+    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
+    {
+        items.Push( ParseAggregateItemDecl( lexer ) );
+    }
+
+    RequireToken( TokenKind::CloseBrace, lexer );
+    NextToken( lexer );
+
+    Decl* result = nullptr;
+    if( lexer->IsValid() )
+    {
+        result = NewAggregateDecl( pos, kind, name, items );
+        if( !result )
+            PARSE_ERROR( token, "Unsupported aggregate type '%s'", Keyword::Values::names[ kind ] );
+    }
+
+    return result;
+}
+
+EnumItem ParseEnumItemDecl( Lexer* lexer )
+{
+    Token const& token = lexer->token;
+    SourcePos pos = token.pos;
+    
+    RequireToken( TokenKind::Name, lexer );
+    char const* name = token.ident;
+
+    Expr* init = nullptr;
+    NextToken( lexer );
+    if( MatchToken( TokenKind::Assign, lexer->token ) )
+    {
+        NextToken( lexer );
+        init = ParseExpr( lexer );
+    }
+
+    EnumItem result = {};
+    if( lexer->IsValid() )
+        result = { pos, name, init };
+
+    return result;
+}
+
+Decl* NewEnumDecl( SourcePos const& pos, char const* name, TypeSpec* type, BucketArray<EnumItem> const& items )
+{
+    Decl* result = NewDecl( pos, Decl::Enum, name );
+    new( &result->enum_.items ) Array<EnumItem>( &globalArena, items.count );
+    items.CopyTo( &result->enum_.items );
+    result->enum_.type = type;
+
+    return result;
+}
+
+Decl* ParseEnumDecl( Lexer* lexer )
+{
+    SourcePos pos = lexer->pos;
+
+    Token token = NextToken( lexer );
+    RequireToken( TokenKind::Name, lexer );
+    char const* name = token.ident;
+
+    TypeSpec* type = nullptr;
+
+    NextToken( lexer );
+    if( MatchToken( TokenKind::Colon, lexer->token ) )
+    {
+        NextToken( lexer );
+        type = ParseTypeSpec( lexer );
+    }
+
+    RequireToken( TokenKind::OpenBrace, lexer );
+    NextToken( lexer );
+
+    BucketArray<EnumItem> items( &globalTmpArena, 16 );
+    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
+    {
+        items.Push( ParseEnumItemDecl( lexer ) );
+        if( !MatchToken( TokenKind::Comma, lexer->token ) )
+            break;
+
+        RequireToken( TokenKind::Comma, lexer );
+        NextToken( lexer );
+    }
+
+    RequireToken( TokenKind::CloseBrace, lexer );
+    NextToken( lexer );
+
+    Decl* result = nullptr;
+    if( lexer->IsValid() )
+        result = NewEnumDecl( pos, name, type, items );
+
+    return result;
+}
+
+FuncArg ParseFuncArg( Lexer* lexer )
+{
+    FuncArg result = {};
+    SourcePos pos = lexer->pos;
+
+    RequireToken( TokenKind::Name, lexer );
+    char const* name = lexer->token.ident;
+
+    NextToken( lexer );
+    RequireToken( TokenKind::Colon, lexer );
+
+    NextToken( lexer );
+    TypeSpec* type = ParseTypeSpec( lexer );
+
+    if( lexer->IsValid() )
+        result = { pos, name, type };
+
+    return result;
+}
+
+Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList* body, TypeSpec* returnType )
+{
+    Decl* result = NewDecl( pos, Decl::Func, name );
+    new( &result->func.args ) Array<FuncArg>( &globalArena, args.count );
+    args.CopyTo( &result->func.args );
+    result->func.body = body;
+    result->func.returnType = returnType;
+
+    return result;
+}
+
+Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr, bool isConst )
+{
+    Decl* result = NewDecl( pos, Decl::Var, name );
+    result->var.type = type;
+    result->var.initExpr = initExpr;
+    result->var.isConst = isConst;
+
+    return result;
+}
+
+StmtList* ParseStmtBlock( Lexer* lexer );
+
+Decl* ParseDecl( Lexer* lexer )
+{
+    Token const& token = lexer->token;
+    SourcePos pos = token.pos;
+
+    if( MatchToken( TokenKind::Keyword, token ) )
+    {
+        // TODO Unions
+        if( MatchKeyword( Keyword::Struct, token ) )
+            return ParseAggregateDecl( lexer, Keyword::Struct );
+        else if( MatchKeyword( Keyword::Enum, token ) )
+            return ParseEnumDecl( lexer );
+
+        // TODO Directives
+    }
+    else
+    {
+        RequireToken( TokenKind::Name, lexer );
+        char const* name = lexer->token.ident;
+        NextToken( lexer );
+        RequireToken( TokenKind::Colon, lexer );
+
+        bool isConst = false;
+        Expr* initExpr = nullptr;
+        TypeSpec* type = nullptr;
+
+        NextToken( lexer );
+        if( MatchToken( TokenKind::Colon, lexer->token ) )
+        {
+            NextToken( lexer );
+            if( MatchToken( TokenKind::OpenParen, lexer->token ) )
+            {
+                // Func
+                BucketArray<FuncArg> args( &globalTmpArena, 16 );
+
+                NextToken( lexer );
+                if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
+                {
+                    args.Push( ParseFuncArg( lexer ) );
+                    while( MatchToken( TokenKind::Comma, lexer->token ) )
+                    {
+                        NextToken( lexer );
+                        args.Push( ParseFuncArg( lexer ) );
+                    }
+                    RequireToken( TokenKind::CloseParen, lexer );
+                }
+
+                NextToken( lexer );
+                TypeSpec* returnType = nullptr;
+                if( MatchToken( TokenKind::RightArrow, lexer->token ) )
+                {
+                    NextToken( lexer );
+                    returnType = ParseTypeSpec( lexer );
+                }
+
+                RequireToken( TokenKind::OpenBrace, lexer );
+                StmtList* body = nullptr;
+                if( lexer->IsValid() )
+                    body = ParseStmtBlock( lexer );
+
+                if( lexer->IsValid() )
+                    return NewFuncDecl( pos, name, args, body, returnType );
+            }
+            else
+            {
+                // Const
+                // TODO Type specifier?
+                initExpr = ParseExpr( lexer );
+                isConst = true;
+
+                RequireToken( TokenKind::Semicolon, lexer );
+                NextToken( lexer );
+            }
+        }
+        else
+        {
+            if( !MatchToken( TokenKind::Assign, lexer->token ) )
+                type = ParseTypeSpec( lexer );
+            if( MatchToken( TokenKind::Assign, lexer->token ) )
+            {
+                NextToken( lexer );
+                initExpr = ParseExpr( lexer );
+            }
+
+            RequireToken( TokenKind::Semicolon, lexer );
+            NextToken( lexer );
+        }
+
+        if( lexer->IsValid() )
+            return NewVarDecl( pos, name, type, initExpr, isConst );
+    }
+
+    return nullptr;
+}
+
+StmtList* ParseStmtBlock( Lexer* lexer )
+{
+    // TODO 
+    return nullptr;
+}
+
+
+Array<Decl*> Parse( String const& program, char const* filename )
+{
+    Lexer lexer = Lexer( program, filename );
+
+    ScopedTmpMemory tmpMemory( &globalTmpArena );
+    BucketArray<Decl*> decls( &globalTmpArena, 16, Temporary() );
+
+    while( globalRunning )
+    {
+        Token token = NextToken( &lexer );
+        if( token.kind == TokenKind::EndOfStream )
+            break;
+
+        Decl* decl = ParseDecl( &lexer );
+        if( decl )
+            decls.Push( decl );
+    }
+
+    Array<Decl*> result( &globalArena, decls.count );
+    decls.CopyTo( &result );
+
+    return result;
+}
+
+
+#define INDENT \
+{ \
+    len = snprintf( outBuf, maxLen, "%*s", indent * 4, "" ); \
+    outBuf += len; \
+    maxLen -= len; \
+} 
+
 #define APPEND(fmt, ...) \
 { \
     len = snprintf( outBuf, maxLen, fmt, ##__VA_ARGS__ ); \
@@ -498,6 +962,13 @@ Expr* ParseExpr( Lexer* lexer )
 void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
 {
     int len = 0;
+
+    if( expr == nullptr )
+    {
+        APPEND( "null" );
+        return;
+    }
+
     switch( expr->kind )
     {
         case Expr::Int:
@@ -597,109 +1068,161 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
         } break;
     }
 }
+
+void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
+{
+    int len = 0;
+
+    if( type == nullptr )
+    {
+        APPEND( "null" );
+        return;
+    }
+
+    switch( type->kind )
+    {
+        case TypeSpec::Name:
+        {
+            for( char const* n : type->names )
+            {
+                if( n != type->names[0] )
+                    APPEND( "." );
+                APPEND( "%s", n );
+            }
+        } break;
+        case TypeSpec::Func:
+        {
+            APPEND( "( " );
+            for( TypeSpec* t : type->func.args )
+            {
+                if( t != type->func.args[0] )
+                    APPEND( ", " );
+                DebugPrintTypeSpec( t, outBuf, maxLen );
+            }
+            APPEND( " ) -> " );
+            DebugPrintTypeSpec( type->func.returnType, outBuf, maxLen );
+        } break;
+        case TypeSpec::Array:
+        {
+            APPEND( "[" );
+            if( type->arraySize )
+                DebugPrintSExpr( type->arraySize, outBuf, maxLen );
+            APPEND( "] " );
+        } break;
+        case TypeSpec::Pointer:
+        {
+            APPEND( "*" );
+        } break;
+    }
+
+    if( type->base )
+        DebugPrintTypeSpec( type->base, outBuf, maxLen );
+}
+
+void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
+{
+    int len = 0;
+    switch( decl->kind )
+    {
+        case Decl::Enum:
+        {
+            APPEND( "(enum %s: ", decl->name );
+            DebugPrintTypeSpec( decl->enum_.type, outBuf, maxLen );
+            APPEND( "\n" );
+            indent++;
+            for( auto& it : decl->enum_.items )
+            {
+                INDENT APPEND( "(%s = ", it.name );
+                DebugPrintSExpr( it.initValue, outBuf, maxLen );
+                APPEND( "),\n" );
+            }
+            APPEND( ")\n" );
+            indent--;
+        } break;
+
+        case Decl::Struct:
+        {
+            APPEND( "(struct %s\n", decl->name );
+            indent++;
+            for( auto& it : decl->aggregate.items )
+            {
+                if( it.kind == AggregateItem::Field )
+                {
+                    INDENT APPEND( "(" );
+                    for( char const* n : it.names )
+                    {
+                        if( n != it.names[0] )
+                            APPEND( ", " );
+                        APPEND( "%s", n );
+                    }
+                    APPEND( ": " );
+                    DebugPrintTypeSpec( it.type, outBuf, maxLen );
+                    APPEND( "),\n" );
+                }
+                else
+                    DebugPrintSExpr( it.subAggregate, outBuf, maxLen, indent );
+            }
+            APPEND( ")\n" );
+            indent--;
+        } break;
+
+        case Decl::Union:
+        {
+            APPEND( "(union %s\n", decl->name );
+            indent++;
+            for( auto& it : decl->aggregate.items )
+            {
+                if( it.kind == AggregateItem::Field )
+                {
+                    APPEND( "(" );
+                    for( char const* n : it.names )
+                    {
+                        if( n != it.names[0] )
+                            APPEND( ", " );
+                        APPEND( "%s", n );
+                    }
+                    APPEND( ": " );
+                    DebugPrintTypeSpec( it.type, outBuf, maxLen );
+                    APPEND( "),\n" );
+                }
+                else
+                    DebugPrintSExpr( it.subAggregate, outBuf, maxLen, indent );
+            }
+            APPEND( ")\n" );
+            indent--;
+        } break;
+
+        case Decl::Var:
+        {
+            APPEND( "(%s %s: ", decl->var.isConst ? "const" : "var", decl->name );
+            DebugPrintTypeSpec( decl->var.type, outBuf, maxLen );
+            APPEND( " = " );
+            DebugPrintSExpr( decl->var.initExpr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Decl::Func:
+        {
+            APPEND( "(func %s ( ", decl->name );
+            for( auto& a : decl->func.args )
+            {
+                if( &a != decl->func.args.begin() )
+                    APPEND( ", " );
+                APPEND( "%s: ", a.name );
+                DebugPrintTypeSpec( a.type, outBuf, maxLen );
+            }
+            APPEND( " ) -> " );
+            DebugPrintTypeSpec( decl->func.returnType, outBuf, maxLen );
+            APPEND( "\n" );
+
+            // TODO
+
+        } break;
+        case Decl::Import:
+        {
+
+        } break;
+    }
+}
+
 #undef APPEND
-
-
-Decl* ParseStructDecl( SourcePos const& pos, Lexer* lexer )
-{
-#if 0
-    if( !lexer->IsValid() )
-        return;
-
-    Token token = NextToken( lexer );
-    while( token.kind != TokenKind::CloseBrace );
-    {
-
-        token = NextToken( lexer );
-    }
-#endif
-    return nullptr;
-}
-
-Decl* ParseEnumDecl( SourcePos const& pos, Lexer* lexer )
-{
-#if 0
-    if( !lexer->IsValid() )
-        return;
-
-    Token token = NextToken( lexer );
-    while( token.kind != TokenKind::CloseBrace );
-    {
-
-        token = NextToken( lexer );
-    }
-#endif
-
-    return nullptr;
-}
-
-Decl* ParseDecl( Lexer* lexer )
-{
-    Token token = lexer->token;
-    SourcePos pos = token.pos;
-
-    if( MatchToken( TokenKind::Keyword, token ) )
-    {
-        if( MatchKeyword( Keyword::Struct, token ) )
-            return ParseStructDecl( pos, lexer );
-        else if( MatchKeyword( Keyword::Enum, token ) )
-            return ParseEnumDecl( pos, lexer );
-    }
-    else
-    {
-        // Try parsing a var / const
-        RequireToken( TokenKind::Name, lexer );
-        char const* name = token.ident;
-        RequireToken( TokenKind::Colon, lexer );
-
-        bool isConst = false;
-        Expr* expr = nullptr;
-        TypeSpec* type = nullptr;
-
-        token = NextToken( lexer );
-        if( MatchToken( TokenKind::Colon, token ) )
-            // Const
-            expr = ParseExpr( lexer );
-        else
-        {
-            type = ParseTypeSpec( lexer );
-            token = NextToken( lexer );
-            if( MatchToken( TokenKind::Assign, lexer->token ) )
-                expr = ParseExpr( lexer );
-        }
-        RequireToken( TokenKind::Semicolon, lexer );
-
-        if( lexer->IsValid() )
-        {
-#if 0
-            return NewVarDecl( pos, name, type, expr, isConst );
-#endif
-        }
-    }
-
-    return nullptr;
-}
-
-Array<Decl*> Parse( String const& program, char const* filename )
-{
-    Lexer lexer = Lexer( program, filename );
-
-    ScopedTmpMemory tmpMemory( &globalTmpArena );
-    BucketArray<Decl*> decls( &globalTmpArena, 16, Temporary() );
-
-    while( globalRunning )
-    {
-        Token token = NextToken( &lexer );
-        if( token.kind == TokenKind::EndOfStream )
-            break;
-
-        Decl* decl = ParseDecl( &lexer );
-        if( decl )
-            decls.Push( decl );
-    }
-
-    Array<Decl*> result( &globalArena, decls.count );
-    decls.CopyTo( &result );
-
-    return result;
-}
+#undef INDENT

@@ -51,6 +51,7 @@ enum TokenFlags : u32
     x(CloseBrace,       "}",            ( " } ", 0 )) \
     x(Tilde,            "~",            ( " ~ ", UnaryOp )) \
     \
+    x(RightArrow,       "->",           ( "-> ", 0 )) \
     x(LeftShift,        "<<",           ( "<< ", MulOp )) \
     x(RightShift,       ">>",           ( ">> ", MulOp )) \
     x(Equal,            "==",           ( "== ", CmpOp )) \
@@ -149,4 +150,13 @@ struct InternStringBuffer
     // TODO This should be a _growable_ hashtable (with linear probing!)?
     BucketArray<InternString> entries;
 };
+
+#define KEYWORDS(x ) \
+    x( Struct,  "struct" ) \
+    x( Enum,    "enum" ) \
+    x( Sizeof,  "sizeof" ) \
+    x( Return,  "return" ) \
+
+STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
+#undef KEYWORDS
 

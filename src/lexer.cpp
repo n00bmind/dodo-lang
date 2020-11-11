@@ -1,13 +1,4 @@
 
-#define KEYWORDS(x ) \
-    x( Struct,  "struct" ) \
-    x( Enum,    "enum" ) \
-    x( Sizeof,  "sizeof" ) \
-    x( Return,  "return" ) \
-
-STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
-#undef KEYWORDS
-
 internal char const* globalKeywords[Keyword::Values::count];
 internal int charToDigit[256];
 internal int escapeToChar[256];
@@ -538,9 +529,11 @@ internal void NextTokenRaw( Lexer* lexer )
         CASE1( '~', TokenKind::Tilde );
         CASE2( '=', TokenKind::Assign, '=', TokenKind::Equal );
         CASE2( '!', TokenKind::Exclamation, '=', TokenKind::NotEqual );
-        CASE2( ':', TokenKind::Colon, '=', TokenKind::ColonAssign );
+        //CASE2( ':', TokenKind::Colon, '=', TokenKind::ColonAssign );
+        // TODO Do we want a separate token for this? (only used for for type inferring var decls, and we don't need it there..)
+        CASE1( ':', TokenKind::Colon );
         CASE2( '+', TokenKind::Plus, '=', TokenKind::PlusAssign );
-        CASE2( '-', TokenKind::Minus, '=', TokenKind::MinusAssign );
+        CASE3( '-', TokenKind::Minus, '=', TokenKind::MinusAssign, '>', TokenKind::RightArrow );
         CASE2( '*', TokenKind::Asterisk, '=', TokenKind::MulAssign );
         CASE2( '%', TokenKind::Percent, '=', TokenKind::ModAssign );
         CASE2( '^', TokenKind::Caret, '=', TokenKind::XorAssign );
@@ -563,7 +556,7 @@ internal void NextTokenRaw( Lexer* lexer )
     token.text.length = I32( lexer->stream.data - token.text.data );
 }
 
-Token const& NextToken( Lexer* lexer )
+Token NextToken( Lexer* lexer )
 {
     Token& token = lexer->token;
     while( true )

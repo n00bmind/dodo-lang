@@ -86,16 +86,18 @@ void RunTests()
         char const* expr;
         char const* sExpr;
     }; 
-    static TestString testExprStrings[] =
+
     {
-        { "a.val+b[5]+10", "(+ (+ (. a val) ([] b 5)) 10)" },
-        { "func('test!', {1.5, 3.0})", "(call func ('test!', ({} 1.5, 3)))" },
-        { "a*b+c", "(+ (* a b) c)" },
-        { "a+b*c", "(+ a (* b c))" },
-        { "(a+b)*-c", "(* (+ a b) (- c))" },
-        { "a && b || c ? (&func)() : &func", "((|| (&& a b) c) ? (call (& func) ()) : (& func))" },
-    };
-    {
+        static TestString testExprStrings[] =
+        {
+            { "a.val+b[5]+10", "(+ (+ (. a val) ([] b 5)) 10)" },
+            { "func('test!', {1.5, 3.0})", "(call func ('test!', ({} 1.5, 3)))" },
+            { "a*b+c", "(+ (* a b) c)" },
+            { "a+b*c", "(+ a (* b c))" },
+            { "(a+b)*-c", "(* (+ a b) (- c))" },
+            { "a && b || c ? (&func)() : &func", "((|| (&& a b) c) ? (call (& func) ()) : (& func))" },
+        };
+
         int i = 0;
         Lexer lexer;
         Expr* expr = nullptr;
@@ -112,19 +114,51 @@ void RunTests()
 
             char* outBuf = buf;
             sz len = ARRAYCOUNT(buf);
+            int indent = 0;
             DebugPrintSExpr( expr, outBuf, len );
 
             globalPlatform.Print( "%s\n", buf );
             ASSERT( StringsEqual( t.sExpr, buf ) );
         }
+        globalPlatform.Print( "\n" );
+    }
+
+    {
+        static TestString testDeclStrings[] =
+        {
+            { "a: int = 42;", "" },
+            { "a := 42;", "" },
+            { "a:: 42;", "" },
+            { "enum Fruit { Lemon, Pineapple = 42, Kiwi, }", "" },
+            { "struct Mesh { vertices: [] v3; indices: []u32; material: *Material; } ", "" },
+            { "factorial :: (x: int) -> int { }", "" },
+        };
+
+        int i = 0;
+        Lexer lexer;
+        Decl* decl = nullptr;
+
+        InitTestMemory();
+
+        for( TestString const& t : testDeclStrings )
+        {
+            char buf[256] = {};
+
+            lexer = Lexer( String( t.expr ), "" );
+            NextToken( &lexer );
+            decl = ParseDecl( &lexer );
+
+            char* outBuf = buf;
+            sz len = ARRAYCOUNT(buf);
+            int indent = 0;
+            DebugPrintSExpr( decl, outBuf, len, indent );
+
+            globalPlatform.Print( "%s\n", buf );
+            //ASSERT( StringsEqual( t.sExpr, buf ) );
+        }
 
         __debugbreak();
     }
-
-static char const* testDeclStrings[] =
-{
-    "a: int = 42;",
-};
 
 }
 
