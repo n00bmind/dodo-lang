@@ -83,11 +83,12 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
         while( !MatchToken( TokenKind::CloseParen, token ) )
         {
             TypeSpec* arg = ParseTypeSpec( lexer );
+            args.Push( arg );
             if( !MatchToken( TokenKind::Comma, token ) )
                 break;
             NextToken( lexer );
         }
-        RequireToken( TokenKind::CloseParen, lexer );
+        RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
 
         TypeSpec* returnType = nullptr;
         if( MatchToken( TokenKind::RightArrow, token ) )
@@ -121,9 +122,8 @@ TypeSpec* ParseTypeSpec( Lexer* lexer )
         {
             size = ParseExpr( lexer );
         }
-        RequireToken( TokenKind::CloseBracket, lexer );
+        RequireTokenAndAdvance( TokenKind::CloseBracket, lexer );
 
-        NextToken( lexer );
         TypeSpec* ofType = ParseTypeSpec( lexer );
 
         if( lexer->IsValid() )
@@ -158,8 +158,8 @@ Expr* NewExpr( SourcePos const& pos, Expr::Kind kind )
 Expr* NewCompoundExpr( SourcePos const& pos, BucketArray<CompoundField> const& fields )
 {
     Expr* result = NewExpr( pos, Expr::Compound );
-    new( &result->compound.fields ) Array<CompoundField>( &globalArena, fields.count );
-    fields.CopyTo( &result->compound.fields );
+    new( &result->compoundFields ) Array<CompoundField>( &globalArena, fields.count );
+    fields.CopyTo( &result->compoundFields );
 
     return result;
 }
@@ -202,7 +202,7 @@ Expr* NewStringExpr( SourcePos const &pos, String const& value, Token::LiteralMo
 Expr* NewSizeofExpr( SourcePos const& pos, Expr* expr )
 {
     Expr* result = NewExpr( pos, Expr::Sizeof );
-    result->sizeof_.expr = expr;
+    result->sizeofExpr = expr;
 
     return result;
 }
@@ -264,20 +264,26 @@ Expr* NewTernaryExpr( SourcePos const& pos, Expr* cond, Expr* thenExpr, Expr* el
     return result;
 }
 
+Expr* NewCommaExpr( SourcePos const& pos, BucketArray<Expr*> const& exprList )
+{
+    Expr* result = NewExpr( pos, Expr::Comma );
+    new( &result->commaExprs ) Array<Expr*>( &globalArena, exprList.count );
+    exprList.CopyTo( &result->commaExprs );
+
+    return result;
+}
+
 CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 {
-    Token const& token = lexer->token;
     SourcePos pos = lexer->token.pos;
 
     CompoundField result = {};
-    if( MatchToken( TokenKind::OpenBracket, token ) )
+    if( MatchToken( TokenKind::OpenBracket, lexer->token ) )
     {
         NextToken( lexer );
         Expr* indexExpr = ParseExpr( lexer );
-        RequireToken( TokenKind::CloseBracket, lexer );
-        NextToken( lexer );
-        RequireToken( TokenKind::Assign, lexer );
-        NextToken( lexer );
+        RequireTokenAndAdvance( TokenKind::CloseBracket, lexer );
+        RequireTokenAndAdvance( TokenKind::Assign, lexer );
         Expr* valueExpr = ParseExpr( lexer );
 
         if( lexer->IsValid() )
@@ -292,7 +298,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
     else
     {
         Expr* expr = ParseExpr( lexer );
-        if( MatchToken( TokenKind::Assign, token ) )
+        if( MatchToken( TokenKind::Assign, lexer->token ) )
         {
             if( expr->kind == Expr::Name )
             {
@@ -303,7 +309,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
                     result = { pos, expr->name, valueExpr, CompoundField::Name };
             }
             else
-                PARSE_ERROR( token, "Unrecognized initializer type in compound literal. Must be either a field name or an index" );
+                PARSE_ERROR( lexer->token.pos, "Unrecognized initializer type in compound literal. Must be either a field name or an index" );
         }
         else
             result = { pos, nullptr, expr, CompoundField::Default };
@@ -317,8 +323,7 @@ Expr* ParseCompoundExpr( Lexer* lexer )
     SourcePos pos = lexer->token.pos;
     BucketArray<CompoundField> fields( &globalTmpArena, 16 );
 
-    RequireToken( TokenKind::OpenBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
         CompoundField field = ParseCompoundFieldExpr( lexer );
@@ -328,8 +333,7 @@ Expr* ParseCompoundExpr( Lexer* lexer )
             break;
         NextToken( lexer );
     }
-    RequireToken( TokenKind::CloseBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
 
     Expr* expr = nullptr;
     if( lexer->IsValid() )
@@ -364,8 +368,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
     else if( MatchKeyword( Keyword::Sizeof, token ) )
     {
         NextToken( lexer );
-        RequireToken( TokenKind::OpenParen, lexer );
-        NextToken( lexer );
+        RequireTokenAndAdvance( TokenKind::OpenParen, lexer );
         Expr* typeExpr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseParen, lexer );
 
@@ -389,7 +392,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
         if( token.kind == TokenKind::Name || token.kind == TokenKind::Keyword )
             desc = token.ident;
 
-        PARSE_ERROR( token, "Unexpected token '%s' in expression", desc );
+        PARSE_ERROR( token.pos, "Unexpected token '%s' in expression", desc );
     }
 
     if( advance && lexer->IsValid() )
@@ -550,13 +553,35 @@ Expr* ParseTernaryExpr( Lexer* lexer )
         NextToken( lexer );
         Expr* thenExpr = ParseTernaryExpr( lexer );
 
-        RequireToken( TokenKind::Colon, lexer );
+        RequireTokenAndAdvance( TokenKind::Colon, lexer );
 
-        NextToken( lexer );
         Expr* elseExpr = ParseTernaryExpr( lexer );
 
         if( lexer->IsValid() )
             expr = NewTernaryExpr( expr->pos, expr, thenExpr, elseExpr );
+    }
+    return expr;
+}
+
+// NOTE This is incompatible with some comma separated constructs involving expressions, like function call arguments and compound
+// expressions, so right now we only invoke it specifically for declarations & assignments so we can support multiple return values
+Expr* ParseCommaExpr( Lexer* lexer )
+{
+    Expr* expr = ParseTernaryExpr( lexer ); 
+
+    if( MatchToken( TokenKind::Comma, lexer->token ) )
+    {
+        BucketArray<Expr*> exprList( &globalTmpArena, 8 );
+        exprList.Push( expr );
+
+        while( MatchToken( TokenKind::Comma, lexer->token ) )
+        {
+            NextToken( lexer );
+            exprList.Push( ParseTernaryExpr( lexer ) );
+        }
+
+        if( lexer->IsValid() )
+            expr = NewCommaExpr( expr->pos, exprList );
     }
     return expr;
 }
@@ -567,135 +592,82 @@ Expr* ParseExpr( Lexer* lexer )
 }
 
 
-AggregateItem NewSubAggregate( SourcePos const& pos, Decl* subAggregate )
-{
-    AggregateItem result = {};
-    result.pos = pos;
-    result.kind = AggregateItem::SubAggregate;
-    result.subAggregate = subAggregate;
-
-    return result;
-}
-
-AggregateItem NewAggregateField( SourcePos const& pos, BucketArray<char const*> const& names, TypeSpec* type )
-{
-    AggregateItem result = {};
-    result.pos = pos;
-    result.kind = AggregateItem::Field;
-    new( &result.names ) Array<char const*>( &globalArena, names.count );
-    names.CopyTo( &result.names );
-    result.type = type;
-
-    return result;
-}
-
-Decl* ParseEnumDecl( Lexer* lexer );
-Decl* ParseAggregateDecl( Lexer* lexer, int kind );
-
-AggregateItem ParseAggregateItemDecl( Lexer* lexer )
-{
-    SourcePos pos = lexer->pos;
-    AggregateItem result = {};
-
-    if( MatchKeyword( Keyword::Enum, lexer->token ) )
-    {
-        Decl* subAggregate = ParseEnumDecl( lexer );
-        result = NewSubAggregate( pos, subAggregate );
-    }
-    else if( MatchKeyword( Keyword::Struct, lexer->token ) )
-    {
-        Decl* subAggregate = ParseAggregateDecl( lexer, Keyword::Struct );
-        result = NewSubAggregate( pos, subAggregate );
-    }
-    else
-    {
-        // Parse field(s)
-        BucketArray<char const*> names( &globalTmpArena, 16 );
-        
-        RequireToken( TokenKind::Name, lexer );
-        names.Push( lexer->token.ident );
-
-        NextToken( lexer );
-        while( MatchToken( TokenKind::Comma, lexer->token ) )
-        {
-            NextToken( lexer );
-            RequireToken( TokenKind::Name, lexer );
-            names.Push( lexer->token.ident );
-            
-            NextToken( lexer );
-        }
-        RequireToken( TokenKind::Colon, lexer );
-
-        NextToken( lexer );
-        TypeSpec* type = ParseTypeSpec( lexer );
-        RequireToken( TokenKind::Semicolon, lexer );
-        NextToken( lexer );
-
-        // TODO Parse this as several separate items with the same type instead?
-        if( lexer->IsValid() )
-            result = NewAggregateField( pos, names, type );
-    }
-
-    return result;
-}
-
 Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name )
 {
     Decl* result = PUSH_STRUCT( &globalArena, Decl );
     result->pos = pos;
-    result->name = name;
+    new( &result->names ) Array<char const*>( &globalArena, 1 );
+    result->names.Push( name );
     result->kind = kind;
 
     return result;
 }
 
-Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, BucketArray<AggregateItem> const& items )
+// TODO Only used for Vars right now, as they don't always have a resolved list of names. Maybe we should resolve before getting here?
+Decl* NewDecl( SourcePos const& pos, Decl::Kind kind )
+{
+    Decl* result = PUSH_STRUCT( &globalArena, Decl );
+    result->pos = pos;
+    result->kind = kind;
+
+    return result;
+}
+
+// TODO Unused?
+Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> const& names )
+{
+    Decl* result = PUSH_STRUCT( &globalArena, Decl );
+    result->pos = pos;
+    new( &result->names ) Array<char const*>( &globalArena, names.count );
+    names.CopyTo( &result->names );
+    result->kind = kind;
+
+    return result;
+}
+
+Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, BucketArray<Decl*> const& items )
 {
     Decl::Kind declKind = Decl::None;
     switch( kind )
     {
         case Keyword::Struct: declKind = Decl::Struct; break;
-        //case Keyword::Union: declKind = Decl::Union break;
+        case Keyword::Union: declKind = Decl::Union; break;
     }
 
     Decl* result = nullptr;
     if( declKind != Decl::None )
     {
         result = NewDecl( pos, declKind, name );
-        new( &result->aggregate.items ) Array<AggregateItem>( &globalArena, items.count );
+        new( &result->aggregate.items ) Array<Decl*>( &globalArena, items.count );
         items.CopyTo( &result->aggregate.items );
     }
 
     return result;
 }
 
-Decl* ParseAggregateDecl( Lexer* lexer, int kind )
+Decl* ParseDecl( Lexer* lexer );
+
+Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, Lexer* lexer, int kind )
 {
-    SourcePos pos = lexer->pos;
-    
-    Token token = NextToken( lexer );
-    RequireToken( TokenKind::Name, lexer );
-    char const* name = token.ident;
+    Token token = lexer->token;
 
-    NextToken( lexer );
-    RequireToken( TokenKind::OpenBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
 
-    BucketArray<AggregateItem> items( &globalTmpArena, 16 );
+    BucketArray<Decl*> items( &globalTmpArena, 16 );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
-        items.Push( ParseAggregateItemDecl( lexer ) );
+        Decl* decl = ParseDecl( lexer );
+        items.Push( decl );
     }
 
-    RequireToken( TokenKind::CloseBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
 
     Decl* result = nullptr;
     if( lexer->IsValid() )
     {
         result = NewAggregateDecl( pos, kind, name, items );
         if( !result )
-            PARSE_ERROR( token, "Unsupported aggregate type '%s'", Keyword::Values::names[ kind ] );
+            PARSE_ERROR( token.pos, "Unsupported aggregate type '%s'", Keyword::Values::names[ kind ] );
     }
 
     return result;
@@ -734,25 +706,17 @@ Decl* NewEnumDecl( SourcePos const& pos, char const* name, TypeSpec* type, Bucke
     return result;
 }
 
-Decl* ParseEnumDecl( Lexer* lexer )
+Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, Lexer* lexer )
 {
-    SourcePos pos = lexer->pos;
-
-    Token token = NextToken( lexer );
-    RequireToken( TokenKind::Name, lexer );
-    char const* name = token.ident;
-
     TypeSpec* type = nullptr;
 
-    NextToken( lexer );
     if( MatchToken( TokenKind::Colon, lexer->token ) )
     {
         NextToken( lexer );
         type = ParseTypeSpec( lexer );
     }
 
-    RequireToken( TokenKind::OpenBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
 
     BucketArray<EnumItem> items( &globalTmpArena, 16 );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
@@ -761,12 +725,10 @@ Decl* ParseEnumDecl( Lexer* lexer )
         if( !MatchToken( TokenKind::Comma, lexer->token ) )
             break;
 
-        RequireToken( TokenKind::Comma, lexer );
-        NextToken( lexer );
+        RequireTokenAndAdvance( TokenKind::Comma, lexer );
     }
 
-    RequireToken( TokenKind::CloseBrace, lexer );
-    NextToken( lexer );
+    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
 
     Decl* result = nullptr;
     if( lexer->IsValid() )
@@ -784,9 +746,8 @@ FuncArg ParseFuncArg( Lexer* lexer )
     char const* name = lexer->token.ident;
 
     NextToken( lexer );
-    RequireToken( TokenKind::Colon, lexer );
+    RequireTokenAndAdvance( TokenKind::Colon, lexer );
 
-    NextToken( lexer );
     TypeSpec* type = ParseTypeSpec( lexer );
 
     if( lexer->IsValid() )
@@ -795,7 +756,7 @@ FuncArg ParseFuncArg( Lexer* lexer )
     return result;
 }
 
-Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList* body, TypeSpec* returnType )
+Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList const& body, TypeSpec* returnType )
 {
     Decl* result = NewDecl( pos, Decl::Func, name );
     new( &result->func.args ) Array<FuncArg>( &globalArena, args.count );
@@ -806,117 +767,598 @@ Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> 
     return result;
 }
 
-Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr, bool isConst )
+Decl* NewVarDecl( SourcePos const& pos, Expr* namesExpr, TypeSpec* type, Expr* initExpr, bool isConst )
 {
-    Decl* result = NewDecl( pos, Decl::Var, name );
+    Decl* result = NewDecl( pos, Decl::Var );
     result->var.type = type;
+    result->var.namesExpr = namesExpr;
     result->var.initExpr = initExpr;
     result->var.isConst = isConst;
 
     return result;
 }
 
-StmtList* ParseStmtBlock( Lexer* lexer );
+Stmt* ParseStmt( Lexer* lexer );
+
+StmtList NewStmtList( SourcePos const& pos, Stmt* stmt )
+{
+    StmtList result = {};
+    result.pos = pos;
+    new( &result.stmts ) Array<Stmt*>( &globalArena, 1 );
+    result.stmts.Push( stmt );
+
+    return result;
+}
+
+StmtList NewStmtList( SourcePos const& pos, BucketArray<Stmt*> const& stmts )
+{
+    StmtList result = {};
+    result.pos = pos;
+    new( &result.stmts ) Array<Stmt*>( &globalArena, stmts.count );
+    stmts.CopyTo( &result.stmts );
+
+    return result;
+}
+
+StmtList ParseStmtBlock( Lexer* lexer )
+{
+    BucketArray<Stmt*> stmts( &globalTmpArena, 16 );
+
+    SourcePos pos = lexer->token.pos;
+    
+    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
+    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
+    {
+        stmts.Push( ParseStmt( lexer ) );
+    }
+    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
+
+    if( lexer->IsValid() )
+        return NewStmtList( pos, stmts );
+
+    return {};
+}
+
+
+Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
+{
+    bool isConst = false;
+    Expr* initExpr = nullptr;
+    TypeSpec* type = nullptr;
+
+    RequireTokenAndAdvance( TokenKind::Colon, lexer );
+
+    if( MatchToken( TokenKind::Colon, lexer->token ) )
+    {
+        NextToken( lexer );
+
+        if( MatchKeyword( Keyword::Struct, lexer->token ) )
+        {
+            if( namesExpr->kind != Expr::Name )
+            {
+                PARSE_ERROR( pos, "Struct declaration cannot be given more than one name" );
+                return nullptr;
+            }
+
+            NextToken( lexer );
+            return ParseAggregateBlockDecl( pos, namesExpr->name, lexer, Keyword::Struct );
+        }
+        else if( MatchKeyword( Keyword::Union, lexer->token ) )
+        {
+            if( namesExpr->kind != Expr::Name )
+            {
+                PARSE_ERROR( pos, "Union declaration cannot be given more than one name" );
+                return nullptr;
+            }
+
+            NextToken( lexer );
+            return ParseAggregateBlockDecl( pos, namesExpr->name, lexer, Keyword::Union );
+        }
+        // TODO Enum struct
+        // TODO Enum union (tagged union)
+        else if( MatchKeyword( Keyword::Enum, lexer->token ) )
+        {
+            if( namesExpr->kind != Expr::Name )
+            {
+                PARSE_ERROR( pos, "Enum declaration cannot be given more than one name" );
+                return nullptr;
+            }
+
+            NextToken( lexer );
+            return ParseEnumBlockDecl( pos, namesExpr->name, lexer );
+        }
+
+        else if( MatchToken( TokenKind::OpenParen, lexer->token ) )
+        {
+            if( namesExpr->kind != Expr::Name )
+            {
+                PARSE_ERROR( pos, "Function declaration cannot be given more than one name" );
+                return nullptr;
+            }
+
+            // Func
+            BucketArray<FuncArg> args( &globalTmpArena, 16 );
+
+            NextToken( lexer );
+            if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
+            {
+                args.Push( ParseFuncArg( lexer ) );
+                while( MatchToken( TokenKind::Comma, lexer->token ) )
+                {
+                    NextToken( lexer );
+                    args.Push( ParseFuncArg( lexer ) );
+                }
+                RequireToken( TokenKind::CloseParen, lexer );
+            }
+
+            NextToken( lexer );
+            TypeSpec* returnType = nullptr;
+            if( MatchToken( TokenKind::RightArrow, lexer->token ) )
+            {
+                NextToken( lexer );
+                returnType = ParseTypeSpec( lexer );
+            }
+
+            RequireToken( TokenKind::OpenBrace, lexer );
+            StmtList body = {};
+            if( lexer->IsValid() )
+                body = ParseStmtBlock( lexer );
+
+            if( lexer->IsValid() )
+                return NewFuncDecl( pos, namesExpr->name, args, body, returnType );
+        }
+        else
+        {
+            // Const
+            // TODO So const vars cannot have a type specifier?
+            initExpr = ParseCommaExpr( lexer );
+            isConst = true;
+
+            RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+        }
+    }
+    else
+    {
+        if( !MatchToken( TokenKind::Assign, lexer->token ) )
+            // TODO We could decide to allow specifying one-time structs/enums inline here too
+            // (in that case I think it would make sense to allow binding to more than one name)
+            type = ParseTypeSpec( lexer );
+        if( MatchToken( TokenKind::Assign, lexer->token ) )
+        {
+            NextToken( lexer );
+            initExpr = ParseCommaExpr( lexer );
+        }
+
+        RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+    }
+
+    if( lexer->IsValid() )
+        return NewVarDecl( pos, namesExpr, type, initExpr, isConst );
+
+    return nullptr;
+}
 
 Decl* ParseDecl( Lexer* lexer )
 {
-    Token const& token = lexer->token;
-    SourcePos pos = token.pos;
+    SourcePos pos = lexer->token.pos;
 
-    if( MatchToken( TokenKind::Keyword, token ) )
+    if( MatchToken( TokenKind::Pound, lexer->token ) )
     {
-        // TODO Unions
-        if( MatchKeyword( Keyword::Struct, token ) )
-            return ParseAggregateDecl( lexer, Keyword::Struct );
-        else if( MatchKeyword( Keyword::Enum, token ) )
-            return ParseEnumDecl( lexer );
-
         // TODO Directives
     }
     else
     {
+        BucketArray<Token> names( &globalTmpArena, 8 );
+
         RequireToken( TokenKind::Name, lexer );
-        char const* name = lexer->token.ident;
-        NextToken( lexer );
-        RequireToken( TokenKind::Colon, lexer );
-
-        bool isConst = false;
-        Expr* initExpr = nullptr;
-        TypeSpec* type = nullptr;
+        names.Push( lexer->token );
 
         NextToken( lexer );
-        if( MatchToken( TokenKind::Colon, lexer->token ) )
+        while( MatchToken( TokenKind::Comma, lexer->token ) )
         {
             NextToken( lexer );
-            if( MatchToken( TokenKind::OpenParen, lexer->token ) )
+            RequireToken( TokenKind::Name, lexer );
+            names.Push( lexer->token );
+            
+            NextToken( lexer );
+        }
+
+        Expr* expr = nullptr;
+        if( names.count > 1 )
+        {
+            BucketArray<Expr*> exprs( &globalTmpArena, names.count );
+            auto idx = names.First();
+            while( idx )
             {
-                // Func
-                BucketArray<FuncArg> args( &globalTmpArena, 16 );
+                Token const& token = *idx;
+                exprs.Push( NewNameExpr( token.pos, token.ident ) );
 
-                NextToken( lexer );
-                if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
-                {
-                    args.Push( ParseFuncArg( lexer ) );
-                    while( MatchToken( TokenKind::Comma, lexer->token ) )
-                    {
-                        NextToken( lexer );
-                        args.Push( ParseFuncArg( lexer ) );
-                    }
-                    RequireToken( TokenKind::CloseParen, lexer );
-                }
-
-                NextToken( lexer );
-                TypeSpec* returnType = nullptr;
-                if( MatchToken( TokenKind::RightArrow, lexer->token ) )
-                {
-                    NextToken( lexer );
-                    returnType = ParseTypeSpec( lexer );
-                }
-
-                RequireToken( TokenKind::OpenBrace, lexer );
-                StmtList* body = nullptr;
-                if( lexer->IsValid() )
-                    body = ParseStmtBlock( lexer );
-
-                if( lexer->IsValid() )
-                    return NewFuncDecl( pos, name, args, body, returnType );
+                idx.Next();
             }
-            else
-            {
-                // Const
-                // TODO Type specifier?
-                initExpr = ParseExpr( lexer );
-                isConst = true;
-
-                RequireToken( TokenKind::Semicolon, lexer );
-                NextToken( lexer );
-            }
+            expr = NewCommaExpr( pos, exprs );
         }
         else
         {
-            if( !MatchToken( TokenKind::Assign, lexer->token ) )
-                type = ParseTypeSpec( lexer );
-            if( MatchToken( TokenKind::Assign, lexer->token ) )
-            {
-                NextToken( lexer );
-                initExpr = ParseExpr( lexer );
-            }
-
-            RequireToken( TokenKind::Semicolon, lexer );
-            NextToken( lexer );
+            ASSERT( names.count == 1 );
+            expr = NewNameExpr( pos, (*names.First()).ident );
         }
 
-        if( lexer->IsValid() )
-            return NewVarDecl( pos, name, type, initExpr, isConst );
+        return ParseNamedDecl( pos, expr, lexer );
     }
 
     return nullptr;
 }
 
-StmtList* ParseStmtBlock( Lexer* lexer )
+Stmt* NewStmt( SourcePos const& pos, Stmt::Kind kind )
 {
-    // TODO 
+    Stmt* result = PUSH_STRUCT( &globalArena, Stmt );
+    result->pos = pos;
+    result->kind = kind;
+
+    return result;
+}
+
+Stmt* NewDeclStmt( SourcePos const& pos, Decl* decl )
+{
+    Stmt* result = NewStmt( pos, Stmt::Decl );
+    result->decl = decl;
+
+    return result;
+}
+
+Stmt* NewAssignStmt( SourcePos const& pos, Expr* leftExpr, TokenKind::Enum op, Expr* rightExpr )
+{
+    Stmt* result = NewStmt( pos, Stmt::Assign );
+    result->assign.left = leftExpr;
+    result->assign.right = rightExpr;
+    result->assign.op = op;
+
+    return result;
+}
+
+Stmt* NewExprStmt( SourcePos const& pos, Expr* expr )
+{
+    Stmt* result = NewStmt( pos, Stmt::Expr );
+    result->expr = expr;
+    
+    return result;
+}
+
+//a, b, c :: 10, 1.0, "whatever";
+//a, b, c := some_func();
+//a, b, c = some_func(), b+c, x > 10 ? 1 : 0;
+//a, b, c += d, e, f; //?
+
+// Assignment / decl / expr
+Stmt* ParseSimpleStmt( SourcePos const& pos, Lexer* lexer )
+{
+    Stmt* result = nullptr;
+    bool consumeSemicolon = true;
+
+    Expr* expr = ParseCommaExpr( lexer );
+
+    if( (expr->kind == Expr::Comma || expr->kind == Expr::Name) &&
+        MatchToken( TokenKind::Colon, lexer->token ) )
+    {
+        Decl* decl = ParseNamedDecl( pos, expr, lexer );
+
+        if( lexer->IsValid() )
+            result = NewDeclStmt( pos, decl );
+
+        consumeSemicolon = false;
+    }
+    else if( lexer->token.HasFlag( TokenFlags::AssignOp ) )
+    {
+        TokenKind::Enum op = lexer->token.kind;
+        NextToken( lexer );
+        Expr* rightExpr = ParseCommaExpr( lexer );
+
+        if( lexer->IsValid() )
+            result = NewAssignStmt( pos, expr, op, rightExpr );
+    }
+    else
+    {
+        // TODO What is this for, exactly? Could be useful for for? x)
+        result = NewExprStmt( pos, expr );
+    }
+
+    if( consumeSemicolon )
+        RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+
+    return result;
+}
+
+Expr* ParseParenExpr( Lexer* lexer )
+{
+    RequireTokenAndAdvance( TokenKind::OpenParen, lexer );
+    Expr* result = ParseExpr( lexer );
+    RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
+
+    return result;
+}
+
+StmtList ParseStmtOrStmtBlock( Lexer* lexer )
+{
+    StmtList result = {};
+    if( MatchToken( TokenKind::OpenBrace, lexer->token ) )
+    {
+        result = ParseStmtBlock( lexer );
+    }
+    else
+    {
+        BucketArray<Stmt*> stmts( &globalTmpArena, 1 );
+        stmts.Push( ParseStmt( lexer ) );
+
+        if( lexer->IsValid() )
+        {
+            Stmt* stmt = *stmts.First();
+            result = NewStmtList( stmt->pos, stmt );
+        }
+    }
+
+    return result;
+}
+
+Stmt* NewIfStmt( SourcePos const& pos, Expr* cond, StmtList const& thenBlock, BucketArray<ElseIf> const& elseIfs, StmtList const& elseBlock )
+{
+    Stmt* result = NewStmt( pos, Stmt::If );
+    result->if_.cond = cond;
+    result->if_.thenBlock = thenBlock;
+    result->if_.elseBlock = elseBlock;
+    new( &result->if_.elseIfs ) Array<ElseIf>( &globalTmpArena, elseIfs.count );
+    elseIfs.CopyTo( &result->if_.elseIfs );
+
+    return result;
+}
+
+Stmt* NewWhileStmt( SourcePos const& pos, Expr* cond, StmtList const& block, bool isDoWhile )
+{
+    Stmt* result = NewStmt( pos, Stmt::While );
+    result->while_.cond = cond;
+    result->while_.block = block;
+    result->while_.isDoWhile = isDoWhile;
+
+    return result;
+}
+
+Stmt* NewForStmt( SourcePos const& pos, Expr* cond, StmtList const& block )
+{
+    Stmt* result = NewStmt( pos, Stmt::For );
+    result->for_.cond = cond;
+    result->for_.block = block;
+
+    return result;
+}
+        
+Stmt* NewSwitchStmt( SourcePos const& pos, Expr* expr, BucketArray<SwitchCase> const& cases )
+{
+    Stmt* result = NewStmt( pos, Stmt::Switch );
+    result->switch_.expr = expr;
+    new( &result->switch_.cases ) Array<SwitchCase>( &globalTmpArena, cases.count );
+    cases.CopyTo( &result->switch_.cases );
+
+    return result;
+}
+
+Stmt* NewReturnStmt( SourcePos const& pos, Expr* expr )
+{
+    Stmt* result = NewStmt( pos, Stmt::Return );
+    result->expr = expr;
+
+    return result;
+}
+
+Stmt* NewBlockStmt( SourcePos const& pos, StmtList const& block )
+{
+    Stmt* result = NewStmt( pos, Stmt::Block );
+    result->block = block;
+
+    return result;
+}
+
+Stmt* ParseIfStmt( SourcePos const& pos, Lexer* lexer )
+{
+    RequireKeywordAndAdvance( Keyword::If, lexer );
+
+    // TODO Assign statements?
+    Expr* cond = ParseParenExpr( lexer );
+
+    StmtList thenBlock = ParseStmtOrStmtBlock( lexer );
+
+    StmtList elseBlock = {};
+    BucketArray<ElseIf> elseIfs( &globalTmpArena, 8 );
+
+    while( MatchKeyword( Keyword::Else, lexer->token ) )
+    {
+        NextToken( lexer );
+        if( MatchKeyword( Keyword::If, lexer->token ) )
+        {
+            NextToken( lexer );
+            Expr* elseIfCond = ParseParenExpr( lexer );
+
+            StmtList elseIfBlock = ParseStmtOrStmtBlock( lexer );
+            elseIfs.Push( { elseIfBlock, elseIfCond } );
+        }
+        else
+        {
+            elseBlock = ParseStmtOrStmtBlock( lexer );
+            break;
+        }
+    }
+
+    if( lexer->IsValid() )
+        return NewIfStmt( pos, cond, thenBlock, elseIfs, elseBlock );
+
     return nullptr;
+}
+
+Stmt* ParseWhileStmt( SourcePos const& pos, Lexer* lexer )
+{
+    RequireKeywordAndAdvance( Keyword::While, lexer );
+
+    Expr* cond = ParseParenExpr( lexer );
+    StmtList block = ParseStmtOrStmtBlock( lexer );
+
+    if( lexer->IsValid() )
+        return NewWhileStmt( pos, cond, block, false );
+
+    return nullptr;
+}
+
+Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer )
+{
+    RequireKeywordAndAdvance( Keyword::Do, lexer );
+    StmtList block = ParseStmtOrStmtBlock( lexer );
+
+    RequireKeywordAndAdvance( Keyword::While, lexer );
+    Expr* cond = ParseParenExpr( lexer );
+
+    RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+
+    if( lexer->IsValid() )
+        return NewWhileStmt( pos, cond, block, true );
+
+    return nullptr;
+}
+
+Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer )
+{
+    RequireKeywordAndAdvance( Keyword::For, lexer );
+    RequireTokenAndAdvance( TokenKind::OpenParen, lexer );
+
+    // TODO 
+    Expr* cond = nullptr;
+    while( !MatchToken( TokenKind::CloseParen, lexer->token ) )
+        NextToken( lexer );
+
+    RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
+
+    StmtList block = ParseStmtOrStmtBlock( lexer );
+
+    if( lexer->IsValid() )
+        return NewForStmt( pos, cond, block );
+
+    return nullptr;
+}
+
+SwitchCase ParseSwitchCase( Lexer* lexer )
+{
+    Expr* expr = nullptr;
+    bool isDefault = false;
+
+    if( MatchKeyword( Keyword::Default, lexer->token ) )
+    {
+        isDefault = true;
+        NextToken( lexer );
+    }
+    else
+    {
+        RequireKeywordAndAdvance( Keyword::Case, lexer );
+        expr = ParseCommaExpr( lexer );
+    }
+
+    RequireTokenAndAdvance( TokenKind::Colon, lexer );
+
+    StmtList block = ParseStmtOrStmtBlock( lexer );
+
+    return { block, expr, isDefault };
+}
+
+Stmt* ParseSwitchStmt( SourcePos const& pos, Lexer* lexer )
+{
+    RequireKeywordAndAdvance( Keyword::Switch, lexer );
+    Expr* expr = ParseParenExpr( lexer );
+
+    // TODO Let's test without these for now
+    //RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
+
+    bool hasDefault = false;
+    BucketArray<SwitchCase> cases( &globalTmpArena, 16 );
+    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
+    {
+        SourcePos casePos = lexer->pos;
+
+        SwitchCase c = ParseSwitchCase( lexer );
+        if( c.isDefault )
+        {
+            if( hasDefault )
+            {
+                PARSE_ERROR( casePos, "Switch statement can only have one default case" );
+                break;
+            }
+            else
+                hasDefault = true;
+        }
+        cases.Push( c );
+    }
+
+    //RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
+
+    if( lexer->IsValid() )
+        return NewSwitchStmt( pos, expr, cases );
+
+    return nullptr;
+}
+
+Stmt* ParseStmt( Lexer* lexer )
+{
+    Stmt* stmt = nullptr;
+    bool needSemicolon = false;
+    SourcePos pos = lexer->token.pos;
+
+    if( MatchKeyword( Keyword::If, lexer->token ) )
+        stmt = ParseIfStmt( pos, lexer );
+    else if( MatchKeyword( Keyword::While, lexer->token ) )
+        stmt = ParseWhileStmt( pos, lexer );
+    else if( MatchKeyword( Keyword::Do, lexer->token ) )
+        stmt = ParseDoWhileStmt( pos, lexer );
+    else if( MatchKeyword( Keyword::For, lexer->token ) )
+        stmt = ParseForStmt( pos, lexer );
+    else if( MatchKeyword( Keyword::Switch, lexer->token ) )
+        stmt = ParseSwitchStmt( pos, lexer );
+
+    else if( MatchKeyword( Keyword::Break, lexer->token ) )
+    {
+        stmt = NewStmt( pos, Stmt::Break );
+        NextToken( lexer );
+        needSemicolon = true;
+    }
+    else if( MatchKeyword( Keyword::Continue, lexer->token ) )
+    {
+        stmt = NewStmt( pos, Stmt::Continue );
+        needSemicolon = true;
+        NextToken( lexer );
+    }
+    else if( MatchKeyword( Keyword::Return, lexer->token ) )
+    {
+        Expr* expr = nullptr;
+
+        NextToken( lexer );
+        if( !MatchToken( TokenKind::Semicolon, lexer->token ) )
+            expr = ParseExpr( lexer );
+
+        if( lexer->IsValid() )
+            stmt = NewReturnStmt( pos, expr );
+        needSemicolon = true;
+    }
+
+    else if( MatchToken( TokenKind::OpenBrace, lexer->token ) )
+    {
+        StmtList block = ParseStmtBlock( lexer );
+
+        if( lexer->IsValid() )
+            stmt = NewBlockStmt( pos, block );
+    }
+
+    else
+    {
+        stmt = ParseSimpleStmt( pos, lexer );
+    }
+
+    if( needSemicolon )
+        RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+
+    return stmt;
 }
 
 
@@ -987,6 +1429,7 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
         {
             APPEND( "%s", expr->name );
         } break;
+
         case Expr::Call:
         {
             APPEND( "(call " );
@@ -1014,11 +1457,12 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             DebugPrintSExpr( expr->field.base, outBuf, maxLen );
             APPEND( " %s)", expr->field.name );
         } break;
+
         case Expr::Compound:
         {
             APPEND( "({} " );
             int i = 0;
-            for( CompoundField const& f : expr->compound.fields )
+            for( CompoundField const& f : expr->compoundFields )
             {
                 if( i++ )
                     APPEND( ", " );
@@ -1036,6 +1480,7 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             }
             APPEND( ")" );
         } break;
+
         case Expr::Unary:
         {
             APPEND( "(%s ", TokenKind::Values::names[ expr->unary.op ] );
@@ -1060,10 +1505,23 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             DebugPrintSExpr( expr->ternary.elseExpr, outBuf, maxLen );
             APPEND( ")" );
         } break;
+
+        case Expr::Comma:
+        {
+            APPEND( "(" );
+            for( Expr* e : expr->commaExprs )
+            {
+                if( e != expr->commaExprs[0] )
+                    APPEND( ", " );
+                DebugPrintSExpr( e, outBuf, maxLen );
+            }
+            APPEND( ")" );
+        } break;
+
         case Expr::Sizeof:
         {
             APPEND( "(sizeof " );
-            DebugPrintSExpr( expr->sizeof_.expr, outBuf, maxLen );
+            DebugPrintSExpr( expr->sizeofExpr, outBuf, maxLen );
             APPEND( ")" );
         } break;
     }
@@ -1119,6 +1577,128 @@ void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
         DebugPrintTypeSpec( type->base, outBuf, maxLen );
 }
 
+void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent );
+void DebugPrintSExpr( Stmt* stmt, char*& outBuf, sz& maxLen, int& indent );
+
+void DebugPrintStmtList( StmtList const& block, char*& outBuf, sz& maxLen, int& indent )
+{
+    int len = 0;
+
+    INDENT APPEND( "(block \n" );
+    indent++;
+    for( Stmt* s : block.stmts )
+    {
+        if( s != block.stmts[0] )
+            APPEND( "\n" );
+        INDENT;
+        DebugPrintSExpr( s, outBuf, maxLen, indent );
+        APPEND( "," );
+    }
+    APPEND( ")\n" );
+    indent--;
+}
+
+void DebugPrintSExpr( Stmt* stmt, char*& outBuf, sz& maxLen, int& indent )
+{
+    int len = 0;
+    switch( stmt->kind )
+    {
+        case Stmt::Expr:
+        {
+            DebugPrintSExpr( stmt->expr, outBuf, maxLen );
+        } break;
+        case Stmt::Decl:
+        {
+            DebugPrintSExpr( stmt->decl, outBuf, maxLen, indent );
+        } break;
+        case Stmt::Assign:
+        {
+            APPEND( "(%s ", TokenKind::Values::names[ stmt->assign.op ] );
+            DebugPrintSExpr( stmt->assign.left, outBuf, maxLen );
+            APPEND( " " );
+            DebugPrintSExpr( stmt->assign.right, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+
+        case Stmt::If:
+        {
+            APPEND( "(if " );
+            DebugPrintSExpr( stmt->if_.cond, outBuf, maxLen );
+            APPEND( "\n" );
+            DebugPrintStmtList( stmt->if_.thenBlock, outBuf, maxLen, indent );
+
+            for( auto& elseIf : stmt->if_.elseIfs )
+            {
+                INDENT APPEND( ")(else if " );
+                DebugPrintSExpr( elseIf.cond, outBuf, maxLen );
+                APPEND( "\n" );
+                DebugPrintStmtList( elseIf.block, outBuf, maxLen, indent );
+            }
+
+            if( stmt->if_.elseBlock.stmts.count )
+            {
+                INDENT APPEND( ")(else\n" );
+                DebugPrintStmtList( stmt->if_.elseBlock, outBuf, maxLen, indent );
+            }
+            INDENT APPEND( ")" );
+        } break;
+        case Stmt::While:
+        {
+            APPEND( "(%swhile ", stmt->while_.isDoWhile ? "do " : "" );
+            DebugPrintSExpr( stmt->while_.cond, outBuf, maxLen );
+            APPEND( "\n" );
+            DebugPrintStmtList( stmt->while_.block, outBuf, maxLen, indent );
+            INDENT APPEND( ")" );
+        } break;
+        case Stmt::For:
+        {
+            APPEND( "(for " );
+            DebugPrintSExpr( stmt->for_.cond, outBuf, maxLen );
+            APPEND( "\n" );
+            DebugPrintStmtList( stmt->for_.block, outBuf, maxLen, indent );
+            INDENT APPEND( ")" );
+        } break;
+        case Stmt::Switch:
+        {
+            APPEND( "(switch " );
+            DebugPrintSExpr( stmt->switch_.expr, outBuf, maxLen );
+            APPEND( "\n" );
+            for( SwitchCase const& c : stmt->switch_.cases ) 
+            {
+                INDENT APPEND( "(%s ", c.isDefault ? "default" : "case" );
+                if( !c.isDefault )
+                    DebugPrintSExpr( c.expr, outBuf, maxLen );
+                APPEND( "\n" );
+                indent++;
+                DebugPrintStmtList( c.block, outBuf, maxLen, indent );
+                INDENT APPEND( ")\n" );
+                indent--;
+            }
+            INDENT APPEND( ")" );
+        } break;
+
+        case Stmt::Break:
+        {
+            APPEND( "(break)" );
+        } break;
+        case Stmt::Continue:
+        {
+            APPEND( "(continue)" );
+        } break;
+        case Stmt::Return:
+        {
+            APPEND( "(return " );
+            DebugPrintSExpr( stmt->expr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+
+        case Stmt::Block:
+        {
+            DebugPrintStmtList( stmt->block, outBuf, maxLen, indent );
+        } break;
+    }
+}
+
 void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
 {
     int len = 0;
@@ -1126,7 +1706,7 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
     {
         case Decl::Enum:
         {
-            APPEND( "(enum %s: ", decl->name );
+            APPEND( "(enum %s: ", decl->names[0] );
             DebugPrintTypeSpec( decl->enum_.type, outBuf, maxLen );
             APPEND( "\n" );
             indent++;
@@ -1142,25 +1722,13 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
 
         case Decl::Struct:
         {
-            APPEND( "(struct %s\n", decl->name );
+            APPEND( "(struct %s\n", decl->names[0] );
             indent++;
             for( auto& it : decl->aggregate.items )
             {
-                if( it.kind == AggregateItem::Field )
-                {
-                    INDENT APPEND( "(" );
-                    for( char const* n : it.names )
-                    {
-                        if( n != it.names[0] )
-                            APPEND( ", " );
-                        APPEND( "%s", n );
-                    }
-                    APPEND( ": " );
-                    DebugPrintTypeSpec( it.type, outBuf, maxLen );
-                    APPEND( "),\n" );
-                }
-                else
-                    DebugPrintSExpr( it.subAggregate, outBuf, maxLen, indent );
+                INDENT;
+                DebugPrintSExpr( it, outBuf, maxLen, indent );
+                APPEND( ",\n" );
             }
             APPEND( ")\n" );
             indent--;
@@ -1168,41 +1736,21 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
 
         case Decl::Union:
         {
-            APPEND( "(union %s\n", decl->name );
+            APPEND( "(union %s\n", decl->names[0] );
             indent++;
             for( auto& it : decl->aggregate.items )
             {
-                if( it.kind == AggregateItem::Field )
-                {
-                    APPEND( "(" );
-                    for( char const* n : it.names )
-                    {
-                        if( n != it.names[0] )
-                            APPEND( ", " );
-                        APPEND( "%s", n );
-                    }
-                    APPEND( ": " );
-                    DebugPrintTypeSpec( it.type, outBuf, maxLen );
-                    APPEND( "),\n" );
-                }
-                else
-                    DebugPrintSExpr( it.subAggregate, outBuf, maxLen, indent );
+                INDENT;
+                DebugPrintSExpr( it, outBuf, maxLen, indent );
+                APPEND( ",\n" );
             }
             APPEND( ")\n" );
             indent--;
         } break;
 
-        case Decl::Var:
-        {
-            APPEND( "(%s %s: ", decl->var.isConst ? "const" : "var", decl->name );
-            DebugPrintTypeSpec( decl->var.type, outBuf, maxLen );
-            APPEND( " = " );
-            DebugPrintSExpr( decl->var.initExpr, outBuf, maxLen );
-            APPEND( ")" );
-        } break;
         case Decl::Func:
         {
-            APPEND( "(func %s ( ", decl->name );
+            APPEND( "(func %s ( ", decl->names[0] );
             for( auto& a : decl->func.args )
             {
                 if( &a != decl->func.args.begin() )
@@ -1214,9 +1762,28 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
             DebugPrintTypeSpec( decl->func.returnType, outBuf, maxLen );
             APPEND( "\n" );
 
-            // TODO
+            indent++;
+            for( Stmt* s : decl->func.body.stmts )
+            {
+                INDENT;
+                DebugPrintSExpr( s, outBuf, maxLen, indent );
+                APPEND( ",\n" );
+            }
+            indent--;
 
         } break;
+
+        case Decl::Var:
+        {
+            APPEND( "(%s ", decl->var.isConst ? "const" : "var" );
+            DebugPrintSExpr( decl->var.namesExpr, outBuf, maxLen );
+            APPEND( ": " );
+            DebugPrintTypeSpec( decl->var.type, outBuf, maxLen );
+            APPEND( " = " );
+            DebugPrintSExpr( decl->var.initExpr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+
         case Decl::Import:
         {
 

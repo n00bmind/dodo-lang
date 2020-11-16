@@ -153,8 +153,19 @@ struct InternStringBuffer
 
 #define KEYWORDS(x ) \
     x( Struct,  "struct" ) \
+    x( Union,   "union" ) \
     x( Enum,    "enum" ) \
     x( Sizeof,  "sizeof" ) \
+    x( If,      "if" ) \
+    x( Else,    "else" ) \
+    x( While,   "while" ) \
+    x( Do,      "do" ) \
+    x( For,     "for" ) \
+    x( Switch,  "switch" ) \
+    x( Case,    "case" ) \
+    x( Default, "default" ) \
+    x( Break,   "break" ) \
+    x( Continue,"continue" ) \
     x( Return,  "return" ) \
 
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)

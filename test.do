@@ -26,7 +26,9 @@ enum TeaTypes : EnumValue
     // Attribute names can be omited IIF you provide ALL of them (do the same for functions?)
     // (in fact maybe even do something like in Python where there is a kind of "correspondence" between function args
     // and struct fields, and you can trivially pack/unpack structs as function args)
-    // AActually, not sure if I would allow this, as fields can sometimes change order for packing reasons, and that can lead to errors easily
+    //
+    // AActually, not sure if I would allow this, as fields can sometimes be re-ordered for packing reasons, and that can
+    // easily lead to errors!
     Chai := { displayName = "Chai", intensity = 70 },
     EarlGrey := { displayName = "Earl Gray", intensity = 90 },
     Matcha := { displayName = "Matcha", intensity = 30 },
@@ -41,5 +43,15 @@ PrintAllTeaTypes :: ()
     {
         it := TeaTypes.items[i];
         print( "{i} - {it.displayName} has an intensity of {it.intensity}\n" );
+    }
+
+    switch( input )
+    {
+    case 1:
+    {
+
+    }
+    case 2: bla;
+    case default: ble;
     }
 }

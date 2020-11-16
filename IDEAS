@@ -24,12 +24,16 @@ ________________________________________________________________________________
 - Maybe even do something like in Python where there is a kind of "correspondence" between function args and struct fields,
   and you can trivially pack/unpack structs as function args
 
-- Precedence table, like in Bitwise's Ion, just 5 levels, highest to lowest:
+- Precedence table, like in Bitwise's Ion, highest to lowest:
+  · postfix: () [] .
+  · unary: ! + - ~ &(addr) *(deref)
   · mul: * / % << >> &
-  · add: + - |
+  · add: + - | ^
   · cmp: == != < > <= >=
   · and: &&
   · or: ||
+  · ternary: ?
+  · comma: ,
 
 - Modules/packages are the main way of organizing code. All .do files in the same directory are automatically part of the same module. Code can be freely moved from one big file to several separate smaller ones (or the other way around) _with no other action necessary_.
   Modules are imported all at once by specifying the name of the folder.
@@ -60,6 +64,14 @@ ________________________________________________________________________________
 - A way to declare an enum as a "flags" bitfield, with correct automatic values and convenient operations to test/set
 
 - A way to tag pure functions?
+
+- Member functions are ooooobviously forbidden! Prefer the "using model" of Jai, where function arguments can be preceded by 'using',
+  which means their internals are available inside the function scope directly, without qualifying them. Also, we could extend that so
+  that if a function has a first argument with using, we could invoke it with the 'object.func()' syntax, ALTHOUGH that may be
+  dangerous already? (promotes the mental model of "this function belongs to this object")
+
+- Think about the "sticky error" pattern for error handling explained in https://youtu.be/0WpCnd9E-eg?t=5864 and how to apply it to
+  the standard library, or even through language constructs.
 
 ________________________________________________________________________________ 
 

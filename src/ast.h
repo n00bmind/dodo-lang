@@ -68,6 +68,8 @@ struct Expr
         Unary,
         Binary,
         Ternary,
+        Comma,
+        Range,      // TODO (a..z) (include-exclude?)
         Sizeof,
         //Typeof,
         //OffsetOf,
@@ -78,26 +80,12 @@ struct Expr
 
     union
     {
-        char const* name;
         struct
         {
-            Expr* expr;
-        } paren;
-        struct
-        {
-            union
-            {
-                u64 intValue;
-                f64 floatValue;
-                String strValue;
-            };
-            Token::LiteralMod modifier;
-        } literal;
-        struct
-        {
-            Expr* expr;
-            TokenKind::Enum op;
-        } unary;
+            Expr* cond;
+            Expr* thenExpr;
+            Expr* elseExpr;
+        } ternary;
         struct
         {
             Expr* left;
@@ -106,10 +94,11 @@ struct Expr
         } binary;
         struct
         {
-            Expr* cond;
-            Expr* thenExpr;
-            Expr* elseExpr;
-        } ternary;
+            Expr* expr;
+            TokenKind::Enum op;
+        } unary;
+        Array<Expr*> commaExprs;
+
         struct
         {
             Array<Expr*> args;
@@ -125,19 +114,38 @@ struct Expr
             Expr* base;
             char const* name;
         } field;
+
+        Array<CompoundField> compoundFields;
         struct
         {
-            Expr* expr;
-        } sizeof_;
-        struct
-        {
-            Array<CompoundField> fields;
-        } compound;
+            union
+            {
+                u64 intValue;
+                f64 floatValue;
+                String strValue;
+            };
+            Token::LiteralMod modifier;
+        } literal;
+        char const* name;
+
+        Expr* parenExpr;
+        Expr* sizeofExpr;
     };
 };
 
 
-struct StmtList;
+struct Stmt;
+
+struct StmtList
+{
+    SourcePos pos;
+    // TODO Test with a big enough parsed file what happens when we make Stmt be pointers instead of inline inside the array..
+    // Does that increase cache efficiency or reduce it?
+    // When each Stmt is a pointer, it will live pretty close in memory to the Expr/Decl etc. that it is formed of, however when they're
+    // inline they're reallocated at the very end of the StmtList that contains them (to make them all contiguous), so in this
+    // case the optimum solution could well be counter intuitive.
+    Array<Stmt*> stmts;
+};
 
 
 struct FuncArg
@@ -155,30 +163,6 @@ struct EnumItem
     u32 index;
 };
 
-struct Decl;
-
-struct AggregateItem
-{
-    enum Kind
-    {
-        Field,
-        SubAggregate,
-    };
-
-    SourcePos pos;
-    Kind kind;
-    union
-    {
-        struct
-        {
-            Array<char const*> names;
-            TypeSpec* type;
-        };
-        // TODO Make this just a normal aggregate Decl with an 'owner' pointing to the enclosing aggregate?
-        Decl* subAggregate;
-    };
-};
-
 struct Decl
 {
     enum Kind
@@ -194,26 +178,11 @@ struct Decl
     };
 
     SourcePos pos;
-    char const* name;
+    Array<char const*> names;
     Kind kind;
 
     union
     {
-        struct
-        {
-            Array<EnumItem> items;
-            TypeSpec* type;
-        } enum_;
-        struct
-        {
-            Array<AggregateItem> items;
-        } aggregate;
-        struct
-        {
-            TypeSpec* type;
-            Expr* initExpr;
-            bool isConst;   //?
-        } var;
         struct
         {
             // TODO Lambdas?
@@ -221,23 +190,50 @@ struct Decl
             // TODO Multiple return types
             Array<FuncArg> args;
             TypeSpec* returnType;
-            StmtList* body;
+            StmtList body;
         } func;
+
+        struct
+        {
+            Array<EnumItem> items;
+            TypeSpec* type;
+        } enum_;
+        struct
+        {
+            Array<Decl*> items;
+        } aggregate;
+
+        struct
+        {
+            TypeSpec* type;
+            Expr* namesExpr;
+            Expr* initExpr;
+            bool isConst;   //?
+        } var;
     };
 };
 
 
 struct ElseIf
 {
-    StmtList* block;
+    StmtList block;
     Expr* cond;
+};
+
+struct SwitchCase
+{
+    StmtList block;
+    // TODO Ranges (create a Range expr)
+    Expr* expr;         // Default case has null expr
+    bool isDefault;
 };
 
 struct Stmt
 {
-    enum class Kind
+    enum Kind
     {
         None,
+        Expr,
         Decl,
         Assign,
         If,
@@ -246,8 +242,8 @@ struct Stmt
         Switch,
         Break,
         Continue,
-        Block,
         Return,
+        Block,
     };
 
     SourcePos pos;
@@ -255,44 +251,41 @@ struct Stmt
 
     union
     {
-        Decl* decl;
-        StmtList* block;
-        struct
-        {
-            Expr* left;
-            Expr* right;
-            TokenKind::Enum op;
-        } assign;
         struct
         {
             Array<ElseIf> elseIfs;
-            StmtList* thenBlock;
-            StmtList* elseBlock;
-            Expr* cond;
+            StmtList thenBlock;
+            StmtList elseBlock;
+            ::Expr* cond;
         } if_;
         struct
         {
-            StmtList* block;
-            Expr* cond;
+            StmtList block;
+            ::Expr* cond;
+            bool isDoWhile;
         } while_;
         struct
         {
-            StmtList* block;
-            Expr* range;
-            Stmt* init;
-            Stmt* next;
+            StmtList block;
+            // TODO 
+            ::Expr* cond;
         } for_;
-    };
-};
+        struct
+        {
+            Array<SwitchCase> cases;
+            ::Expr* expr;
+        } switch_;
 
-struct StmtList
-{
-    SourcePos pos;
-    // TODO Test with a big enough parsed file what happens when we make Stmt be pointers instead of inline inside the array..
-    // Does that increase cache efficiency or reduce it?
-    // When each Stmt is a pointer, it will live pretty close in memory to the Expr etc. that form it, however when they're
-    // inline they're reallocated at the very end of the StmtList that contains them (to make them all contiguous), so in this
-    // case the optimum solution could well be counter intuitive.
-    Array<Stmt> stmts;
+        struct
+        {
+            ::Expr* left;
+            ::Expr* right;
+            TokenKind::Enum op;
+        } assign;
+
+        ::Decl* decl;
+        ::Expr* expr;
+        StmtList block;
+    };
 };
 

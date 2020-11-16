@@ -127,8 +127,8 @@ internal void Error( Lexer* lexer, char const* fmt, ... )
 #endif
 }
 
-#define PARSE_ERROR( token, msg, ... ) Error( lexer, "%s(%d,%d): Error: "msg"\n", \
-                                        (token).pos.filename, (token).pos.lineNumber, (token).pos.columnNumber, ##__VA_ARGS__ )
+#define PARSE_ERROR( pos, msg, ... ) Error( lexer, "%s(%d,%d): Error: "msg"\n", \
+                                        (pos).filename, (pos).lineNumber, (pos).columnNumber, ##__VA_ARGS__ )
 
 internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod mod = Token::None )
 {
@@ -140,7 +140,7 @@ internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod
         case Token::Octal:          base = 8; break;
         case Token::Hexadecimal:    base = 16; break;
         default:
-            PARSE_ERROR( *token, "Unsupported literal modifier flags (0x%x)", mod );
+            PARSE_ERROR( token->pos, "Unsupported literal modifier flags (0x%x)", mod );
             return;
     }
 
@@ -152,17 +152,17 @@ internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod
 
         if( digit == -1 )
         {
-            PARSE_ERROR( *token, "Expected digit, found '%c'", c );
+            PARSE_ERROR( token->pos, "Expected digit, found '%c'", c );
             return;
         }
         if( digit >= base )
         {
-            PARSE_ERROR( *token, "Invalid digit '%c' for base %d", c, base );
+            PARSE_ERROR( token->pos, "Invalid digit '%c' for base %d", c, base );
             return;
         }
         if( val > (U64MAX - digit)/base )
         {
-            PARSE_ERROR( *token, "Integer literal overflow" );
+            PARSE_ERROR( token->pos, "Integer literal overflow" );
             return;
         }
 
@@ -195,7 +195,7 @@ internal void ScanFloat( Lexer* lexer, Token* token )
             c++;
         if( !IsNumber( *c ) )
         {
-            PARSE_ERROR( *token, "Expected number after float literal exponent, found '%c'", *c );
+            PARSE_ERROR( token->pos, "Expected number after float literal exponent, found '%c'", *c );
             return;
         }
         while( IsNumber( *c ) )
@@ -208,7 +208,7 @@ internal void ScanFloat( Lexer* lexer, Token* token )
 
     if( (val == 0.0 && end == nullptr) ||
         (val == HUGE_VAL && errno) )
-        PARSE_ERROR( *token, "Invalid floating point literal" );
+        PARSE_ERROR( token->pos, "Invalid floating point literal" );
     else
     {
         ASSERT( end == c, "Float literal parsed incorrectly" );
@@ -299,7 +299,7 @@ internal void NextTokenRaw( Lexer* lexer )
                     ScanInt( lexer, &token, length, mod );
                 }
                 else
-                    PARSE_ERROR( token, "Integer prefix must be followed by one or more digits" );
+                    PARSE_ERROR( token.pos, "Integer prefix must be followed by one or more digits" );
             }
             else
             {
@@ -358,7 +358,7 @@ internal void NextTokenRaw( Lexer* lexer )
 
                 if( c == '\n' || c == '\r' )
                 {
-                    PARSE_ERROR( token, "String literal cannot contain newline" );
+                    PARSE_ERROR( token.pos, "String literal cannot contain newline" );
                     break;
                 }
                 else if( c == '\\' )
@@ -369,7 +369,7 @@ internal void NextTokenRaw( Lexer* lexer )
                     int val = escapeToChar[ c ];
                     if( val == -1 )
                     {
-                        PARSE_ERROR( token, "Invalid escape sequence in string literal '%c'", c );
+                        PARSE_ERROR( token.pos, "Invalid escape sequence in string literal '%c'", c );
                         break;
                     }
 
@@ -547,7 +547,7 @@ internal void NextTokenRaw( Lexer* lexer )
         default:
         {
             token.kind = TokenKind::Unknown;
-            PARSE_ERROR( token, "Invalid token '%c', skipping", stream[0] );
+            PARSE_ERROR( token.pos, "Invalid token '%c', skipping", stream[0] );
 
             lexer->Advance();
         } break;
@@ -599,9 +599,31 @@ void RequireToken( TokenKind::Enum wantedKind, Lexer* lexer )
     Token const& token = lexer->token;
     if( token.kind != wantedKind )
     {
-        PARSE_ERROR( token, "Unexpected token type (wanted '%s', got '%s')",
+        PARSE_ERROR( token.pos, "Unexpected token type (wanted '%s', got '%s')",
                TokenKind::Values::names[wantedKind], TokenKind::Values::names[token.kind] );
     }
+}
+
+void RequireTokenAndAdvance( TokenKind::Enum wantedKind, Lexer* lexer )
+{
+    RequireToken( wantedKind, lexer );
+    NextToken( lexer );
+}
+
+void RequireKeyword( int kw, Lexer* lexer )
+{
+    Token const& token = lexer->token;
+    if( token.kind != TokenKind::Keyword || token.ident != globalKeywords[ kw ] )
+    {
+        PARSE_ERROR( token.pos, "Expected keyword '%s' (got '%s')",
+               globalKeywords[ kw ], TokenKind::Values::names[token.kind] );
+    }
+}
+
+void RequireKeywordAndAdvance( int kw, Lexer* lexer )
+{
+    RequireKeyword( kw, lexer );
+    NextToken( lexer );
 }
 
 bool MatchToken( TokenKind::Enum wantedKind, Token const& token )
