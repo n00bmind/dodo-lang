@@ -19,7 +19,7 @@ TypeSpec* NewNameTypeSpec( SourcePos const& pos, BucketArray<char const*> const&
 TypeSpec* NewPtrTypeSpec( SourcePos const& pos, TypeSpec* ofType )
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Pointer );
-    result->base = ofType;
+    result->ptr.base = ofType;
 
     return result;
 }
@@ -37,8 +37,8 @@ TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<TypeSpec*> const& a
 TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size )
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Array );
-    result->base = ofType;
-    result->arraySize = size;
+    result->array.base = ofType;
+    result->array.count = size;
 
     return result;
 }
@@ -603,21 +603,11 @@ Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name )
     return result;
 }
 
-// TODO Only used for Vars right now, as they don't always have a resolved list of names. Maybe we should resolve before getting here?
-Decl* NewDecl( SourcePos const& pos, Decl::Kind kind )
-{
-    Decl* result = PUSH_STRUCT( &globalArena, Decl );
-    result->pos = pos;
-    result->kind = kind;
-
-    return result;
-}
-
-// TODO Unused?
 Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> const& names )
 {
     Decl* result = PUSH_STRUCT( &globalArena, Decl );
     result->pos = pos;
+    // Copy names array to ensure it's in the global arena
     new( &result->names ) Array<char const*>( &globalArena, names.count );
     names.CopyTo( &result->names );
     result->kind = kind;
@@ -767,11 +757,10 @@ Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> 
     return result;
 }
 
-Decl* NewVarDecl( SourcePos const& pos, Expr* namesExpr, TypeSpec* type, Expr* initExpr, bool isConst )
+Decl* NewVarDecl( SourcePos const& pos, BucketArray<char const*> const& names, TypeSpec* type, Expr* initExpr, bool isConst )
 {
-    Decl* result = NewDecl( pos, Decl::Var );
+    Decl* result = NewDecl( pos, Decl::Var, names );
     result->var.type = type;
-    result->var.namesExpr = namesExpr;
     result->var.initExpr = initExpr;
     result->var.isConst = isConst;
 
@@ -932,8 +921,29 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
         RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
     }
 
+    BucketArray<char const*> names( &globalTmpArena, 8 );
+    if( namesExpr->kind == Expr::Name )
+        names.Push( namesExpr->name );
+    else
+    {
+        if( namesExpr->kind == Expr::Comma )
+        {
+            for( Expr* e : namesExpr->commaExprs )
+            {
+                if( e->kind != Expr::Name )
+                {
+                    PARSE_ERROR( e->pos, "Expected identifier" );
+                    break;
+                }
+                names.Push( e->name );
+            }
+        }
+        else
+            PARSE_ERROR( namesExpr->pos, "Expected one or more identifiers" );
+    }
+
     if( lexer->IsValid() )
-        return NewVarDecl( pos, namesExpr, type, initExpr, isConst );
+        return NewVarDecl( pos, names, type, initExpr, isConst );
 
     return nullptr;
 }
@@ -1369,9 +1379,8 @@ Array<Decl*> Parse( String const& program, char const* filename )
     ScopedTmpMemory tmpMemory( &globalTmpArena );
     BucketArray<Decl*> decls( &globalTmpArena, 16, Temporary() );
 
-    while( globalRunning )
+    while( lexer.IsValid() )
     {
-        Token token = NextToken( &lexer );
         if( token.kind == TokenKind::EndOfStream )
             break;
 
@@ -1563,18 +1572,17 @@ void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
         case TypeSpec::Array:
         {
             APPEND( "[" );
-            if( type->arraySize )
-                DebugPrintSExpr( type->arraySize, outBuf, maxLen );
+            if( type->array.count )
+                DebugPrintSExpr( type->array.count, outBuf, maxLen );
             APPEND( "] " );
+            DebugPrintTypeSpec( type->array.base, outBuf, maxLen );
         } break;
         case TypeSpec::Pointer:
         {
             APPEND( "*" );
+            DebugPrintTypeSpec( type->ptr.base, outBuf, maxLen );
         } break;
     }
-
-    if( type->base )
-        DebugPrintTypeSpec( type->base, outBuf, maxLen );
 }
 
 void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent );

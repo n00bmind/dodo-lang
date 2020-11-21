@@ -171,3 +171,32 @@ struct InternStringBuffer
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
 
+
+struct Lexer
+{
+    SourcePos pos;
+    Token token;
+    String stream;
+
+    bool error;
+
+    Lexer() {}
+    Lexer( String const& input, char const* filename_ );
+
+    INLINE void Advance( int count = 1 )
+    {
+        ASSERT( count <= stream.length );
+
+        stream.length -= count;
+        stream.data += count;
+
+        pos.columnNumber += count;
+    }
+
+    INLINE bool IsValid()
+    {
+        return !error;
+    }
+};
+
+

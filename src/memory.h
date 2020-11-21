@@ -37,7 +37,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), alignof(char), ## __VA_ARGS__ )
 #define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, DefaultMemoryAlignment, ## __VA_ARGS__ )
 
-#define INIT(address) new (address)
+#define INIT(var) new (&var)
 
 
 ///// STATIC MEMORY ARENA

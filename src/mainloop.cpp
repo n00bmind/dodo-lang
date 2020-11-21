@@ -15,10 +15,12 @@
 MemoryArena globalArena;
 MemoryArena globalTmpArena;
 InternStringBuffer globalInternStrings;
-bool globalRunning = true;
+bool globalError = false;
 
+#include "common.cpp"
 #include "lexer.cpp"
 #include "parser.cpp"
+#include "resolver.cpp"
 
 
 void InitTestMemory()
@@ -110,7 +112,6 @@ void RunTests()
             char buf[256] = {};
 
             lexer = Lexer( String( t.expr ), "" );
-            NextToken( &lexer );
             expr = ParseExpr( &lexer );
 
             char* outBuf = buf;
@@ -119,14 +120,13 @@ void RunTests()
             DebugPrintSExpr( expr, outBuf, len );
 
             globalPlatform.Print( "%s\n", buf );
-            // FIXME 
-            //ASSERT( StringsEqual( t.sExpr, buf ) );
+            ASSERT( StringsEqual( t.sExpr, buf ) );
         }
         globalPlatform.Print( "\n" );
     }
 
     {
-        // TODO Auto compare
+        // TODO Auto compare strings
         static TestString testDeclStrings[] =
         {
             { "a: int = 42;", "" },
@@ -183,7 +183,6 @@ complex_func :: ()
             }
         };
 
-        int i = 0;
         Lexer lexer;
         Decl* decl = nullptr;
 
@@ -194,7 +193,6 @@ complex_func :: ()
             char buf[16768] = {};
 
             lexer = Lexer( String( t.expr ), "" );
-            NextToken( &lexer );
             decl = ParseDecl( &lexer );
 
             char* outBuf = buf;
@@ -205,9 +203,73 @@ complex_func :: ()
             globalPlatform.Print( "%s\n", buf );
             //ASSERT( StringsEqual( t.sExpr, buf ) );
         }
-
-        __debugbreak();
     }
+
+    {
+        InitTestMemory();
+        InitResolver();
+
+        Type* intPtr = NewPtrType( intType );
+        ASSERT( NewPtrType( intType ) == intPtr );
+        Type* intPtrPtr = NewPtrType( NewPtrType( intType ) );
+        ASSERT( NewPtrType( NewPtrType( intType ) ) == intPtrPtr );
+        ASSERT( intPtrPtr != intPtr );
+        Type* float4Array = NewArrayType( floatType, 4 );
+        ASSERT( NewArrayType( floatType, 4 ) == float4Array );
+        BucketArray<Type*> args( &globalTmpArena, 1 );
+        args.Push( intType );
+        Type* intIntFunc = NewFuncType( args, intType );
+        ASSERT( NewFuncType( args, intType ) == intIntFunc );
+
+        InternString* fooIntern = Intern( String( "foo" ) );
+        char const* foo = fooIntern->data;
+        ASSERT( GetSymbol( foo ) == nullptr );
+        Decl nilDecl = {};
+        nilDecl.name = foo;
+        PushSymbol( &nilDecl );
+        ASSERT( GetSymbol( foo ) && GetSymbol( foo )->decl == &nilDecl );
+
+        static char const* testDeclStrings[] =
+        {
+            "n :: 1 + sizeof(p)",
+            "p : *T",
+            "u := *p",
+            "struct T { a: [n]int; }",
+            "r := &t.a",
+            "t: T",
+            "s: [n+m]int",
+            "m :: sizeof(t.a)",
+            "i := n + m",
+            "q = &i",
+            "sx :: sizeof(x)",
+            "x: R",
+            "struct R { s: *S; }",
+            "struct S { r: [sx]R; }",
+        };
+
+        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        {
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Decl* decl = ParseDecl( &lexer );
+            PushSymbol( decl );
+        }
+        auto idx = globalSymbolList.First();
+        while( idx )
+        {
+            ResolveSymbol( *idx );
+            idx.Next();
+        }
+        auto idx2 = globalOrderedSymbols.First();
+        while( idx2 )
+        {
+            Symbol* sym = *idx2;
+            if( sym->decl )
+                printf( "Declare %s\n", sym->decl->name );
+            else
+                printf( "%s\n", sym->name );
+        }
+    }
+    __debugbreak();
 }
 
 void Run( Array<String> const& argsList )
@@ -227,6 +289,8 @@ void Run( Array<String> const& argsList )
     // Init intern strings
     InitArena( &globalInternStrings.arena );
     new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
+
+    InitResolver();
 
     String inputFilename = argsList[0];
     char const* filename_str = inputFilename.CString( globalTmpArena );

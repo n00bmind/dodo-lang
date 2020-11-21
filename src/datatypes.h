@@ -34,10 +34,16 @@ struct Array
         capacity = bufferCount;
     }
 
-    inline T*       begin()         { return data; }
-    inline const T* begin() const   { return data; }
-    inline T*       end()           { return data + count; }
-    inline const T* end() const     { return data + count; }
+    T*       begin()         { return data; }
+    const T* begin() const   { return data; }
+    T*       end()           { return data + count; }
+    const T* end() const     { return data + count; }
+
+    bool operator ==( Array<T> const& other ) const
+    {
+        return count == other.count && PEQUAL( data, other.data, count * sizeof(T) );
+    }
+
 
     void Resize( i32 new_count )
     {
@@ -469,6 +475,25 @@ struct BucketArray
     {
         ASSERT( idx.IsValid() );
         return (T const&)idx;
+    }
+
+    bool operator ==( Array<T> const& other ) const
+    {
+        if( count != other.count)
+            return false;
+
+        int i = 0;
+        auto idx = First(); 
+        while( idx )
+        {
+            T const& e = *idx;
+            if( e != other[i++] )
+                return false;
+
+            idx.Next();
+        }
+
+        return true;
     }
 
 private:

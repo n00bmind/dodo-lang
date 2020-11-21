@@ -82,6 +82,8 @@ error messages to more advanced tools, should be designed with care so as to nev
 :: TOOLING ::
 
 - Debuggers are very very poor at visualizing complex data in general, so there's tons to be improved here, from directly previewing images or other media, to graph-like representations of relationships between different parts of the data in memory.
+  Some ideas on this regard: http://worrydream.com/#!/LearnableProgramming (see the adaptive visualization right before "Eliminate hidden state", for example)
+  Also the Whitebox tool being developed by azmr.
 
 - One of the reasons profilers are incredibly useful is they allow to easily graph historical data, and debuggers have never tried something like that. There's probably a way to augment the debugged code directly so it can sample all kinds of stuff about the runtime behaviour
   of the code that can then be plotted directly in the debugger (maybe even provide a socket so that interesting data can be piped back to the app or to be viewed remotely).

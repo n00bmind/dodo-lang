@@ -4,7 +4,7 @@ struct TypeSpec
 {
     enum Kind
     {
-        None,
+        None = 0,
         Name,
         Func,
         Array,
@@ -14,7 +14,6 @@ struct TypeSpec
     };
     
     SourcePos pos;
-    TypeSpec* base;
     Kind kind;
 
     union
@@ -26,8 +25,16 @@ struct TypeSpec
             // TODO 
             //bool hasVarargs;
         } func;
+        struct
+        {
+            Expr* count;
+            TypeSpec* base;
+        } array;
+        struct
+        {
+            TypeSpec* base;
+        } ptr;
         ::Array<char const*> names;
-        Expr* arraySize;
     };
 };
 
@@ -114,15 +121,15 @@ struct Expr
             Expr* base;
             char const* name;
         } field;
-
         Array<CompoundField> compoundFields;
+
         struct
         {
             union
             {
+                String strValue;
                 u64 intValue;
                 f64 floatValue;
-                String strValue;
             };
             Token::LiteralMod modifier;
         } literal;
@@ -206,9 +213,8 @@ struct Decl
         struct
         {
             TypeSpec* type;
-            Expr* namesExpr;
             Expr* initExpr;
-            bool isConst;   //?
+            bool isConst;
         } var;
     };
 };

@@ -32,103 +32,64 @@ internal InternString* Intern( String const& string, u16 flags = 0 )
     return result;
 }
 
-struct Lexer
+Token NextToken( Lexer* lexer );
+
+Lexer::Lexer( String const& input, char const* filename_ )
+    : stream( input )
+    , error( false )
 {
-    SourcePos pos;
-    Token token;
-    String stream;
+    pos = { filename_, 1, 1 };
+    token = {};
 
-    bool error;
-
-    Lexer()
-    {}
-    Lexer( String const& input, char const* filename_ )
-        : stream( input )
-        , error( false )
+    // Intern keywords
+    for( Keyword const& k : Keyword::Values::items )
     {
-        pos = { filename_, 1, 1 };
-        token = {};
-
-        // Intern keywords
-        for( Keyword const& k : Keyword::Values::items )
-        {
-            InternString* intern = Intern( String( k.name ), InternString::Keyword );
-            globalKeywords[k.index] = intern->data;
-        }
-
-        // Escape sequences
-        SET( escapeToChar, -1 );
-        escapeToChar['0'] = '\0';
-        escapeToChar['\''] = '\'';
-        escapeToChar['"'] = '"';
-        escapeToChar['\\'] = '\\';
-        escapeToChar['n'] = '\n';
-        escapeToChar['r'] = '\r';
-        escapeToChar['t'] = '\t';
-        escapeToChar['v'] = '\v';
-        escapeToChar['b'] = '\b';
-        escapeToChar['a'] = '\a';
-
-        // Digit table
-        SET( charToDigit, -1 );
-        charToDigit['0'] = 0;
-        charToDigit['1'] = 1;
-        charToDigit['2'] = 2;
-        charToDigit['3'] = 3;
-        charToDigit['4'] = 4;
-        charToDigit['5'] = 5;
-        charToDigit['6'] = 6;
-        charToDigit['7'] = 7;
-        charToDigit['8'] = 8;
-        charToDigit['9'] = 9;
-        charToDigit['a'] = 10; 
-        charToDigit['b'] = 11; 
-        charToDigit['c'] = 12; 
-        charToDigit['d'] = 13; 
-        charToDigit['e'] = 14; 
-        charToDigit['f'] = 15; 
-        charToDigit['A'] = 10;
-        charToDigit['B'] = 11;
-        charToDigit['C'] = 12;
-        charToDigit['D'] = 13;
-        charToDigit['E'] = 14;
-        charToDigit['F'] = 15;
+        InternString* intern = Intern( String( k.name ), InternString::Keyword );
+        globalKeywords[k.index] = intern->data;
     }
 
-    void Advance( int count = 1 )
-    {
-        ASSERT( count <= stream.length );
+    // Escape sequences
+    SET( escapeToChar, -1 );
+    escapeToChar['0'] = '\0';
+    escapeToChar['\''] = '\'';
+    escapeToChar['"'] = '"';
+    escapeToChar['\\'] = '\\';
+    escapeToChar['n'] = '\n';
+    escapeToChar['r'] = '\r';
+    escapeToChar['t'] = '\t';
+    escapeToChar['v'] = '\v';
+    escapeToChar['b'] = '\b';
+    escapeToChar['a'] = '\a';
 
-        stream.length -= count;
-        stream.data += count;
+    // Digit table
+    SET( charToDigit, -1 );
+    charToDigit['0'] = 0;
+    charToDigit['1'] = 1;
+    charToDigit['2'] = 2;
+    charToDigit['3'] = 3;
+    charToDigit['4'] = 4;
+    charToDigit['5'] = 5;
+    charToDigit['6'] = 6;
+    charToDigit['7'] = 7;
+    charToDigit['8'] = 8;
+    charToDigit['9'] = 9;
+    charToDigit['a'] = 10; 
+    charToDigit['b'] = 11; 
+    charToDigit['c'] = 12; 
+    charToDigit['d'] = 13; 
+    charToDigit['e'] = 14; 
+    charToDigit['f'] = 15; 
+    charToDigit['A'] = 10;
+    charToDigit['B'] = 11;
+    charToDigit['C'] = 12;
+    charToDigit['D'] = 13;
+    charToDigit['E'] = 14;
+    charToDigit['F'] = 15;
 
-        pos.columnNumber += count;
-    }
 
-    bool IsValid()
-    {
-        return !error;
-    }
-};
-
-internal void Error( Lexer* lexer, char const* fmt, ... )
-{
-    va_list arg_list;
-    va_start( arg_list, fmt );
-
-    globalPlatform.ErrorVA( fmt, arg_list );
-    va_end( arg_list );
-
-    lexer->error = true;
-    globalRunning = false;
-
-#if DEBUG
-    __debugbreak();
-#endif
+    NextToken( this );
 }
 
-#define PARSE_ERROR( pos, msg, ... ) Error( lexer, "%s(%d,%d): Error: "msg"\n", \
-                                        (pos).filename, (pos).lineNumber, (pos).columnNumber, ##__VA_ARGS__ )
 
 internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod mod = Token::None )
 {
