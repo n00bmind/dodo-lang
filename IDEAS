@@ -73,6 +73,9 @@ ________________________________________________________________________________
 - Think about the "sticky error" pattern for error handling explained in https://youtu.be/0WpCnd9E-eg?t=5864 and how to apply it to
   the standard library, or even through language constructs.
 
+- Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default
+  for all instances), or when declaring each instance.
+
 ________________________________________________________________________________ 
 
 

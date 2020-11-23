@@ -9,6 +9,7 @@
 
 
 PlatformAPI globalPlatform;
+const sz PlatformAPI::PointerSize = 8;
 
 
 PLATFORM_ALLOC(Win32Alloc)

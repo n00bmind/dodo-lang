@@ -91,7 +91,7 @@ struct Array
         ASSERT( count < capacity );
         T* result = data + count++;
         if( clear )
-            PZERO( result, sizeof(T) );
+            *result = {};
 
         return result;
     }
@@ -320,18 +320,22 @@ struct BucketArray
     BucketArray( const BucketArray& ) = delete;
     BucketArray& operator =( const BucketArray& ) = delete;
 
-    T* PushEmpty()
+    T* PushEmpty( bool clear = true )
     {
         if( last->count == last->capacity )
             AddEmptyBucket();
 
         count++;
-        return &last->data[last->count++];
+        T* result = &last->data[last->count++];
+        if( clear )
+            *result = {};
+
+        return result;
     }
 
     T* Push( const T& item )
     {
-        T* slot = PushEmpty();
+        T* slot = PushEmpty( false );
         *slot = item;
         return slot;
     }

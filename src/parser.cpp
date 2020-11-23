@@ -1379,6 +1379,7 @@ Array<Decl*> Parse( String const& program, char const* filename )
     ScopedTmpMemory tmpMemory( &globalTmpArena );
     BucketArray<Decl*> decls( &globalTmpArena, 16, Temporary() );
 
+    Token const& token = lexer.token;
     while( lexer.IsValid() )
     {
         if( token.kind == TokenKind::EndOfStream )
@@ -1784,7 +1785,12 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
         case Decl::Var:
         {
             APPEND( "(%s ", decl->var.isConst ? "const" : "var" );
-            DebugPrintSExpr( decl->var.namesExpr, outBuf, maxLen );
+            for( char const*& name : decl->names )
+            {
+                if( &name != decl->names.begin() )
+                    APPEND( ", " );
+                APPEND( "%s", name );
+            }
             APPEND( ": " );
             DebugPrintTypeSpec( decl->var.type, outBuf, maxLen );
             APPEND( " = " );

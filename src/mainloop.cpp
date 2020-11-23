@@ -47,7 +47,8 @@ void RunTests()
         Lexer lexer = Lexer( String( testTokenStrings[0] ), "" );
         Token token;
 
-        ASSERT_TOKEN(Name);
+        // First token was already eaten
+        ASSERT(lexer.token.kind == TokenKind::Name);
         ASSERT_TOKEN(OpenParen);
         ASSERT_TOKEN(StringLiteral);
         ASSERT( StringsEqual( token.strValue, "num\v" ) );
@@ -119,10 +120,10 @@ void RunTests()
             int indent = 0;
             DebugPrintSExpr( expr, outBuf, len );
 
-            globalPlatform.Print( "%s\n", buf );
+            //globalPlatform.Print( "%s\n", buf );
             ASSERT( StringsEqual( t.sExpr, buf ) );
         }
-        globalPlatform.Print( "\n" );
+        //globalPlatform.Print( "\n" );
     }
 
     {
@@ -200,7 +201,7 @@ complex_func :: ()
             int indent = 0;
             DebugPrintSExpr( decl, outBuf, len, indent );
 
-            globalPlatform.Print( "%s\n", buf );
+            //globalPlatform.Print( "%s\n", buf );
             //ASSERT( StringsEqual( t.sExpr, buf ) );
         }
     }
@@ -214,9 +215,9 @@ complex_func :: ()
         Type* intPtrPtr = NewPtrType( NewPtrType( intType ) );
         ASSERT( NewPtrType( NewPtrType( intType ) ) == intPtrPtr );
         ASSERT( intPtrPtr != intPtr );
-        Type* float4Array = NewArrayType( floatType, 4 );
-        ASSERT( NewArrayType( floatType, 4 ) == float4Array );
-        BucketArray<Type*> args( &globalTmpArena, 1 );
+        //Type* float4Array = NewArrayType( floatType, 4 );
+        //ASSERT( NewArrayType( floatType, 4 ) == float4Array );
+        Array<Type*> args( &globalTmpArena, 1 );
         args.Push( intType );
         Type* intIntFunc = NewFuncType( args, intType );
         ASSERT( NewFuncType( args, intType ) == intIntFunc );
@@ -224,49 +225,77 @@ complex_func :: ()
         InternString* fooIntern = Intern( String( "foo" ) );
         char const* foo = fooIntern->data;
         ASSERT( GetSymbol( foo ) == nullptr );
-        Decl nilDecl = {};
-        nilDecl.name = foo;
-        PushSymbol( &nilDecl );
-        ASSERT( GetSymbol( foo ) && GetSymbol( foo )->decl == &nilDecl );
+        CreateTypeSymbol( foo, intType );
+        ASSERT( GetSymbol( foo ) && GetSymbol( foo )->type == intType );
 
         static char const* testDeclStrings[] =
         {
-            "n :: 1 + sizeof(p)",
-            "p : *T",
-            "u := *p",
-            "struct T { a: [n]int; }",
-            "r := &t.a",
-            "t: T",
-            "s: [n+m]int",
-            "m :: sizeof(t.a)",
-            "i := n + m",
-            "q = &i",
-            "sx :: sizeof(x)",
-            "x: R",
-            "struct R { s: *S; }",
-            "struct S { r: [sx]R; }",
+            "n :: 1 + sizeof(p);",
+            "p : *T;",
+            "u := *p;",
+            "T :: struct { a: [n] int; };",
+            "r := &t.a;",
+            "t: T;",
+            "s: [n+m]int;",
+            "m :: sizeof(t.a);",
+            "i := n + m;",
+            "q := &i;",
+            "sx :: sizeof(x);",
+            "x: R;",
+            "R :: struct { s: *S; };",
+            "S :: struct { r: [sx] R; };",
+            "a, b, c :: 0;",
+            //"b := 1;",                                  // Redeclared
         };
 
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
             Decl* decl = ParseDecl( &lexer );
-            PushSymbol( decl );
+            CreateDeclSymbols( decl );
         }
-        auto idx = globalSymbolList.First();
-        while( idx )
         {
-            ResolveSymbol( *idx );
-            idx.Next();
+            auto idx = globalSymbolList.First();
+            while( idx )
+            {
+                CompleteSymbol( &*idx );
+                idx.Next();
+            }
         }
+
+        // Complete any remaining incomplete types
+#if 0
+        {
+            SourcePos pos = {};
+            auto idx = globalSymbolList.First();
+            while( idx )
+            {
+                Symbol* sym = &*idx;
+                if( sym->type && sym->type->kind == Type::Incomplete )
+                    CompleteType( sym->type, pos );
+                idx.Next();
+            }
+        }
+#endif
         auto idx2 = globalOrderedSymbols.First();
         while( idx2 )
         {
             Symbol* sym = *idx2;
+
             if( sym->decl )
-                printf( "Declare %s\n", sym->decl->name );
+            {
+                char buf[1024] = {};
+                char* outBuf = buf;
+                sz len = ARRAYCOUNT(buf);
+                int indent = 0;
+
+                DebugPrintSExpr( sym->decl, outBuf, len, indent );
+                printf( "Declare %s\n", buf );
+            }
             else
                 printf( "%s\n", sym->name );
+
+            idx2.Next();
         }
     }
     __debugbreak();

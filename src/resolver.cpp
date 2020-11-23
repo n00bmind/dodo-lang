@@ -1,3 +1,12 @@
+struct Type;
+
+struct Value
+{
+    union
+    {
+        u64 intValue;
+    };
+};
 
 struct Symbol
 {
@@ -7,8 +16,8 @@ struct Symbol
         Var,
         Const,
         Func,
-        //Type,     // This is just for typedefs apparently
-        //Module,
+        Type,
+        Module,
     };
 
     enum State
@@ -20,21 +29,16 @@ struct Symbol
 
     char const* name;
     Decl* decl;
-    Type* type;
+    ::Type* type;
+    Value value;
     Kind kind;
     State state;
-
-    union
-    {
-        i64 intValue;
-    } value;
 };
 
 // TODO Hashtable!
 BucketArray<Symbol> globalSymbolList;
+BucketArray<Symbol*> globalOrderedSymbols;
 
-
-struct Type;
 
 struct TypeField
 {
@@ -62,9 +66,14 @@ struct Type
         Func,
     };
 
+    // TODO Fill up!
+    char const* name;
     // TODO Should be decl?
-    //Symbol* symbol;   // NOTE Will be null for all primitive types
+    Symbol* symbol;   // NOTE Only aggregates and enums will have one
+    // TODO Remove?
     Decl* decl;
+    sz size;
+    sz align;
     Kind kind;
 
     union
@@ -91,8 +100,10 @@ struct Type
     };
 };
 
-Type intTypeVal = { nullptr, Type::Int };
-Type floatTypeVal = { nullptr, Type::Float };
+// TODO Builtins
+// TODO Type metrics
+Type intTypeVal = { "int", nullptr, nullptr, 4, 4, Type::Int };
+Type floatTypeVal = { "float", nullptr, nullptr, 4, 4, Type::Float };
 
 Type* intType = &intTypeVal;
 Type* floatType = &floatTypeVal;
@@ -129,13 +140,20 @@ struct CachedType
 BucketArray<Type*> globalCachedTypes;
 
 
+sz TypeSize( Type* type )
+{
+    ASSERT( type->kind > Type::Completing );
+    ASSERT( type->size );
+    return type->size;
+}
+
+
 struct ResolvedExpr
 {
     Type* type;
+    Value value;
     bool isLvalue;
     bool isConst;
-    // TODO 
-    u64 intValue;
 };
 
 ResolvedExpr resolvedNull = {};
@@ -155,16 +173,52 @@ ResolvedExpr NewResolvedLvalue( Type* type )
     return result;
 }
 
+ResolvedExpr NewResolvedConst( Type* type, u64 intValue )
+{
+    ResolvedExpr result = {};
+    result.type = type;
+    result.isConst = true;
+    result.value.intValue = intValue;
+    return result;
+}
+
+
+Symbol* ResolveName( char const* name, SourcePos const& pos );
+ResolvedExpr ResolveExpr( Expr* expr );
+
+ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
+{
+    ResolvedExpr result = ResolveExpr( expr );
+    if( !result.isConst )
+    {
+        RSLV_ERROR( expr->pos, "Expected constant expression" );
+        result = resolvedNull;
+    }
+    if( expectedType && result.type != expectedType )
+    {
+        RSLV_ERROR( expr->pos, "Expected constant expression of type '%s'", expectedType );
+        result = resolvedNull;
+    }
+
+    return result;
+}
+
+u64 ResolveConstExprInt( Expr* expr )
+{
+    ResolvedExpr result = ResolveConstExpr( expr, intType );
+    return result.value.intValue;
+}
+
 ResolvedExpr ResolveNameExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Name );
 
-    Symbol* sym = ResolveName( expr->name );
-    if( symbol->kind == Symbol::Var )
+    Symbol* sym = ResolveName( expr->name, expr->pos );
+    if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
-    else if( symbol->kind == Symbol::Const )
+    else if( sym->kind == Symbol::Const )
         // TODO 
-        return NewResolvedConst( sym->value.intValue );
+        return NewResolvedConst( intType, sym->value.intValue );
     // TODO Functions
     else
     {
@@ -172,6 +226,46 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
         return resolvedNull;
     }
 }
+
+void CompleteType( Type* type, SourcePos const& pos );
+
+ResolvedExpr ResolveFieldExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Field );
+
+    // TODO Modules
+    ResolvedExpr left = ResolveExpr( expr->field.base );
+    Type* type = left.type;
+    CompleteType( type, expr->pos );
+
+    if( type && type->kind == Type::Pointer )
+    {
+        left = NewResolvedLvalue( type->ptr.base );
+        type = left.type;
+        CompleteType( type, expr->pos );
+    }
+    if( !type || !(type->kind == Type::Struct || type->kind == Type::Union) )
+    {
+        RSLV_ERROR( expr->pos, "Can only reference fields on aggregates or pointers to aggregates" );
+        return resolvedNull;
+    }
+
+    for( TypeField const& f : type->aggregate.fields )
+    {
+        if( f.name == expr->field.name )
+        {
+            ResolvedExpr resolvedField = left.isLvalue
+                ? NewResolvedLvalue( f.type )
+                : NewResolvedRvalue( f.type );
+            return resolvedField;
+        }
+    }
+
+    RSLV_ERROR( expr->pos, "No field named '%s' in type '%s'", expr->field.name, type->name );
+    return resolvedNull;
+}
+
+Type* NewPtrType( Type* base );
 
 ResolvedExpr ResolveUnaryExpr( Expr* expr )
 {
@@ -223,7 +317,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         {
             if( left.isConst && right.isConst )
                 // TODO 
-                return NewResolvedConst( left.value.intValue + right.value.intValue );
+                return NewResolvedConst( intType, left.value.intValue + right.value.intValue );
             else
                 return NewResolvedRvalue( left.type );
         } break;
@@ -241,7 +335,7 @@ ResolvedExpr ResolveExpr( Expr* expr )
     {
         case Expr::Int:
         {
-            return NewResolvedConst( expr->value->intValue );
+            return NewResolvedConst( intType, expr->literal.intValue );
         } break;
         case Expr::Name:
         {
@@ -263,9 +357,10 @@ ResolvedExpr ResolveExpr( Expr* expr )
         {
             ResolvedExpr result = ResolveExpr( expr->sizeofExpr );
             Type* type = result.type;
-            CompleteType( type );
+            CompleteType( type, expr->pos );
 
-            return NewResolvedConst( NewSizeofType( type ) );
+            // TODO Unsigned 64 bit?
+            return NewResolvedConst( intType, TypeSize( type ) );
         } break;
 
         default:
@@ -276,10 +371,11 @@ ResolvedExpr ResolveExpr( Expr* expr )
     }
 }
 
-Type* NewType( Type::Kind kind )
+Type* NewType( Type::Kind kind, sz size )
 {
     Type* result = PUSH_STRUCT( &globalArena, Type );
     result->kind = kind;
+    result->size = size;
     
     return result;
 }
@@ -298,7 +394,7 @@ Type* NewPtrType( Type* base )
         idx.Next();
     }
 
-    Type* result = NewType( Type::Pointer );
+    Type* result = NewType( Type::Pointer, globalPlatform.PointerSize );
     result->ptr.base = base;
 
 #if 0
@@ -325,7 +421,8 @@ Type* NewArrayType( Type* base, u64 count )
         idx.Next();
     }
 
-    Type* result = NewType( Type::Array );
+    // TODO Dynamic/any size arrays
+    Type* result = NewType( Type::Array, count * TypeSize( base ) );
     result->array.base = base;
     result->array.count = count;
 
@@ -354,7 +451,8 @@ Type* NewFuncType( Array<Type*> const& args, Type* returnType )
         idx.Next();
     }
 
-    Type* result = NewType( Type::Func );
+    Type* result = NewType( Type::Func, globalPlatform.PointerSize );
+    // NOTE Assume passed args are allocated in permanent memory
     result->func.args = args;
     result->func.returnType = returnType;
 
@@ -371,7 +469,7 @@ Type* NewFuncType( Array<Type*> const& args, Type* returnType )
 
 Type* NewIncompleteType( Symbol* sym )
 {
-    Type* result = NewType( Type::Incomplete );
+    Type* result = NewType( Type::Incomplete, 0 );
     result->symbol = sym;
     return result;
 }
@@ -385,9 +483,9 @@ void CompleteStructType( Type* type, Array<TypeField> const& fields )
     type->size = 0;
     for( TypeField const& f : type->aggregate.fields )
     {
-        ASSERT( f->type->kind > Type::Completing );
+        ASSERT( f.type->kind > Type::Completing );
         // TODO Alignment, field offset, etc.
-        type->size += SizeOfType( f->type );
+        type->size += TypeSize( f.type );
     }
 }
 
@@ -400,52 +498,13 @@ void CompleteUnionType( Type* type, Array<TypeField> const& fields )
     type->size = 0;
     for( TypeField const& f : type->aggregate.fields )
     {
-        ASSERT( f->type->kind > Type::Completing );
+        ASSERT( f.type->kind > Type::Completing );
         // TODO Alignment, field offset, etc.
-        type->size = Max( type->size, SizeOfType( f->type ) );
+        type->size = Max( type->size, TypeSize( f.type ) );
     }
 }
 
-void CompleteType( Type* type )
-{
-    ASSERT( type->kind );
-
-    Decl* decl = type->symbol->decl;
-    SourcePos const& pos = decl->pos;
-    if( type->kind == Type::Completing )
-    {
-        // TODO
-        RSLV_ERROR( pos, "Circular dependency detected" );
-        return;
-    }
-    else if( type->kind != Type::Incomplete )
-        // Nothing to do
-        return;
-
-    type->kind = Type::Completing;
-    ASSERT( decl->kind == Decl::Struct || decl->kind == Decl::Union );
-
-    Array<TypeField> fields( &globalArena, decl->aggregate.items.count );
-    for( Decl* d : decl->aggregate.items )
-    {
-        Symbol* sym = ResolveDecl( d );
-        CompleteType( sym->type );
-        // If there's several names, create a separate field for each
-        // TODO Should have returned several symbols above?
-        for( char const* name : d->names )
-        {
-            // TODO Offset
-            field.Push( { name, sym->type } );
-        }
-    }
-
-    if( decl->kind == Decl::Struct )
-        CompleteStructType( type, fields );
-    else
-        CompleteUnionType( type, fields );
-
-    globalOrderedSymbols.Push( type->symbol );
-}
+Array<Symbol*> CreateDeclSymbols( Decl* decl );
 
 Type* ResolveTypeSpec( TypeSpec* spec )
 {
@@ -465,8 +524,8 @@ Type* ResolveTypeSpec( TypeSpec* spec )
                 break;
             }
 
-            char const* name = spec->names.Back();
-            Symbol* sym = ResolveName( spec->name, pos );
+            char const* name = spec->names.Last();
+            Symbol* sym = ResolveName( name, pos );
             if( sym->kind != Symbol::Type )
             {
                 RSLV_ERROR( pos, "'%s' must denote a type", name );
@@ -482,7 +541,10 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         } break;
         case TypeSpec::Array:
         {
-            u64 count = ResolveConstIntExpr( spec->array.count );
+            // TODO Dynamic/unknown array size
+            u64 count = ResolveConstExprInt( spec->array.count );
+            // TODO Signed/unsigned
+            // TODO Check positive
             Type* base = ResolveTypeSpec( spec->array.base );
             result = NewArrayType( base, count );
         } break;
@@ -500,6 +562,55 @@ Type* ResolveTypeSpec( TypeSpec* spec )
 
         INVALID_DEFAULT_CASE
     }
+
+    return result;
+}
+
+void CompleteType( Type* type, SourcePos const& pos )
+{
+    ASSERT( type->kind );
+
+    if( type->kind == Type::Completing )
+    {
+        // TODO
+        RSLV_ERROR( pos, "Circular dependency detected" );
+        return;
+    }
+    else if( type->kind != Type::Incomplete )
+        // Nothing to do
+        return;
+
+    type->kind = Type::Completing;
+    ASSERT( type->symbol && type->symbol->decl );
+
+    // TODO Enums?
+    Decl* decl = type->symbol->decl;
+    ASSERT( decl->kind == Decl::Struct || decl->kind == Decl::Union );
+
+    Array<TypeField> fields( &globalArena, decl->aggregate.items.count );
+    for( Decl* d : decl->aggregate.items )
+    {
+        // Only care about variable fields
+        if( d->kind == Decl::Var )
+        {
+            Type* fieldType = ResolveTypeSpec( d->var.type );
+            CompleteType( fieldType, d->pos );
+
+            // If there are several names, create a separate field for each one
+            for( char const* name : d->names )
+            {
+                // TODO Offset
+                fields.Push( { name, fieldType } );
+            }
+        }
+    }
+
+    if( decl->kind == Decl::Struct )
+        CompleteStructType( type, fields );
+    else
+        CompleteUnionType( type, fields );
+
+    globalOrderedSymbols.Push( type->symbol );
 }
 
 
@@ -522,26 +633,14 @@ Symbol* GetSymbol( char const* name )
     return result;
 }
 
-Symbol* PushSymbol( Decl* decl )
-{
-    ASSERT( decl->name );
-    ASSERT( GetSymbol( decl->name ) == nullptr );
-
-    Symbol result = {};
-    result->decl = decl;
-    result->name = decl->name;
-    result->state = Symbol::Unresolved;
-
-    return globalSymbolList.Push( result );
-}
-
 void ResolveSymbol( Symbol* sym )
 {
     if( sym->state == Symbol::Resolved )
         // Nothing to do
         return;
 
-    SourcePos const& pos = sym->decl->pos;
+    Decl* decl = sym->decl;
+    SourcePos const& pos = decl->pos;
     if( sym->state == Symbol::Resolving )
     {
         // TODO Log dependency graph nodes to aid debugging?
@@ -550,7 +649,7 @@ void ResolveSymbol( Symbol* sym )
     }
 
     ASSERT( sym->state == Symbol::Unresolved );
-    sym->state == Symbol::Resolving;
+    sym->state = Symbol::Resolving;
 
     switch( sym->kind )
     {
@@ -563,29 +662,48 @@ void ResolveSymbol( Symbol* sym )
                 type = ResolveTypeSpec( decl->var.type );
 
             // TODO Multiple names/inits?
-            auto& names decl->var.names;
+            // (Should maybe separate any comma expressions when separating the names above)
+            //auto& names = decl->var.names;
             if( decl->var.initExpr )
             {
                 ResolvedExpr init = ResolveExpr( decl->var.initExpr );
                 if( type && init.type != type )
-                    RSLV_ERROR( pos, "Declared type does not match inferred type" );
+                    RSLV_ERROR( pos, "Declared type for '%s' does not match inferred type", sym->name );
 
                 type = init.type;
             }
 
-            CompleteType( type );
+            CompleteType( type, decl->pos );
             sym->type = type;
         } break;
 
         case Symbol::Const:
         {
+            ASSERT( decl->var.isConst );
+
+            // NOTE Type is always inferred for constants right now
+            ResolvedExpr init = ResolveExpr( decl->var.initExpr );
+            if( !init.isConst )
+                RSLV_ERROR( pos, "Initializer for constant '%s' is not a constant expression", sym->name );
+
+            sym->value = init.value;
+            sym->type = init.type;
         } break;
-        //case Symbol::Type:
-        //{
-        //} break;
+
+        case Symbol::Type:
+        {
+            // TODO This would only be for typedefs now, as aggregates are resolved from the beginning
+        } break;
+
         case Symbol::Func:
         {
+            Array<Type*> args( &globalArena, decl->func.args.count );
+            for( FuncArg const& a : decl->func.args )
+                args.Push( ResolveTypeSpec( a.type ) );
+
+            sym->type = NewFuncType( args, ResolveTypeSpec( decl->func.returnType ) );
         } break;
+
         case Symbol::Module:
         {
         } break;
@@ -602,14 +720,14 @@ void CompleteSymbol( Symbol* sym )
     ResolveSymbol( sym );
 
     if( sym->kind == Symbol::Type )
-        CompleteType( sym->type );
+        CompleteType( sym->type, sym->decl->pos );
 }
 
 Symbol* ResolveName( char const* name, SourcePos const& pos )
 {
     Symbol* sym = GetSymbol( name );
     if( sym )
-        ResolveSymbol( sym, pos );
+        ResolveSymbol( sym );
     else
         RSLV_ERROR( pos, "Undefined symbol '%s'", name );
 
@@ -618,24 +736,75 @@ Symbol* ResolveName( char const* name, SourcePos const& pos )
 
 void ResolveSymbols()
 {
-    // TODO
-    SourcePos pos = {};
-
     auto idx = globalSymbolList.First();
     while( idx )
     {
-        ResolveSymbol( &*idx, pos );
+        ResolveSymbol( &*idx );
         idx.Next();
     }
 }
 
+Array<Symbol*> CreateDeclSymbols( Decl* decl )
+{
+    ASSERT( decl->names );
+
+    Symbol::Kind kind = Symbol::None;
+    switch( decl->kind )
+    {
+        case Decl::Var:
+            kind = decl->var.isConst ? Symbol::Const : Symbol::Var;
+            break;
+        case Decl::Func:
+            kind = Symbol::Func;
+            break;
+        // TODO Don't we need to add all syb-types and contained symbols for these?
+        case Decl::Struct:
+        case Decl::Union:
+        case Decl::Enum:
+            kind = Symbol::Type;
+            break;
+
+        INVALID_DEFAULT_CASE;
+    }
+
+    // TODO Temp?
+    Array<Symbol*> result( &globalTmpArena, decl->names.count );
+
+    for( char const* name : decl->names )
+    {
+        if( GetSymbol( name ) != nullptr )
+        {
+            RSLV_ERROR( decl->pos, "Symbol '%s' already declared", name );
+            continue;
+        }
+
+        Symbol* sym = globalSymbolList.PushEmpty( true );
+        sym->decl = decl;
+        sym->name = name;
+        sym->kind = kind;
+        sym->state = Symbol::Unresolved;
+
+        if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
+        {
+            sym->state = Symbol::Resolved;
+            sym->type = NewIncompleteType( sym );
+        }
+
+        result.Push( sym );
+    }
+
+    return result;
+}
+
 Symbol* CreateTypeSymbol( char const* name, Type* type )
 {
+    InternString* internName = Intern( String( name ) );
+
     Symbol result = {};
-    result->name = name;
-    result->type = type;
-    result->kind = Symbol::Type;
-    result->state = Symbol::Resolved;
+    result.name = internName->data;
+    result.type = type;
+    result.kind = Symbol::Type;
+    result.state = Symbol::Resolved;
 
     return globalSymbolList.Push( result );
 }
@@ -643,8 +812,9 @@ Symbol* CreateTypeSymbol( char const* name, Type* type )
 
 void InitResolver()
 {
-    new( &globalSymbolList ) BucketArray<Symbol>( &globalArena, 256 );
-    new( &globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
+    INIT( globalSymbolList ) BucketArray<Symbol>( &globalArena, 256 );
+    INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
+    INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
     CreateTypeSymbol( "int", intType );
     CreateTypeSymbol( "float", floatType );

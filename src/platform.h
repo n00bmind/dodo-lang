@@ -17,6 +17,8 @@ typedef PLATFORM_PRINT_VA(PlatformPrintVAFunc);
 
 struct PlatformAPI
 {
+    static const sz PointerSize;
+
     PlatformAlloc* Alloc;
     PlatformFree* Free;
     PlatformReadEntireFileFunc* ReadEntireFile;
