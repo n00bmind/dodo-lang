@@ -236,7 +236,7 @@ complex_func :: ()
             "T :: struct { a: [n] int; };",
             "r := &t.a;",
             "t: T;",
-            "s: [n+m]int;",
+            "s: [n+m]int = { 0, 1, 2 };",
             "m :: sizeof(t.a);",
             "i := n + m;",
             "q := &i;",
@@ -244,8 +244,19 @@ complex_func :: ()
             "x: R;",
             "R :: struct { s: *S; };",
             "S :: struct { r: [sx] R; };",
+            "U :: struct { a: [3] int; };",
+            "uu: U = { { 0 } };",
             "a, b, c :: 0;",
             //"b := 1;",                                  // Redeclared
+            "add :: (v: Vector, w: Vector) -> Vector { return { v.x + w.x, v.y + w.y }; }",
+            "result := add_func( { 1, 2 }, { 3, 4 } );",
+            "add_func := add;",
+            "Vector :: struct { x, y: int; }",
+            // TODO Check this actually works for all cond types
+            "it := 1 ? 2 : 3;",
+            "ptr := &s[1 + 1];",
+            // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
+            "item := ptr[1];",
         };
 
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )

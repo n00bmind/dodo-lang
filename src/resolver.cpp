@@ -4,7 +4,9 @@ struct Value
 {
     union
     {
+        void* ptrValue;
         u64 intValue;
+        bool boolValue;
     };
 };
 
@@ -103,9 +105,11 @@ struct Type
 // TODO Builtins
 // TODO Type metrics
 Type intTypeVal = { "int", nullptr, nullptr, 4, 4, Type::Int };
+Type boolTypeVal = { "bool", nullptr, nullptr, 1, 1, Type::Bool };
 Type floatTypeVal = { "float", nullptr, nullptr, 4, 4, Type::Float };
 
 Type* intType = &intTypeVal;
+Type* boolType = &boolTypeVal;
 Type* floatType = &floatTypeVal;
 
 
@@ -184,7 +188,7 @@ ResolvedExpr NewResolvedConst( Type* type, u64 intValue )
 
 
 Symbol* ResolveName( char const* name, SourcePos const& pos );
-ResolvedExpr ResolveExpr( Expr* expr );
+ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType = nullptr );
 
 ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
 {
@@ -214,12 +218,14 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     ASSERT( expr->kind == Expr::Name );
 
     Symbol* sym = ResolveName( expr->name, expr->pos );
+
     if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
     else if( sym->kind == Symbol::Const )
         // TODO 
         return NewResolvedConst( intType, sym->value.intValue );
-    // TODO Functions
+    else if( sym->kind == Symbol::Func )
+        return NewResolvedRvalue( sym->type );
     else
     {
         RSLV_ERROR( expr->pos, "Named expression can only refer to variable or constant" );
@@ -329,7 +335,137 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
     }
 }
 
-ResolvedExpr ResolveExpr( Expr* expr )
+ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
+{
+    ASSERT( expr->kind == Expr::Compound );
+    if( !expectedType )
+    {
+        RSLV_ERROR( expr->pos, "Compound literal requires explicit type" );
+        return resolvedNull;
+    }
+
+    CompleteType( expectedType, expr->pos );
+
+    sz slotCount = 0;
+    // TODO Unions?
+    if( expectedType->kind == Type::Array )
+        slotCount = expectedType->array.count;
+    else if( expectedType->kind == Type::Struct )
+        slotCount = Sz( expectedType->aggregate.fields.count );
+    else
+    {
+        RSLV_ERROR( expr->pos, "Compound literals can only be used to initialize struct or array types" );
+        return resolvedNull;
+    }
+
+    if( Sz( expr->compoundFields.count ) > slotCount )
+    {
+        RSLV_ERROR( expr->pos, "Too many fields in compound literal" );
+        return resolvedNull;
+    }
+
+    Type* expectedFieldType = nullptr;
+    if( expectedType->kind == Type::Array )
+        expectedFieldType = expectedType->array.base;
+
+    int i = 0;
+    for( CompoundField const& f : expr->compoundFields )
+    {
+        if( expectedType->kind == Type::Struct )
+            expectedFieldType = expectedType->aggregate.fields[i++].type;
+
+        ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
+        if( field.type != expectedFieldType )
+        {
+            RSLV_ERROR( expr->pos, "Type mismatch in compound literal field (wanted '%s', got '%s')",
+                        expectedFieldType->name, field.type->name );
+        }
+    }
+
+    return NewResolvedRvalue( expectedType );
+}
+
+ResolvedExpr ResolveCallExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Call );
+    ResolvedExpr result = ResolveExpr( expr->call.func );
+    CompleteType( result.type, expr->pos );
+
+    if( result.type->kind != Type::Func )
+    {
+        RSLV_ERROR( expr->pos, "Cannot call non-function value" );
+        return resolvedNull;
+    }
+    if( expr->call.args.count != result.type->func.args.count )
+    {
+        RSLV_ERROR( expr->pos, "Missing arguments in function call" );
+        return resolvedNull;
+    }
+
+    int i = 0;
+    Array<Type*> const& argTypes = result.type->func.args;
+    for( Expr* arg : expr->call.args )
+    {
+        Type* argType = argTypes[i++];
+        ResolvedExpr resolvedArg = ResolveExpr( arg, argType );
+        if( resolvedArg.type != argType )
+        {
+            RSLV_ERROR( arg->pos, "Type mismatch in function call (wanted '%s', got '%s')",
+                        argType->name, resolvedArg.type->name );
+            return resolvedNull;
+        }
+    }
+
+    return NewResolvedRvalue( result.type->func.returnType );
+}
+
+ResolvedExpr ResolveTernaryExpr( Expr* expr, Type* expectedType )
+{
+    ASSERT( expr->kind == Expr::Ternary );
+
+    ResolvedExpr cond = ResolveExpr( expr->ternary.cond );
+    // TODO Is this equivalent to C semantics for all cases?
+    if( false ) //cond.type != boolType )
+    {
+        RSLV_ERROR( expr->ternary.cond->pos, "Conditional expression must have type bool" );
+        return resolvedNull;
+    }
+
+    ResolvedExpr thenExpr = ResolveExpr( expr->ternary.thenExpr, expectedType );
+    ResolvedExpr elseExpr = ResolveExpr( expr->ternary.elseExpr, expectedType );
+    if( thenExpr.type != elseExpr.type )
+    {
+        RSLV_ERROR( expr->ternary.elseExpr->pos, "Ternary expression branches must have matching types" );
+        return resolvedNull;
+    }
+
+    if( cond.isConst && thenExpr.isConst && elseExpr.isConst )
+        return cond.value.boolValue ? thenExpr : elseExpr;
+    else
+        return NewResolvedRvalue( thenExpr.type );
+}
+
+ResolvedExpr ResolveIndexExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Index );
+
+    ResolvedExpr base = ResolveExpr( expr->index.base );
+    ResolvedExpr index = ResolveExpr( expr->index.index );
+    if( index.type->kind != Type::Int )
+        RSLV_ERROR( expr->pos, "Index expression must have integer type" );
+
+    if( base.type->kind == Type::Pointer )
+        return NewResolvedLvalue( base.type->ptr.base );
+    else if( base.type->kind == Type::Array )
+        return NewResolvedLvalue( base.type->array.base );
+    else
+    {
+        RSLV_ERROR( expr->pos, "Can only index arrays or pointers" );
+        return resolvedNull;
+    }
+}
+
+ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 {
     switch( expr->kind )
     {
@@ -345,6 +481,19 @@ ResolvedExpr ResolveExpr( Expr* expr )
         {
             return ResolveFieldExpr( expr );
         } break;
+        case Expr::Index:
+        {
+            return ResolveIndexExpr( expr );
+        } break;
+        case Expr::Compound:
+        {
+            return ResolveCompoundExpr( expr, expectedType );
+        } break;
+        case Expr::Call:
+        {
+            return ResolveCallExpr( expr );
+        } break;
+
         case Expr::Unary:
         {
             return ResolveUnaryExpr( expr );
@@ -352,6 +501,10 @@ ResolvedExpr ResolveExpr( Expr* expr )
         case Expr::Binary:
         {
             return ResolveBinaryExpr( expr );
+        } break;
+        case Expr::Ternary:
+        {
+            return ResolveTernaryExpr( expr, expectedType );
         } break;
         case Expr::Sizeof:
         {
@@ -566,6 +719,18 @@ Type* ResolveTypeSpec( TypeSpec* spec )
     return result;
 }
 
+int CountAggregateItems( Array<Decl*> const& items )
+{
+    int result = 0;
+    for( Decl* d : items )
+    {
+        for( char const* n : d->names )
+            result++;
+    }
+
+    return result;
+}
+
 void CompleteType( Type* type, SourcePos const& pos )
 {
     ASSERT( type->kind );
@@ -587,10 +752,10 @@ void CompleteType( Type* type, SourcePos const& pos )
     Decl* decl = type->symbol->decl;
     ASSERT( decl->kind == Decl::Struct || decl->kind == Decl::Union );
 
-    Array<TypeField> fields( &globalArena, decl->aggregate.items.count );
+    Array<TypeField> fields( &globalArena, CountAggregateItems( decl->aggregate.items ) );
     for( Decl* d : decl->aggregate.items )
     {
-        // Only care about variable fields
+        // Only care about variable & const fields
         if( d->kind == Decl::Var )
         {
             Type* fieldType = ResolveTypeSpec( d->var.type );
@@ -666,9 +831,9 @@ void ResolveSymbol( Symbol* sym )
             //auto& names = decl->var.names;
             if( decl->var.initExpr )
             {
-                ResolvedExpr init = ResolveExpr( decl->var.initExpr );
+                ResolvedExpr init = ResolveExpr( decl->var.initExpr, type );
                 if( type && init.type != type )
-                    RSLV_ERROR( pos, "Declared type for '%s' does not match inferred type", sym->name );
+                    RSLV_ERROR( pos, "Declared type for '%s' does not match type of initializer expression", sym->name );
 
                 type = init.type;
             }
@@ -692,16 +857,20 @@ void ResolveSymbol( Symbol* sym )
 
         case Symbol::Type:
         {
-            // TODO This would only be for typedefs now, as aggregates are resolved from the beginning
+            // TODO This would only be for typedefs now, as aggregates start out already resolved
         } break;
 
         case Symbol::Func:
         {
             Array<Type*> args( &globalArena, decl->func.args.count );
             for( FuncArg const& a : decl->func.args )
-                args.Push( ResolveTypeSpec( a.type ) );
+            {
+                Type* argType = ResolveTypeSpec( a.type );
+                args.Push( argType );
+            }
 
-            sym->type = NewFuncType( args, ResolveTypeSpec( decl->func.returnType ) );
+            Type* retType = ResolveTypeSpec( decl->func.returnType );
+            sym->type = NewFuncType( args, retType );
         } break;
 
         case Symbol::Module:

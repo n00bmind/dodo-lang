@@ -76,6 +76,8 @@ ________________________________________________________________________________
 - Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default
   for all instances), or when declaring each instance.
 
+- Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
+
 ________________________________________________________________________________ 
 
 
