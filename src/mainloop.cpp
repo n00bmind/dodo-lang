@@ -35,14 +35,15 @@ void InitTestMemory()
 
 void RunTests()
 {
-    static char const* testTokenStrings[] =
     {
-        "fact\n('num\v', 0x2a)//this is a comment\na.b .111<<=11234> 1.234E-100abc {}*: sizeof*=0o52 &= &&/*another comment*/\r\n\tstruct 0b101010",
-    };
+        static char const* testTokenStrings[] =
+        {
+            "fact\n('num\v', 0x2a)//this is a comment\na.b .111<<=11234> 1.234E-100abc {}*: sizeof*=0o52 &= &&/*another comment*/\r\n\tstruct 0b101010",
+        };
 #define ASSERT_TOKEN(k) \
-        token = NextToken( &lexer ); \
-        ASSERT( token.kind == TokenKind::k );
-    {
+            token = NextToken( &lexer ); \
+            ASSERT( token.kind == TokenKind::k );
+
         InitTestMemory();
         Lexer lexer = Lexer( String( testTokenStrings[0] ), "" );
         Token token;
@@ -81,8 +82,8 @@ void RunTests()
         ASSERT_TOKEN(Keyword);
         ASSERT_TOKEN(IntLiteral);
         ASSERT( token.intValue == 42 && token.mod == Token::Binary );
-    }
 #undef ASSERT_TOKEN
+    }
 
     struct TestString
     {
@@ -256,7 +257,9 @@ complex_func :: ()
             "it := 1 ? 2 : 3;",
             "ptr := &s[1 + 1];",
             // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
-            "item := ptr[1];",
+            "item := ptr[-1];",
+            "bin := 1000 / (2 + 3 * 5) << 10;",
+            "aptr: *int = -s[3] as *int;",
         };
 
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
@@ -269,25 +272,27 @@ complex_func :: ()
             auto idx = globalSymbolList.First();
             while( idx )
             {
-                CompleteSymbol( &*idx );
+                Symbol* sym = &*idx;
+
+#if 0
+                if( sym->decl )
+                {
+                    char buf[1024] = {};
+                    char* outBuf = buf;
+                    sz len = ARRAYCOUNT(buf);
+                    int indent = 0;
+
+                    DebugPrintSExpr( sym->decl, outBuf, len, indent );
+                    printf( "Completing %s\n", buf );
+                }
+#endif
+
+                CompleteSymbol( sym );
                 idx.Next();
             }
         }
 
-        // Complete any remaining incomplete types
-#if 0
-        {
-            SourcePos pos = {};
-            auto idx = globalSymbolList.First();
-            while( idx )
-            {
-                Symbol* sym = &*idx;
-                if( sym->type && sym->type->kind == Type::Incomplete )
-                    CompleteType( sym->type, pos );
-                idx.Next();
-            }
-        }
-#endif
+        //printf( "\n-----------------------\n" );
         auto idx2 = globalOrderedSymbols.First();
         while( idx2 )
         {

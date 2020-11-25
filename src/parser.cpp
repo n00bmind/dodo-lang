@@ -172,7 +172,7 @@ Expr* NewNameExpr( SourcePos const& pos, char const* name )
     return result;
 }
 
-Expr* NewIntExpr( SourcePos const &pos, u64 value, Token::LiteralMod modifier )
+Expr* NewIntExpr( SourcePos const &pos, i64 value, Token::LiteralMod modifier )
 {
     Expr* result = NewExpr( pos, Expr::Int );
     result->literal.intValue = value;
@@ -231,6 +231,15 @@ Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name )
     Expr* result = NewExpr( pos, Expr::Field );
     result->field.base = base;
     result->field.name = name;
+
+    return result;
+}
+
+Expr* NewCastExpr( SourcePos const& pos, TypeSpec* type, Expr* castedExpr )
+{
+    Expr* result = NewExpr( pos, Expr::Cast );
+    result->cast.type = type;
+    result->cast.expr = castedExpr;
 
     return result;
 }
@@ -341,6 +350,8 @@ Expr* ParseCompoundExpr( Lexer* lexer )
     return expr;
 }
 
+Expr* ParseUnaryExpr( Lexer* lexer );
+
 Expr* ParseBaseExpr( Lexer* lexer )
 {
     Token const& token = lexer->token;
@@ -448,27 +459,51 @@ Expr* ParsePostfixExpr( Lexer* lexer )
 
         NextToken( lexer );
     }
-    
+
     return expr;
 }
 
 Expr* ParseUnaryExpr( Lexer* lexer )
 {
+    Expr* expr = nullptr;
+
     if( lexer->token.HasFlag( TokenFlags::UnaryOp ) )
     {
         SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
 
         NextToken( lexer );
-        return NewUnaryExpr( pos, op, ParseUnaryExpr( lexer ) );
+        expr = NewUnaryExpr( pos, op, ParseUnaryExpr( lexer ) );
     }
     else
-        return ParsePostfixExpr( lexer );
+    {
+        expr = ParsePostfixExpr( lexer );
+    }
+
+    return expr;
+}
+
+Expr* ParseCastExpr( Lexer* lexer )
+{
+    Expr* expr = ParseUnaryExpr( lexer );
+
+    if( MatchKeyword( Keyword::As, lexer->token ) )
+    {
+        SourcePos pos = lexer->token.pos;
+
+        NextToken( lexer );
+        TypeSpec* type = ParseTypeSpec( lexer );
+
+        if( lexer->IsValid() )
+            expr = NewCastExpr( pos, type, expr );
+    }
+
+    return expr;
 }
 
 Expr* ParseMulExpr( Lexer* lexer )
 {
-    Expr* expr = ParseUnaryExpr( lexer );
+    Expr* expr = ParseCastExpr( lexer );
 
     while( lexer->token.HasFlag( TokenFlags::MulOp ) )
     {
@@ -476,7 +511,7 @@ Expr* ParseMulExpr( Lexer* lexer )
         TokenKind::Enum op = lexer->token.kind;
 
         NextToken( lexer );
-        expr = NewBinaryExpr( pos, op, expr, ParseUnaryExpr( lexer ) );
+        expr = NewBinaryExpr( pos, op, expr, ParseCastExpr( lexer ) );
     }
 
     return expr;
@@ -1411,6 +1446,57 @@ Array<Decl*> Parse( String const& program, char const* filename )
     maxLen -= len; \
 } 
 
+void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen );
+
+void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
+{
+    int len = 0;
+
+    if( type == nullptr )
+    {
+        APPEND( "null" );
+        return;
+    }
+
+    switch( type->kind )
+    {
+        case TypeSpec::Name:
+        {
+            for( char const* n : type->names )
+            {
+                if( n != type->names[0] )
+                    APPEND( "." );
+                APPEND( "%s", n );
+            }
+        } break;
+        case TypeSpec::Func:
+        {
+            APPEND( "( " );
+            for( TypeSpec* t : type->func.args )
+            {
+                if( t != type->func.args[0] )
+                    APPEND( ", " );
+                DebugPrintTypeSpec( t, outBuf, maxLen );
+            }
+            APPEND( " ) -> " );
+            DebugPrintTypeSpec( type->func.returnType, outBuf, maxLen );
+        } break;
+        case TypeSpec::Array:
+        {
+            APPEND( "[" );
+            if( type->array.count )
+                DebugPrintSExpr( type->array.count, outBuf, maxLen );
+            APPEND( "] " );
+            DebugPrintTypeSpec( type->array.base, outBuf, maxLen );
+        } break;
+        case TypeSpec::Pointer:
+        {
+            APPEND( "*" );
+            DebugPrintTypeSpec( type->ptr.base, outBuf, maxLen );
+        } break;
+    }
+}
+
 void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
 {
     int len = 0;
@@ -1466,6 +1552,14 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             APPEND( "(. " );
             DebugPrintSExpr( expr->field.base, outBuf, maxLen );
             APPEND( " %s)", expr->field.name );
+        } break;
+        case Expr::Cast:
+        {
+            APPEND( "(" );
+            DebugPrintSExpr( expr->cast.expr, outBuf, maxLen );
+            APPEND( " as " );
+            DebugPrintTypeSpec( expr->cast.type, outBuf, maxLen );
+            APPEND( ")" );
         } break;
 
         case Expr::Compound:
@@ -1533,55 +1627,6 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             APPEND( "(sizeof " );
             DebugPrintSExpr( expr->sizeofExpr, outBuf, maxLen );
             APPEND( ")" );
-        } break;
-    }
-}
-
-void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
-{
-    int len = 0;
-
-    if( type == nullptr )
-    {
-        APPEND( "null" );
-        return;
-    }
-
-    switch( type->kind )
-    {
-        case TypeSpec::Name:
-        {
-            for( char const* n : type->names )
-            {
-                if( n != type->names[0] )
-                    APPEND( "." );
-                APPEND( "%s", n );
-            }
-        } break;
-        case TypeSpec::Func:
-        {
-            APPEND( "( " );
-            for( TypeSpec* t : type->func.args )
-            {
-                if( t != type->func.args[0] )
-                    APPEND( ", " );
-                DebugPrintTypeSpec( t, outBuf, maxLen );
-            }
-            APPEND( " ) -> " );
-            DebugPrintTypeSpec( type->func.returnType, outBuf, maxLen );
-        } break;
-        case TypeSpec::Array:
-        {
-            APPEND( "[" );
-            if( type->array.count )
-                DebugPrintSExpr( type->array.count, outBuf, maxLen );
-            APPEND( "] " );
-            DebugPrintTypeSpec( type->array.base, outBuf, maxLen );
-        } break;
-        case TypeSpec::Pointer:
-        {
-            APPEND( "*" );
-            DebugPrintTypeSpec( type->ptr.base, outBuf, maxLen );
         } break;
     }
 }

@@ -5,7 +5,8 @@ struct Value
     union
     {
         void* ptrValue;
-        u64 intValue;
+        i64 intValue;
+        f64 floatValue;
         bool boolValue;
     };
 };
@@ -66,6 +67,8 @@ struct Type
         Union,
         Enum,
         Func,
+        // TODO 
+        TypeVar,
     };
 
     // TODO Fill up!
@@ -104,10 +107,12 @@ struct Type
 
 // TODO Builtins
 // TODO Type metrics
+Type voidTypeVal = { "void", nullptr, nullptr, 0, 0, Type::Void };
 Type intTypeVal = { "int", nullptr, nullptr, 4, 4, Type::Int };
 Type boolTypeVal = { "bool", nullptr, nullptr, 1, 1, Type::Bool };
 Type floatTypeVal = { "float", nullptr, nullptr, 4, 4, Type::Float };
 
+Type* voidType = &voidTypeVal;
 Type* intType = &intTypeVal;
 Type* boolType = &boolTypeVal;
 Type* floatType = &floatTypeVal;
@@ -177,12 +182,21 @@ ResolvedExpr NewResolvedLvalue( Type* type )
     return result;
 }
 
-ResolvedExpr NewResolvedConst( Type* type, u64 intValue )
+ResolvedExpr NewResolvedConst( Type* type, i64 intValue )
 {
     ResolvedExpr result = {};
     result.type = type;
     result.isConst = true;
     result.value.intValue = intValue;
+    return result;
+}
+
+ResolvedExpr NewResolvedConst( Type* type, f64 floatValue )
+{
+    ResolvedExpr result = {};
+    result.type = type;
+    result.isConst = true;
+    result.value.floatValue = floatValue;
     return result;
 }
 
@@ -207,7 +221,7 @@ ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
     return result;
 }
 
-u64 ResolveConstExprInt( Expr* expr )
+i64 ResolveConstExprInt( Expr* expr )
 {
     ResolvedExpr result = ResolveConstExpr( expr, intType );
     return result.value.intValue;
@@ -273,6 +287,25 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
 Type* NewPtrType( Type* base );
 
+i64 EvalIntUnaryExpr( TokenKind::Enum op, i64 value )
+{
+    switch( op )
+    {
+        case TokenKind::Plus:
+            return +value;
+        case TokenKind::Minus:
+            return -value;
+        case TokenKind::Tilde:
+            return ~value;
+        case TokenKind::Exclamation:
+            return !value;
+
+        INVALID_DEFAULT_CASE
+    }
+
+    return 0;
+}
+
 ResolvedExpr ResolveUnaryExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Unary );
@@ -302,10 +335,86 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
         } break;
         default:
         {
-            NOT_IMPLEMENTED;
-            return resolvedNull;
+            if( type->kind != Type::Int )
+            {
+                RSLV_ERROR( expr->pos, "Can only use unary '%s' with ints for now!", TokenKind::Values::names[ expr->unary.op ] );
+                return resolvedNull;
+            }
+
+            if( operand.isConst )
+                return NewResolvedConst( type, EvalIntUnaryExpr( expr->unary.op, operand.value.intValue ) );
+            else
+                return NewResolvedRvalue( type );
         } break;
     }
+}
+
+i64 EvalIntBinaryExpr( TokenKind::Enum op, i64 leftValue, i64 rightValue, SourcePos const& pos )
+{
+    switch( op )
+    {
+        case TokenKind::Asterisk:
+            return leftValue * rightValue;
+        case TokenKind::Slash:
+        {
+            if( rightValue == 0 )
+            {
+                RSLV_ERROR( pos, "Divide by zero in constant expression" );
+                return 0;
+            }
+            else
+                return leftValue / rightValue;
+        }
+        case TokenKind::Percent:
+        {
+            if( rightValue == 0 )
+            {
+                RSLV_ERROR( pos, "Divide by zero in constant expression" );
+                return 0;
+            }
+            else
+                return leftValue % rightValue;
+        }
+        // TODO Prevent UB in shifts
+        case TokenKind::LeftShift:
+            return leftValue << rightValue;
+        case TokenKind::RightShift:
+            return leftValue >> rightValue;
+        case TokenKind::Ampersand:
+            return leftValue & rightValue;
+
+        case TokenKind::Plus:
+            return leftValue + rightValue;
+        case TokenKind::Minus:
+            return leftValue - rightValue;
+        case TokenKind::Pipe:
+            return leftValue | rightValue;
+        case TokenKind::Caret:
+            return leftValue ^ rightValue;
+
+        case TokenKind::Equal:
+            return leftValue == rightValue;
+        case TokenKind::NotEqual:
+            return leftValue != rightValue;
+        case TokenKind::LessThan:
+            return leftValue < rightValue;
+        case TokenKind::GreaterThan:
+            return leftValue > rightValue;
+        case TokenKind::LTEqual:
+            return leftValue <= rightValue;
+        case TokenKind::GTEqual:
+            return leftValue >= rightValue;
+
+        // TODO Return bools for these
+        case TokenKind::LogicAnd:
+            return leftValue && rightValue;
+        case TokenKind::LogicOr:
+            return leftValue || rightValue;
+
+        INVALID_DEFAULT_CASE
+    }
+
+    return 0;
 }
 
 ResolvedExpr ResolveBinaryExpr( Expr* expr )
@@ -315,24 +424,21 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
     ResolvedExpr left = ResolveExpr( expr->binary.left );
     ResolvedExpr right = ResolveExpr( expr->binary.right );
 
-    // TODO Check left and right types
-
-    switch( expr->binary.op )
+    if( left.type != intType )
     {
-        case TokenKind::Plus:
-        {
-            if( left.isConst && right.isConst )
-                // TODO 
-                return NewResolvedConst( intType, left.value.intValue + right.value.intValue );
-            else
-                return NewResolvedRvalue( left.type );
-        } break;
-        default:
-        {
-            NOT_IMPLEMENTED;
-            return resolvedNull;
-        } break;
+        RSLV_ERROR( expr->pos, "Only ints supported in binary expressions for now!" );
+        return resolvedNull;
     }
+    if( left.type != right.type )
+    {
+        RSLV_ERROR( expr->pos, "Type mismatch in binary expression (left is '%s', right is '%s')", left.type->name, right.type->name );
+        return resolvedNull;
+    }
+
+    if( left.isConst && right.isConst )
+        return NewResolvedConst( intType, EvalIntBinaryExpr( expr->binary.op, left.value.intValue, right.value.intValue, expr->pos ) );
+    else
+        return NewResolvedRvalue( left.type );
 }
 
 ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
@@ -439,7 +545,7 @@ ResolvedExpr ResolveTernaryExpr( Expr* expr, Type* expectedType )
         return resolvedNull;
     }
 
-    if( cond.isConst && thenExpr.isConst && elseExpr.isConst )
+    if( cond.isConst )
         return cond.value.boolValue ? thenExpr : elseExpr;
     else
         return NewResolvedRvalue( thenExpr.type );
@@ -465,63 +571,146 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     }
 }
 
+Type* NewArrayType( Type* base, sz count );
+Type* NewFuncType( Array<Type*> const& args, Type* returnType );
+
+Type* ResolveTypeSpec( TypeSpec* spec )
+{
+    Type* result = nullptr;
+    SourcePos const& pos = spec->pos;
+
+    switch( spec->kind )
+    {
+        case TypeSpec::Name:
+        {
+            ASSERT( spec->names.count );
+
+            // TODO Resolve namespaces
+            if( spec->names.count > 1 )
+            {
+                RSLV_ERROR( pos, "Namespaces not yet supported" );
+                break;
+            }
+
+            char const* name = spec->names.Last();
+            Symbol* sym = ResolveName( name, pos );
+            if( sym->kind != Symbol::Type )
+            {
+                RSLV_ERROR( pos, "'%s' must denote a type", name );
+                break;
+            }
+
+            result = sym->type;
+        } break;
+        case TypeSpec::Pointer:
+        {
+            Type* base = ResolveTypeSpec( spec->ptr.base );
+            result = NewPtrType( base );
+        } break;
+        case TypeSpec::Array:
+        {
+            // TODO Dynamic/unknown array size
+            i64 count = ResolveConstExprInt( spec->array.count );
+            // TODO Zero-sized arrays?
+            if( count < 0 )
+            {
+                RSLV_ERROR( pos, "Array size must be a positive integer" );
+                return nullptr;
+            }
+            Type* base = ResolveTypeSpec( spec->array.base );
+            result = NewArrayType( base, Sz( count ) );
+        } break;
+        case TypeSpec::Func:
+        {
+            Array<Type*> args( &globalArena, spec->func.args.count );
+            for( TypeSpec* argSpec : spec->func.args )
+            {
+                Type* arg = ResolveTypeSpec( argSpec );
+                args.Push( arg );
+            }
+            Type* ret = ResolveTypeSpec( spec->func.returnType );
+            result = NewFuncType( args, ret );
+        } break;
+
+        INVALID_DEFAULT_CASE
+    }
+
+    return result;
+}
+
+ResolvedExpr ResolveCastExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Cast );
+    
+    Type* type = ResolveTypeSpec( expr->cast.type );
+    ResolvedExpr operand = ResolveExpr( expr->cast.expr );
+
+    // TODO Proper cast rules
+    if( type->kind == Type::Pointer )
+    {
+        if( operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
+        {
+            RSLV_ERROR( expr->pos, "Invalid cast to pointer type" );
+        }
+    }
+    else if( type->kind == Type::Int )
+    {
+        if( operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
+        {
+            RSLV_ERROR( expr->pos, "Invalid cast to int type" );
+        }
+    }
+    else
+    {
+        RSLV_ERROR( expr->pos, "Unsupported cast!" );
+    }
+
+    return NewResolvedRvalue( type );
+}
+
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 {
     switch( expr->kind )
     {
+        // TODO Type sizes
         case Expr::Int:
-        {
             return NewResolvedConst( intType, expr->literal.intValue );
-        } break;
-        case Expr::Name:
-        {
-            return ResolveNameExpr( expr );
-        } break;
-        case Expr::Field:
-        {
-            return ResolveFieldExpr( expr );
-        } break;
-        case Expr::Index:
-        {
-            return ResolveIndexExpr( expr );
-        } break;
-        case Expr::Compound:
-        {
-            return ResolveCompoundExpr( expr, expectedType );
-        } break;
-        case Expr::Call:
-        {
-            return ResolveCallExpr( expr );
-        } break;
+        case Expr::Float:
+            return NewResolvedConst( floatType, expr->literal.floatValue );
+        // TODO String
 
+        case Expr::Name:
+            return ResolveNameExpr( expr );
+        case Expr::Field:
+            return ResolveFieldExpr( expr );
+        case Expr::Index:
+            return ResolveIndexExpr( expr );
+        case Expr::Compound:
+            return ResolveCompoundExpr( expr, expectedType );
+        case Expr::Call:
+            return ResolveCallExpr( expr );
+
+        case Expr::Cast:
+            return ResolveCastExpr( expr );
         case Expr::Unary:
-        {
             return ResolveUnaryExpr( expr );
-        } break;
         case Expr::Binary:
-        {
             return ResolveBinaryExpr( expr );
-        } break;
         case Expr::Ternary:
-        {
             return ResolveTernaryExpr( expr, expectedType );
-        } break;
         case Expr::Sizeof:
         {
             ResolvedExpr result = ResolveExpr( expr->sizeofExpr );
             Type* type = result.type;
             CompleteType( type, expr->pos );
 
-            // TODO Unsigned 64 bit?
-            return NewResolvedConst( intType, TypeSize( type ) );
+            return NewResolvedConst( intType, I64( TypeSize( type ) ) );
         } break;
+        // TODO Typeof
 
-        default:
-        {
-            NOT_IMPLEMENTED;
-            return resolvedNull;
-        } break;
+        INVALID_DEFAULT_CASE
     }
+    return resolvedNull;
 }
 
 Type* NewType( Type::Kind kind, sz size )
@@ -560,7 +749,7 @@ Type* NewPtrType( Type* base )
     return result;
 }
 
-Type* NewArrayType( Type* base, u64 count )
+Type* NewArrayType( Type* base, sz count )
 {
     auto idx = globalCachedTypes.First(); 
     while( idx )
@@ -655,68 +844,6 @@ void CompleteUnionType( Type* type, Array<TypeField> const& fields )
         // TODO Alignment, field offset, etc.
         type->size = Max( type->size, TypeSize( f.type ) );
     }
-}
-
-Array<Symbol*> CreateDeclSymbols( Decl* decl );
-
-Type* ResolveTypeSpec( TypeSpec* spec )
-{
-    Type* result = nullptr;
-    SourcePos const& pos = spec->pos;
-
-    switch( spec->kind )
-    {
-        case TypeSpec::Name:
-        {
-            ASSERT( spec->names.count );
-
-            // TODO Resolve namespaces
-            if( spec->names.count > 1 )
-            {
-                RSLV_ERROR( pos, "Namespaces not yet supported" );
-                break;
-            }
-
-            char const* name = spec->names.Last();
-            Symbol* sym = ResolveName( name, pos );
-            if( sym->kind != Symbol::Type )
-            {
-                RSLV_ERROR( pos, "'%s' must denote a type", name );
-                break;
-            }
-
-            result = sym->type;
-        } break;
-        case TypeSpec::Pointer:
-        {
-            Type* base = ResolveTypeSpec( spec->ptr.base );
-            result = NewPtrType( base );
-        } break;
-        case TypeSpec::Array:
-        {
-            // TODO Dynamic/unknown array size
-            u64 count = ResolveConstExprInt( spec->array.count );
-            // TODO Signed/unsigned
-            // TODO Check positive
-            Type* base = ResolveTypeSpec( spec->array.base );
-            result = NewArrayType( base, count );
-        } break;
-        case TypeSpec::Func:
-        {
-            Array<Type*> args( &globalArena, spec->func.args.count );
-            for( TypeSpec* argSpec : spec->func.args )
-            {
-                Type* arg = ResolveTypeSpec( argSpec );
-                args.Push( arg );
-            }
-            Type* ret = ResolveTypeSpec( spec->func.returnType );
-            result = NewFuncType( args, ret );
-        } break;
-
-        INVALID_DEFAULT_CASE
-    }
-
-    return result;
 }
 
 int CountAggregateItems( Array<Decl*> const& items )
@@ -985,6 +1112,8 @@ void InitResolver()
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
+    CreateTypeSymbol( "void", voidType );
+    CreateTypeSymbol( "bool", boolType );
     CreateTypeSymbol( "int", intType );
     CreateTypeSymbol( "float", floatType );
 }

@@ -105,7 +105,7 @@ internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod
             return;
     }
 
-    u64 val = 0;
+    i64 val = 0;
     for( int i = 0; i < length; ++i )
     {
         char c = lexer->stream.data[i];
@@ -121,7 +121,8 @@ internal void ScanInt( Lexer* lexer, Token* token, int length, Token::LiteralMod
             PARSE_ERROR( token->pos, "Invalid digit '%c' for base %d", c, base );
             return;
         }
-        if( val > (U64MAX - digit)/base )
+        //if( val > (U64MAX - digit)/base )
+        if( val > (I64MAX - digit)/base )
         {
             PARSE_ERROR( token->pos, "Integer literal overflow" );
             return;

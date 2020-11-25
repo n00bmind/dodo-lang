@@ -122,13 +122,18 @@ struct Expr
             char const* name;
         } field;
         Array<CompoundField> compoundFields;
+        struct
+        {
+            TypeSpec* type;
+            Expr* expr;
+        } cast;
 
         struct
         {
             union
             {
                 String strValue;
-                u64 intValue;
+                i64 intValue;
                 f64 floatValue;
             };
             Token::LiteralMod modifier;

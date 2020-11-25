@@ -111,7 +111,7 @@ struct Token
     {
         String strValue;
         f64 floatValue;
-        u64 intValue;
+        i64 intValue;
         char const* ident;  // Interned
     };
     LiteralMod mod;
@@ -167,6 +167,7 @@ struct InternStringBuffer
     x( Break,   "break" ) \
     x( Continue,"continue" ) \
     x( Return,  "return" ) \
+    x( As,      "as" ) \
 
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
