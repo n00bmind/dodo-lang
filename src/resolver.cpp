@@ -40,6 +40,11 @@ struct Symbol
 
 // TODO Hashtable!
 BucketArray<Symbol> globalSymbolList;
+
+// Local scopes for functions
+BucketArray<Symbol> globalScopeStack;
+BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
+// Ordered global symbols for linearized codegen
 BucketArray<Symbol*> globalOrderedSymbols;
 
 
@@ -77,6 +82,7 @@ struct Type
     Symbol* symbol;   // NOTE Only aggregates and enums will have one
     // TODO Remove?
     Decl* decl;
+    // TODO Do size & alignment for all types
     sz size;
     sz align;
     Kind kind;
@@ -910,19 +916,47 @@ Symbol* GetSymbol( char const* name )
 {
     Symbol* result = nullptr;
 
-    auto idx = globalSymbolList.First();
-    while( idx )
+    // First look in the local scope stack
     {
-        if( (*idx).name == name )
-            break;
-
-        idx.Next();
+        for( auto idx = globalScopeStack.Last(); idx; --idx )
+        {
+            if( (*idx).name == name )
+            {
+                result = &*idx;
+                break;
+            }
+        }
     }
 
-    if( idx )
-        result = &*idx;
+    // Otherwise search in the global symbols
+    if( !result )
+    {
+        for( auto idx = globalSymbolList.First(); idx; ++idx )
+        {
+            if( (*idx).name == name )
+            {
+                result = &*idx;
+                break;
+            }
+        }
+    }
 
     return result;
+}
+
+void PushLocalSymbol( Symbol const& sym )
+{
+    globalScopeStack.Push( sym );
+}
+
+BucketArray<Symbol>::Idx<false> EnterScope()
+{
+    return globalScopeStack.Last();
+}
+
+void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
+{
+    globalScopeStack.PopUntil( scopeStartIdx );
 }
 
 void ResolveSymbol( Symbol* sym )
@@ -996,7 +1030,10 @@ void ResolveSymbol( Symbol* sym )
                 args.Push( argType );
             }
 
-            Type* retType = ResolveTypeSpec( decl->func.returnType );
+            Type* retType = voidType;
+            if( decl->func.returnType )
+                retType = ResolveTypeSpec( decl->func.returnType );
+
             sym->type = NewFuncType( args, retType );
         } break;
 
@@ -1011,12 +1048,180 @@ void ResolveSymbol( Symbol* sym )
     globalOrderedSymbols.Push( sym );
 }
 
+Symbol NewVarSymbol( char const* name, Type* type )
+{
+    Symbol result = {};
+    result.name = name;
+    result.type = type;
+    result.kind = Symbol::Var;
+    result.state = Symbol::Resolved;
+
+    return result;
+}
+
+ResolvedExpr ResolveConditionalExpr( Expr* expr )
+{
+    ResolvedExpr cond = ResolveExpr( expr );
+    // TODO
+    if( cond.type != intType )
+        RSLV_ERROR( expr->pos, "Condition must have integer type" );
+
+    return cond;
+}
+
+void ResolveStmtBlock( StmtList const& block, Type* returnType );
+
+void ResolveStmt( Stmt* stmt, Type* returnType )
+{
+    // TODO Check all control paths return a value
+    switch( stmt->kind )
+    {
+        case Stmt::Block:
+        ResolveStmtBlock( stmt->block, returnType );
+        break;
+
+        case Stmt::Assign:
+        {
+            ResolvedExpr left = ResolveExpr( stmt->assign.left );
+            ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
+            if( left.type != right.type )
+            {
+                RSLV_ERROR( stmt->pos, "Type mismatch in assignment (left is '%s', right is '%s')",
+                            left.type->name, right.type->name );
+            }
+            if( !left.isLvalue )
+                RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to non-lvalue" );
+            if( left.isConst )
+                RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
+
+        } break;
+
+        case Stmt::If:
+        {
+            ResolvedExpr cond = ResolveConditionalExpr( stmt->if_.cond );
+            ResolveStmtBlock( stmt->if_.thenBlock, returnType );
+
+            for( ElseIf const& ei : stmt->if_.elseIfs )
+            {
+                ResolvedExpr elseIfCond = ResolveConditionalExpr( ei.cond );
+                ResolveStmtBlock( ei.block, returnType );
+            }
+
+            if( stmt->if_.elseBlock.stmts.count )
+                ResolveStmtBlock( stmt->if_.elseBlock, returnType );
+        } break;
+
+        case Stmt::While:
+        {
+            ResolvedExpr cond = ResolveConditionalExpr( stmt->while_.cond );
+            ResolveStmtBlock( stmt->while_.block, returnType );
+        } break;
+        case Stmt::For:
+        {
+            // TODO 
+            auto forScopeIdx = EnterScope();
+
+            //ResolveStmt( stmt->for_.init, returnType);
+            ResolveConditionalExpr( stmt->for_.cond );
+            ResolveStmtBlock( stmt->for_.block, returnType );
+            //ResolveStmt( stmt->for_.next, returnType );
+
+            LeaveScope( forScopeIdx );
+        } break;
+
+        case Stmt::Switch:
+        {
+            ResolvedExpr result = ResolveExpr( stmt->switch_.expr );
+            for( SwitchCase const& c : stmt->switch_.cases )
+            {
+                if( !c.isDefault )
+                {
+                    // TODO Comma expressions
+                    ResolvedExpr caseResult = ResolveExpr( c.expr );
+                    // FIXME All these type comparisons should consider compatible types not just equality!
+                    if( caseResult.type != result.type )
+                        RSLV_ERROR( c.expr->pos, "Type mismatch in case expression" );
+
+                    ResolveStmtBlock( c.block, returnType );
+                }
+            }
+        } break;
+
+        case Stmt::Break:
+        case Stmt::Continue:
+        // Do nothing
+        break;
+        case Stmt::Return:
+        {
+            if( stmt->expr )
+            {
+                // TODO Return multiple values
+                ResolvedExpr result = ResolveExpr( stmt->expr, returnType );
+                if( result.type != returnType )
+                {
+                    RSLV_ERROR( stmt->expr->pos, "Type mismatch in return expression (expected '%s', got '%s')",
+                                returnType->name, result.type->name );
+                }
+            }
+            else
+            {
+                if( returnType != voidType )
+                {
+                    RSLV_ERROR( stmt->pos, "Empty return expression for function with non-void return type" );
+                }
+            }
+        } break;
+
+        default:
+        NOT_IMPLEMENTED;
+    }
+}
+
+void ResolveStmtBlock( StmtList const& block, Type* returnType )
+{
+    auto scopeIdx = EnterScope();
+
+    for( Stmt* stmt : block.stmts )
+    {
+        ResolveStmt( stmt, returnType );
+    }
+
+    LeaveScope( scopeIdx );
+}
+
+void ResolveFunc( Symbol* sym )
+{
+    ASSERT( sym->state == Symbol::Resolved );
+
+    Decl* decl = sym->decl;
+    ASSERT( decl->kind == Decl::Func );
+
+    Type* type = sym->type;
+    ASSERT( type->kind == Type::Func );
+
+    auto scopeIdx = EnterScope();
+
+    int i = 0;
+    for( FuncArg const& a : decl->func.args )
+    {
+        Type* argType = type->func.args[i];
+        CompleteType( argType, a.pos );
+        PushLocalSymbol( NewVarSymbol( a.name, argType ) );
+    }
+    CompleteType( type->func.returnType, decl->func.returnType->pos );
+    ResolveStmtBlock( decl->func.body, type->func.returnType );
+
+    LeaveScope( scopeIdx );
+}
+
 void CompleteSymbol( Symbol* sym )
 {
     ResolveSymbol( sym );
 
     if( sym->kind == Symbol::Type )
         CompleteType( sym->type, sym->decl->pos );
+    else if( sym->kind == Symbol::Func )
+        ResolveFunc( sym );
 }
 
 Symbol* ResolveName( char const* name, SourcePos const& pos )
@@ -1040,7 +1245,7 @@ void ResolveSymbols()
     }
 }
 
-Array<Symbol*> CreateDeclSymbols( Decl* decl )
+Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
 {
     ASSERT( decl->names );
 
@@ -1053,7 +1258,7 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl )
         case Decl::Func:
             kind = Symbol::Func;
             break;
-        // TODO Don't we need to add all syb-types and contained symbols for these?
+        // TODO Don't we need to add all sub-types and contained symbols for these?
         case Decl::Struct:
         case Decl::Union:
         case Decl::Enum:
@@ -1092,7 +1297,7 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl )
     return result;
 }
 
-Symbol* CreateTypeSymbol( char const* name, Type* type )
+Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
 {
     InternString* internName = Intern( String( name ) );
 
@@ -1109,11 +1314,14 @@ Symbol* CreateTypeSymbol( char const* name, Type* type )
 void InitResolver()
 {
     INIT( globalSymbolList ) BucketArray<Symbol>( &globalArena, 256 );
+    INIT( globalScopeStack ) BucketArray<Symbol>( &globalArena, 1024 );
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
-    CreateTypeSymbol( "void", voidType );
-    CreateTypeSymbol( "bool", boolType );
-    CreateTypeSymbol( "int", intType );
-    CreateTypeSymbol( "float", floatType );
+    globalCurrentScopeStart = globalScopeStack.First();
+
+    PushGlobalTypeSymbol( "void", voidType );
+    PushGlobalTypeSymbol( "bool", boolType );
+    PushGlobalTypeSymbol( "int", intType );
+    PushGlobalTypeSymbol( "float", floatType );
 }

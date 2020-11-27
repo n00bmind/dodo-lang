@@ -201,8 +201,8 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
         waste = Sz( (u8*)result - (u8*)block );
     }
 
-    sz actualSize = size + waste;
-    if( arena->used + actualSize > arena->size )
+    sz alignedSize = size + waste;
+    if( arena->used + alignedSize > arena->size )
     {
         ASSERT( arena->pageSize, "Fixed-size arena cannot fit requested size" );
 
@@ -215,7 +215,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
         headerInfo.used = arena->used;
 
         ASSERT( arena->pageSize > sizeof(MemoryArenaHeader) );
-        sz pageSize = Max( actualSize + sizeof(MemoryArenaHeader), arena->pageSize );
+        sz pageSize = Max( size + sizeof(MemoryArenaHeader), arena->pageSize );
         arena->base = (u8*)globalPlatform.Alloc( pageSize, 0 ) + sizeof(MemoryArenaHeader);
         arena->size = pageSize - sizeof(MemoryArenaHeader);
         arena->used = 0;
@@ -229,11 +229,10 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
             ASSERT( Align( arena->base, params.alignment ) == arena->base );
 
         result = arena->base;
-        waste = 0;
+        alignedSize = size;
     }
 
-    actualSize = size + waste;
-    arena->used += actualSize;
+    arena->used += alignedSize;
 
     // Have already moved up the block's pointer, so just clear the requested size
     if( params.flags & MemoryFlags_ClearToZero )

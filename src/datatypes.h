@@ -226,17 +226,18 @@ struct BucketArray
         BucketPtr base;
         i32 index;
 
-        Idx( BucketPtr base_, i32 index_ )
+        Idx( BucketPtr base_ = nullptr, i32 index_ = 0 )
             : base( base_ )
             , index( index_ )
         {}
 
-        explicit operator bool() const
+        // FIXME Additionally check that base is not in the free list
+        bool IsValid() const
         {
-            return IsValid();
+            return base && index >= 0 && index < base->count;
         }
 
-        bool IsValid() const
+        explicit operator bool() const
         {
             return base && index >= 0 && index < base->count;
         }
@@ -264,7 +265,13 @@ struct BucketArray
             }
         }
 
-        Idx operator ++( int _ )
+        Idx& operator ++()
+        {
+            Next();
+            return *this;
+        }
+
+        Idx operator ++( int )
         {
             Idx result(*this);
             Next();
@@ -283,7 +290,13 @@ struct BucketArray
             }
         }
 
-        Idx operator --( int _ )
+        Idx& operator --()
+        {
+            Prev();
+            return *this;
+        }
+
+        Idx operator --( int )
         {
             Idx result(*this);
             Prev();
@@ -376,6 +389,24 @@ struct BucketArray
         return result;
     }
 
+    // TODO Need a way to convert between index const-ness when it makes sense, otherwise this IsConst shit is shit
+    void PopUntil( const Idx<false>& index )
+    {
+        ASSERT( index.IsValid() );
+
+        while( last != index.base && last != &first )
+        {
+            // Place last bucket in the free list
+            last->next = firstFree;
+            firstFree = last;
+
+            last = last->prev;
+        }
+
+        ASSERT( last == index.base );
+        last->count = index.index + 1;
+    }
+
     typedef bool (*Comparator)( T const& a, T const& b );
 
     T* Find( T const& it, Comparator cmp )
@@ -461,12 +492,12 @@ struct BucketArray
 
     Idx<false> Last()
     {
-        return { last, last->count - 1 };
+        return { last, last->count ? last->count - 1 : 0 };
     }
 
     Idx<true> Last() const
     {
-        return { last, last->count - 1 };
+        return { last, last->count ? last->count - 1 : 0 };
     }
 
     T& operator[]( const Idx<false>& idx )

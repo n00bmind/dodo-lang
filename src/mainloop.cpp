@@ -226,7 +226,7 @@ complex_func :: ()
         InternString* fooIntern = Intern( String( "foo" ) );
         char const* foo = fooIntern->data;
         ASSERT( GetSymbol( foo ) == nullptr );
-        CreateTypeSymbol( foo, intType );
+        PushGlobalTypeSymbol( foo, intType );
         ASSERT( GetSymbol( foo ) && GetSymbol( foo )->type == intType );
 
         static char const* testDeclStrings[] =
@@ -260,13 +260,15 @@ complex_func :: ()
             "item := ptr[-1];",
             "bin := 1000 / (2 + 3 * 5) << 10;",
             "aptr: *int = -s[3] as *int;",
+            "f :: () { i += 1; }",
+            "h :: (x: int) -> int { if(x) { return -x; } else { return 1; } }",
         };
 
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
             Decl* decl = ParseDecl( &lexer );
-            CreateDeclSymbols( decl );
+            PushGlobalDeclSymbols( decl );
         }
         {
             auto idx = globalSymbolList.First();
