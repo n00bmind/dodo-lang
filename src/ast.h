@@ -58,6 +58,8 @@ struct CompoundField
     Kind kind;
 };
 
+struct Type;
+
 struct Expr
 {
     enum Kind
@@ -82,6 +84,8 @@ struct Expr
         //OffsetOf,
     };
 
+    // Annotated type from the result of the resolve
+    Type* resolvedType;
     SourcePos pos;
     Kind kind;
 
@@ -189,6 +193,8 @@ struct Decl
         Import, //?
     };
 
+    // Annotated type from the result of the resolve
+    Type* resolvedType;
     SourcePos pos;
     Array<char const*> names;
     Kind kind;

@@ -125,15 +125,7 @@ int main( int argCount, char const* args[] )
     globalPlatform.PrintVA = Win32PrintVA;
     globalPlatform.ErrorVA = Win32ErrorVA;
 
-    InitArena( &globalArena, MEGABYTES(16) );
-    InitArena( &globalTmpArena, MEGABYTES(16) );
-
-    Array<String> argsList( &globalArena, argCount );
-    // Skip exe path from args list
-    for( int i = 1; i < argCount; ++i )
-        argsList.Push( String( args[i] ) );
-
-    Run( argsList );
+    Run( argCount, args );
 
     return 0;
 }

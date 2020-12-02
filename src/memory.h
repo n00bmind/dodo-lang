@@ -40,7 +40,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define INIT(var) new (&var)
 
 
-///// STATIC MEMORY ARENA
+///// MEMORY ARENA
 // Linear memory arena that can grow in pages of a certain size
 // Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested, similar to a stack allocator)
 

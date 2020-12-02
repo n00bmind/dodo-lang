@@ -570,3 +570,43 @@ private:
     }
 };
 
+
+/////     HASHTABLE     /////
+
+/*
+After watching how Bitwise handles open addressing for pointer hashtables, I think I want to keep separate data structures
+for pointer-sized data vs. the rest, when generalizing this data structure to hold any type of data.
+
+So, for pointers we'd have something like:
+*/
+
+struct PtrHashtable
+{
+    struct Item
+    {
+        void* key;
+        void* value;
+    };
+
+    Item* items;
+    i32 count;
+    i32 capacity;
+};
+
+/*
+We're trying to optimize for the "hole-in-1" approach here, assuming a sufficiently good hash function, and we'll also keep the
+occupancy quite low by doing an ASSERT( count * 2 < capacity ) before each insertion, so for the few times that we don't hit
+the correct entry on the first try, it makes sense to keep the values inlined with the keys, as the correct result will be hopefully
+just a couple entries away and hence will still be in the same cache line, so we'll _hopefully_ still only have one cache miss even if
+we fail the first hit.
+
+Now, for generic keys & values, that picture changes significantly, and having both keys & values inlined is now quite probably bad
+for cache efficiency. So, for the generic case (and to be able to validate these assumptions through proper testing) we're going to want
+to be able to have either keys + values as separate or as interleaved.
+
+The problem is how to do this without having to write the code twice and without affecting performance.
+We could somehow templatize an internal structure that dictates the layout, based on the size of K and V types, but then all access
+would be through pass-through methods in that structure, which I guess is fine as long as they're inlined?
+*/
+
+

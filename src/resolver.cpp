@@ -1,6 +1,6 @@
 struct Type;
 
-struct Value
+struct ConstValue
 {
     union
     {
@@ -33,7 +33,7 @@ struct Symbol
     char const* name;
     Decl* decl;
     ::Type* type;
-    Value value;
+    ConstValue value;
     Kind kind;
     State state;
 };
@@ -76,7 +76,7 @@ struct Type
         TypeVar,
     };
 
-    // TODO Fill up!
+    // TODO Fill up! Can we just use the symbol?
     char const* name;
     // TODO Should be decl?
     Symbol* symbol;   // NOTE Only aggregates and enums will have one
@@ -166,7 +166,7 @@ sz TypeSize( Type* type )
 struct ResolvedExpr
 {
     Type* type;
-    Value value;
+    ConstValue value;
     bool isLvalue;
     bool isConst;
 };
@@ -676,47 +676,62 @@ ResolvedExpr ResolveCastExpr( Expr* expr )
 
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 {
+    ResolvedExpr result = {};
     switch( expr->kind )
     {
         // TODO Type sizes
         case Expr::Int:
-            return NewResolvedConst( intType, expr->literal.intValue );
+            result = NewResolvedConst( intType, expr->literal.intValue );
+            break;
         case Expr::Float:
-            return NewResolvedConst( floatType, expr->literal.floatValue );
+            result = NewResolvedConst( floatType, expr->literal.floatValue );
+            break;
         // TODO String
 
         case Expr::Name:
-            return ResolveNameExpr( expr );
+            result = ResolveNameExpr( expr );
+            break;
         case Expr::Field:
-            return ResolveFieldExpr( expr );
+            result = ResolveFieldExpr( expr );
+            break;
         case Expr::Index:
-            return ResolveIndexExpr( expr );
+            result = ResolveIndexExpr( expr );
+            break;
         case Expr::Compound:
-            return ResolveCompoundExpr( expr, expectedType );
+            result = ResolveCompoundExpr( expr, expectedType );
+            break;
         case Expr::Call:
-            return ResolveCallExpr( expr );
+            result = ResolveCallExpr( expr );
+            break;
 
         case Expr::Cast:
-            return ResolveCastExpr( expr );
+            result = ResolveCastExpr( expr );
+            break;
         case Expr::Unary:
-            return ResolveUnaryExpr( expr );
+            result = ResolveUnaryExpr( expr );
+            break;
         case Expr::Binary:
-            return ResolveBinaryExpr( expr );
+            result = ResolveBinaryExpr( expr );
+            break;
         case Expr::Ternary:
-            return ResolveTernaryExpr( expr, expectedType );
+            result = ResolveTernaryExpr( expr, expectedType );
+            break;
         case Expr::Sizeof:
         {
-            ResolvedExpr result = ResolveExpr( expr->sizeofExpr );
-            Type* type = result.type;
+            ResolvedExpr size = ResolveExpr( expr->sizeofExpr );
+            Type* type = size.type;
             CompleteType( type, expr->pos );
 
-            return NewResolvedConst( intType, I64( TypeSize( type ) ) );
+            result = NewResolvedConst( intType, I64( TypeSize( type ) ) );
         } break;
         // TODO Typeof
 
         INVALID_DEFAULT_CASE
     }
-    return resolvedNull;
+
+    if( result.type )
+        expr->resolvedType = result.type;
+    return result;
 }
 
 Type* NewType( Type::Kind kind, sz size )
@@ -900,6 +915,8 @@ void CompleteType( Type* type, SourcePos const& pos )
                 // TODO Offset
                 fields.Push( { name, fieldType } );
             }
+
+            d->resolvedType = fieldType;
         }
     }
 
@@ -1000,11 +1017,12 @@ void ResolveSymbol( Symbol* sym )
             }
 
             CompleteType( type, decl->pos );
-            sym->type = type;
+            decl->resolvedType = sym->type = type;
         } break;
 
         case Symbol::Const:
         {
+            ASSERT( decl->kind == Decl::Var );
             ASSERT( decl->var.isConst );
 
             // NOTE Type is always inferred for constants right now
@@ -1013,12 +1031,13 @@ void ResolveSymbol( Symbol* sym )
                 RSLV_ERROR( pos, "Initializer for constant '%s' is not a constant expression", sym->name );
 
             sym->value = init.value;
-            sym->type = init.type;
+            decl->resolvedType = sym->type = init.type;
         } break;
 
         case Symbol::Type:
         {
             // TODO This would only be for typedefs now, as aggregates start out already resolved
+            INVALID_CODE_PATH
         } break;
 
         case Symbol::Func:
@@ -1034,7 +1053,7 @@ void ResolveSymbol( Symbol* sym )
             if( decl->func.returnType )
                 retType = ResolveTypeSpec( decl->func.returnType );
 
-            sym->type = NewFuncType( args, retType );
+            decl->resolvedType = sym->type = NewFuncType( args, retType );
         } break;
 
         case Symbol::Module:
@@ -1189,7 +1208,7 @@ void ResolveStmtBlock( StmtList const& block, Type* returnType )
     LeaveScope( scopeIdx );
 }
 
-void ResolveFunc( Symbol* sym )
+void ResolveFuncBody( Symbol* sym )
 {
     ASSERT( sym->state == Symbol::Resolved );
 
@@ -1221,7 +1240,7 @@ void CompleteSymbol( Symbol* sym )
     if( sym->kind == Symbol::Type )
         CompleteType( sym->type, sym->decl->pos );
     else if( sym->kind == Symbol::Func )
-        ResolveFunc( sym );
+        ResolveFuncBody( sym );
 }
 
 Symbol* ResolveName( char const* name, SourcePos const& pos )
@@ -1290,7 +1309,7 @@ Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
             sym->state = Symbol::Resolved;
             sym->type = NewIncompleteType( sym );
         }
-
+        
         result.Push( sym );
     }
 

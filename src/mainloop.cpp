@@ -14,6 +14,7 @@
 
 MemoryArena globalArena;
 MemoryArena globalTmpArena;
+MemoryArena globalOutArena;
 InternStringBuffer globalInternStrings;
 bool globalError = false;
 
@@ -21,11 +22,14 @@ bool globalError = false;
 #include "lexer.cpp"
 #include "parser.cpp"
 #include "resolver.cpp"
+#include "codegen_c.cpp"
 
 
 void InitTestMemory()
 {
     ClearArena( &globalArena );
+    ClearArena( &globalTmpArena );
+    ClearArena( &globalOutArena );
     ClearArena( &globalInternStrings.arena );
 
     // Init intern strings
@@ -207,6 +211,41 @@ complex_func :: ()
         }
     }
 
+    static char const* testDeclStrings[] =
+    {
+        "n :: 1 + sizeof(p);",
+        "p : *T;",
+        "u := *p;",
+        "T :: struct { a: [n] int; };",
+        "r := &t.a;",
+        "t: T;",
+        "s: [n+m]int = { 0, 1, 2 };",
+        "m :: sizeof(t.a);",
+        "i := n + m;",
+        "q := &i;",
+        "sx :: sizeof(x);",
+        "x: R;",
+        "R :: struct { s: *S; };",
+        "S :: struct { r: [sx] R; };",
+        "U :: struct { a: [3] int; };",
+        "uu: U = { { 0 } };",
+        "a, b, c :: 0;",
+        //"b := 1;",                                  // Redeclared
+        "add :: (v: Vector, w: Vector) -> Vector { return { v.x + w.x, v.y + w.y }; }",
+        "result := add_func( { 1, 2 }, { 3, 4 } );",
+        "add_func := add;",
+        "Vector :: struct { x, y: int; }",
+        // TODO Check this actually works for all cond types
+        "it := 1 ? 2 : 3;",
+        "ptr := &s[1 + 1];",
+        // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
+        "item := ptr[-1];",
+        "bin := 1000 / (2 + 3 * 5) << 10;",
+        "aptr: *int = -s[3] as *int;",
+        "f :: () { i += 1; }",
+        "h :: (x: int) -> int { if(x) { return -x; } else { return 1; } }",
+    };
+
     {
         InitTestMemory();
         InitResolver();
@@ -228,41 +267,6 @@ complex_func :: ()
         ASSERT( GetSymbol( foo ) == nullptr );
         PushGlobalTypeSymbol( foo, intType );
         ASSERT( GetSymbol( foo ) && GetSymbol( foo )->type == intType );
-
-        static char const* testDeclStrings[] =
-        {
-            "n :: 1 + sizeof(p);",
-            "p : *T;",
-            "u := *p;",
-            "T :: struct { a: [n] int; };",
-            "r := &t.a;",
-            "t: T;",
-            "s: [n+m]int = { 0, 1, 2 };",
-            "m :: sizeof(t.a);",
-            "i := n + m;",
-            "q := &i;",
-            "sx :: sizeof(x);",
-            "x: R;",
-            "R :: struct { s: *S; };",
-            "S :: struct { r: [sx] R; };",
-            "U :: struct { a: [3] int; };",
-            "uu: U = { { 0 } };",
-            "a, b, c :: 0;",
-            //"b := 1;",                                  // Redeclared
-            "add :: (v: Vector, w: Vector) -> Vector { return { v.x + w.x, v.y + w.y }; }",
-            "result := add_func( { 1, 2 }, { 3, 4 } );",
-            "add_func := add;",
-            "Vector :: struct { x, y: int; }",
-            // TODO Check this actually works for all cond types
-            "it := 1 ? 2 : 3;",
-            "ptr := &s[1 + 1];",
-            // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
-            "item := ptr[-1];",
-            "bin := 1000 / (2 + 3 * 5) << 10;",
-            "aptr: *int = -s[3] as *int;",
-            "f :: () { i += 1; }",
-            "h :: (x: int) -> int { if(x) { return -x; } else { return 1; } }",
-        };
 
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
@@ -308,19 +312,68 @@ complex_func :: ()
                 int indent = 0;
 
                 DebugPrintSExpr( sym->decl, outBuf, len, indent );
-                printf( "Declare %s\n", buf );
+                //printf( "Declare %s\n", buf );
             }
-            else
-                printf( "%s\n", sym->name );
+            //else
+                //printf( "%s\n", sym->name );
 
             idx2.Next();
         }
     }
-    __debugbreak();
+
+    {
+        InitTestMemory();
+        InitResolver();
+
+        char* cdecl1 = TypeToCdecl( intType, "x" );
+        char* cdecl2 = TypeToCdecl( NewPtrType( intType ), "x" );
+        char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10 ), "x" );
+        Array<Type*> args( &globalTmpArena, 2 );
+        args.Push( NewPtrType( intType ) );
+        args.Push( intType );
+        char* cdecl4 = TypeToCdecl( NewFuncType( args, intType ), "x" );
+        char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10 ), "x" );
+        Array<Type*> emptyArgs( &globalTmpArena, 0 );
+        char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
+
+        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        {
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Decl* decl = ParseDecl( &lexer );
+            PushGlobalDeclSymbols( decl );
+        }
+        for( auto idx = globalSymbolList.First(); idx; ++idx )
+        {
+            Symbol* sym = &*idx;
+            CompleteSymbol( sym );
+        }
+
+        GenerateAll();
+        String outString( (char*)globalOutArena.base, I32( globalOutArena.used ) );
+        printf( "%.*s", outString.length, outString.data );
+
+        __debugbreak();
+    }
+
 }
 
-void Run( Array<String> const& argsList )
+void Run( int argCount, char const* args[] )
 {
+    InitArena( &globalArena, MEGABYTES(16) );
+    InitArena( &globalTmpArena, MEGABYTES(16) );
+    InitArena( &globalOutArena, MEGABYTES(16) );
+    InitArena( &globalInternStrings.arena );
+
+#if !CONFIG_RELEASE
+    RunTests();
+#endif
+
+#if 0
+    Array<String> argsList( &globalArena, argCount );
+    // Skip exe path from args list
+    for( int i = 1; i < argCount; ++i )
+        argsList.Push( String( args[i] ) );
+
     // Parse arguments
     if( argsList.count == 0 )
     {
@@ -328,13 +381,7 @@ void Run( Array<String> const& argsList )
         return;
     }
 
-#if !CONFIG_RELEASE
-    RunTests();
-#endif
-
-#if 0
     // Init intern strings
-    InitArena( &globalInternStrings.arena );
     new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
 
     InitResolver();

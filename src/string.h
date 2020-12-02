@@ -116,18 +116,23 @@ INLINE bool IsNumber( char c )
     return result;
 }
 
-bool StringsEqual( String const& a, String const& b )
+INLINE bool StringsEqual( String const& a, String const& b )
 {
     return a.length == b.length && strncmp( a.data, b.data, Sz( a.length ) ) == 0;
 }
 
 // NOTE Unsafe!
-bool StringsEqual( String const& a, char const* b )
+INLINE bool StringsEqual( String const& a, char const* b )
 {
     return b[ a.length ] == 0 && strncmp( a.data, b, Sz( a.length ) ) == 0;
 }
 
-bool StringsEqual( char const* a, char const* b )
+INLINE bool StringsEqual( char const* a, char const* b )
 {
     return strcmp( a, b ) == 0;
+}
+
+INLINE sz StringLength( char const* s )
+{
+    return strlen( s );
 }
