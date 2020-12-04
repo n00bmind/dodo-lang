@@ -277,7 +277,7 @@ void EmitFuncDecl( Decl* decl )
 
 void EmitForwardDecls()
 {
-    for( auto idx = globalSymbolList.First(); idx; ++idx )
+    for( auto idx = globalSymbolsList.First(); idx; ++idx )
     {
         Symbol const& sym = *idx;
         Decl* decl = sym.decl;
@@ -302,52 +302,65 @@ void EmitForwardDecls()
                 OUTSTR( ";" );
                 OutNL();
             } break;
-            case Decl::Func:
-            {
-                EmitFuncDecl( decl );
-                OUTSTR( ";" );
-                OutNL();
-            } break;
         }
     }
 }
 
 void EmitStmtBlock( StmtList const& block );
 
-void EmitDecl( Decl* decl, bool nested = false )
+void EmitVarDecl( Decl* decl, char const* name, bool nested )
 {
     Type* resolvedType = decl->resolvedType; 
 
     OutIndent();
+    if( decl->var.isConst )
+    {
+        if( nested )
+            OUTSTR( "static constexpr " );
+        else
+            OUTSTR( "const " );
+    }
+
+    TypeSpec* typeSpec = decl->var.type;
+    if( typeSpec )
+        Out( TypeSpecToCdecl( typeSpec, name ) );
+    else
+        Out( TypeToCdecl( resolvedType, name ) );
+
+    if( decl->var.initExpr )
+    {
+        OUTSTR( " = " );
+        EmitExpr( decl->var.initExpr );
+    }
+    OUTSTR( ";" );
+    OutNL();
+}
+
+void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
+{
     switch( decl->kind )
     {
         case Decl::Var:
         {
-            if( decl->var.isConst )
+            // NOTE For declarations where multiple names are declared together, right now the situation is different
+            // for top-level variables and fields inside aggregates. Top-level variables need to have a separate symbol created
+            // for each name, so we have to emit them just once using the symbol name. For aggregate fields, we just emit
+            // a field per name on separate lines
+            if( nested )
             {
-                if( nested )
-                    OUTSTR( "static constexpr " );
-                else
-                    OUTSTR( "const " );
+                for( char const* name : decl->names )
+                    EmitVarDecl( decl, name, nested );
             }
-            // TODO Multiple names
-            TypeSpec* typeSpec = decl->var.type;
-            if( typeSpec )
-                Out( TypeSpecToCdecl( typeSpec, decl->names[0] ) );
             else
-                Out( TypeToCdecl( resolvedType, decl->names[0] ) );
-
-            if( decl->var.initExpr )
             {
-                OUTSTR( " = " );
-                EmitExpr( decl->var.initExpr );
+                ASSERT( symbol, "Need a (named) symbol for top-level variable declarations" );
+                EmitVarDecl( decl, symbol->name, nested );
             }
-            OUTSTR( ";" );
-            OutNL();
         } break;
         case Decl::Struct:
         case Decl::Union:
         {
+            OutIndent();
             if( decl->kind == Decl::Struct )
                 OUTSTR( "struct " );
             else
@@ -360,15 +373,16 @@ void EmitDecl( Decl* decl, bool nested = false )
             globalIndent++;
             for( Decl* field : decl->aggregate.items )
             {
-                EmitDecl( field, true );
+                EmitDecl( field, nullptr, true );
             }
             globalIndent--;
-            OUTSTR( "}" );
+            OUTSTR( "};" );
             OutNL();
         } break;
 
         case Decl::Func:
         {
+            OutIndent();
             EmitFuncDecl( decl );
             OutNL();
             EmitStmtBlock( decl->func.body );
@@ -398,6 +412,7 @@ void EmitStmt( Stmt* stmt )
             Out( TokenKind::Values::names[stmt->assign.op] );
             OUTSTR( " " );
             EmitExpr( stmt->assign.right );
+            OUTSTR( ";" );
             break;
         case Stmt::If:
             OutIndent();
@@ -540,7 +555,7 @@ void EmitOrderedSymbols()
         if( !decl )
             return;
 
-        EmitDecl( decl );
+        EmitDecl( decl, sym );
     }
 }
 

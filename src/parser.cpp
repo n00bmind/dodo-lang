@@ -58,7 +58,7 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
 
     if( MatchToken( TokenKind::Name, token ) )
     {
-        BucketArray<char const*> names( &globalTmpArena, 8 );
+        BucketArray<char const*> names( &globalTmpArena, 8, Temporary() );
 
         names.Push( token.ident );
         NextToken( lexer );
@@ -77,7 +77,7 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
     else if( MatchToken( TokenKind::OpenParen, token ) )
     {
         // Function type
-        BucketArray<TypeSpec*> args( &globalTmpArena, 8 );
+        BucketArray<TypeSpec*> args( &globalTmpArena, 8, Temporary() );
 
         NextToken( lexer );
         while( !MatchToken( TokenKind::CloseParen, token ) )
@@ -330,7 +330,7 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 Expr* ParseCompoundExpr( Lexer* lexer )
 {
     SourcePos pos = lexer->token.pos;
-    BucketArray<CompoundField> fields( &globalTmpArena, 16 );
+    BucketArray<CompoundField> fields( &globalTmpArena, 16, Temporary() );
 
     RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
@@ -422,7 +422,7 @@ Expr* ParsePostfixExpr( Lexer* lexer )
 
         if( MatchToken( TokenKind::OpenParen, lexer->token ) )
         {
-            BucketArray<Expr*> args( &globalTmpArena, 16 );
+            BucketArray<Expr*> args( &globalTmpArena, 16, Temporary() );
 
             Token token = NextToken( lexer );
             if( !MatchToken( TokenKind::CloseParen, token ) )
@@ -606,7 +606,7 @@ Expr* ParseCommaExpr( Lexer* lexer )
 
     if( MatchToken( TokenKind::Comma, lexer->token ) )
     {
-        BucketArray<Expr*> exprList( &globalTmpArena, 8 );
+        BucketArray<Expr*> exprList( &globalTmpArena, 8, Temporary() );
         exprList.Push( expr );
 
         while( MatchToken( TokenKind::Comma, lexer->token ) )
@@ -678,7 +678,7 @@ Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, Lexer* le
 
     RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
 
-    BucketArray<Decl*> items( &globalTmpArena, 16 );
+    BucketArray<Decl*> items( &globalTmpArena, 16, Temporary() );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
         Decl* decl = ParseDecl( lexer );
@@ -743,7 +743,7 @@ Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, Lexer* lexer )
 
     RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
 
-    BucketArray<EnumItem> items( &globalTmpArena, 16 );
+    BucketArray<EnumItem> items( &globalTmpArena, 16, Temporary() );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
         items.Push( ParseEnumItemDecl( lexer ) );
@@ -826,7 +826,7 @@ StmtList NewStmtList( SourcePos const& pos, BucketArray<Stmt*> const& stmts )
 
 StmtList ParseStmtBlock( Lexer* lexer )
 {
-    BucketArray<Stmt*> stmts( &globalTmpArena, 16 );
+    BucketArray<Stmt*> stmts( &globalTmpArena, 16, Temporary() );
 
     SourcePos pos = lexer->token.pos;
     
@@ -901,7 +901,7 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
             }
 
             // Func
-            BucketArray<FuncArg> args( &globalTmpArena, 16 );
+            BucketArray<FuncArg> args( &globalTmpArena, 16, Temporary() );
 
             NextToken( lexer );
             if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
@@ -956,7 +956,7 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
         RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
     }
 
-    BucketArray<char const*> names( &globalTmpArena, 8 );
+    BucketArray<char const*> names( &globalTmpArena, 8, Temporary() );
     if( namesExpr->kind == Expr::Name )
         names.Push( namesExpr->name );
     else
@@ -993,7 +993,7 @@ Decl* ParseDecl( Lexer* lexer )
     }
     else
     {
-        BucketArray<Token> names( &globalTmpArena, 8 );
+        BucketArray<Token> names( &globalTmpArena, 8, Temporary() );
 
         RequireToken( TokenKind::Name, lexer );
         names.Push( lexer->token );
@@ -1011,7 +1011,7 @@ Decl* ParseDecl( Lexer* lexer )
         Expr* expr = nullptr;
         if( names.count > 1 )
         {
-            BucketArray<Expr*> exprs( &globalTmpArena, names.count );
+            BucketArray<Expr*> exprs( &globalTmpArena, names.count, Temporary() );
             auto idx = names.First();
             while( idx )
             {
@@ -1131,7 +1131,7 @@ StmtList ParseStmtOrStmtBlock( Lexer* lexer )
     }
     else
     {
-        BucketArray<Stmt*> stmts( &globalTmpArena, 1 );
+        BucketArray<Stmt*> stmts( &globalTmpArena, 1, Temporary() );
         stmts.Push( ParseStmt( lexer ) );
 
         if( lexer->IsValid() )
@@ -1150,7 +1150,7 @@ Stmt* NewIfStmt( SourcePos const& pos, Expr* cond, StmtList const& thenBlock, Bu
     result->if_.cond = cond;
     result->if_.thenBlock = thenBlock;
     result->if_.elseBlock = elseBlock;
-    new( &result->if_.elseIfs ) Array<ElseIf>( &globalTmpArena, elseIfs.count );
+    new( &result->if_.elseIfs ) Array<ElseIf>( &globalTmpArena, elseIfs.count, Temporary() );
     elseIfs.CopyTo( &result->if_.elseIfs );
 
     return result;
@@ -1179,7 +1179,7 @@ Stmt* NewSwitchStmt( SourcePos const& pos, Expr* expr, BucketArray<SwitchCase> c
 {
     Stmt* result = NewStmt( pos, Stmt::Switch );
     result->switch_.expr = expr;
-    new( &result->switch_.cases ) Array<SwitchCase>( &globalTmpArena, cases.count );
+    new( &result->switch_.cases ) Array<SwitchCase>( &globalTmpArena, cases.count, Temporary() );
     cases.CopyTo( &result->switch_.cases );
 
     return result;
@@ -1211,7 +1211,7 @@ Stmt* ParseIfStmt( SourcePos const& pos, Lexer* lexer )
     StmtList thenBlock = ParseStmtOrStmtBlock( lexer );
 
     StmtList elseBlock = {};
-    BucketArray<ElseIf> elseIfs( &globalTmpArena, 8 );
+    BucketArray<ElseIf> elseIfs( &globalTmpArena, 8, Temporary() );
 
     while( MatchKeyword( Keyword::Else, lexer->token ) )
     {
@@ -1318,7 +1318,7 @@ Stmt* ParseSwitchStmt( SourcePos const& pos, Lexer* lexer )
     //RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
 
     bool hasDefault = false;
-    BucketArray<SwitchCase> cases( &globalTmpArena, 16 );
+    BucketArray<SwitchCase> cases( &globalTmpArena, 16, Temporary() );
     while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
     {
         SourcePos casePos = lexer->pos;

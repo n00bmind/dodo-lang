@@ -111,10 +111,10 @@ GetArenaHeader( MemoryArena* arena )
 internal void
 FreeLastPage( MemoryArena* arena )
 {
-    void* freePage = arena->base;
-
     // Restore previous page's info
     MemoryArenaHeader* header = GetArenaHeader( arena );
+    void* freePage = header;
+
     arena->base = header->base;
     arena->size = header->size;
     arena->used = header->used;

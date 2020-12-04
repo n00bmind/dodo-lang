@@ -42,6 +42,10 @@ PLATFORM_PRINT(Win32Error)
     va_start( args, fmt );
     vfprintf( stderr, fmt, args );
     va_end( args );
+
+#if CONFIG_DEBUG
+    __debugbreak();
+#endif
 }
 
 PLATFORM_PRINT_VA(Win32ErrorVA)
@@ -98,6 +102,34 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
     return result;
 }
 
+PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
+{
+    DWORD creationMode = CREATE_NEW;
+#if CONFIG_DEBUG
+    creationMode = CREATE_ALWAYS;
+#endif
+    HANDLE outFile = CreateFile( filename, GENERIC_WRITE, 0, NULL,
+                                 creationMode, FILE_ATTRIBUTE_NORMAL, NULL ); 
+    if( outFile == INVALID_HANDLE_VALUE )
+    {
+        globalPlatform.Error( "Could not open '%s' for writing", filename );
+        return;
+    }
+
+    for( int i = 0; i < chunks.count; ++i )
+    {
+        Buffer const& chunk = chunks[i];
+        SetFilePointer( outFile, 0, NULL, FILE_END );
+
+        DWORD bytesWritten;
+        if( !WriteFile( outFile, chunk.data, U32( chunk.size ), &bytesWritten, NULL ) )
+        {
+            globalPlatform.Error( "Failed writing %d bytes to '%s'", chunk.size, filename );
+            return;
+        }
+    }
+}
+
 ASSERT_HANDLER(DefaultAssertHandler)
 {
     // TODO Logging
@@ -120,6 +152,7 @@ int main( int argCount, char const* args[] )
     globalPlatform.Alloc = Win32Alloc;
     globalPlatform.Free = Win32Free;
     globalPlatform.ReadEntireFile = Win32ReadEntireFile;
+    globalPlatform.WriteEntireFile = Win32WriteEntireFile;
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
     globalPlatform.PrintVA = Win32PrintVA;

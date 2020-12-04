@@ -39,7 +39,7 @@ struct Symbol
 };
 
 // TODO Hashtable!
-BucketArray<Symbol> globalSymbolList;
+BucketArray<Symbol> globalSymbolsList;
 
 // Local scopes for functions
 BucketArray<Symbol> globalScopeStack;
@@ -948,7 +948,7 @@ Symbol* GetSymbol( char const* name )
     // Otherwise search in the global symbols
     if( !result )
     {
-        for( auto idx = globalSymbolList.First(); idx; ++idx )
+        for( auto idx = globalSymbolsList.First(); idx; ++idx )
         {
             if( (*idx).name == name )
             {
@@ -1046,12 +1046,16 @@ void ResolveSymbol( Symbol* sym )
             for( FuncArg const& a : decl->func.args )
             {
                 Type* argType = ResolveTypeSpec( a.type );
+                CompleteType( argType, a.pos );
                 args.Push( argType );
             }
 
             Type* retType = voidType;
             if( decl->func.returnType )
+            {
                 retType = ResolveTypeSpec( decl->func.returnType );
+                CompleteType( retType, decl->func.returnType->pos );
+            }
 
             decl->resolvedType = sym->type = NewFuncType( args, retType );
         } break;
@@ -1256,7 +1260,7 @@ Symbol* ResolveName( char const* name, SourcePos const& pos )
 
 void ResolveSymbols()
 {
-    auto idx = globalSymbolList.First();
+    auto idx = globalSymbolsList.First();
     while( idx )
     {
         ResolveSymbol( &*idx );
@@ -1298,7 +1302,7 @@ Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
             continue;
         }
 
-        Symbol* sym = globalSymbolList.PushEmpty( true );
+        Symbol* sym = globalSymbolsList.PushEmpty( true );
         sym->decl = decl;
         sym->name = name;
         sym->kind = kind;
@@ -1326,13 +1330,13 @@ Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
     result.kind = Symbol::Type;
     result.state = Symbol::Resolved;
 
-    return globalSymbolList.Push( result );
+    return globalSymbolsList.Push( result );
 }
 
 
 void InitResolver()
 {
-    INIT( globalSymbolList ) BucketArray<Symbol>( &globalArena, 256 );
+    INIT( globalSymbolsList ) BucketArray<Symbol>( &globalArena, 256 );
     INIT( globalScopeStack ) BucketArray<Symbol>( &globalArena, 1024 );
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
@@ -1343,4 +1347,15 @@ void InitResolver()
     PushGlobalTypeSymbol( "bool", boolType );
     PushGlobalTypeSymbol( "int", intType );
     PushGlobalTypeSymbol( "float", floatType );
+}
+
+void ResolveAll( Array<Decl*> const& globalDecls )
+{
+    for( Decl* decl : globalDecls )
+        PushGlobalDeclSymbols( decl );
+    for( auto idx = globalSymbolsList.First(); idx; ++idx )
+    {
+        Symbol* sym = &*idx;
+        CompleteSymbol( sym );
+    }
 }

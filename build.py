@@ -45,6 +45,7 @@ platform_win = Platform(
             '-wd4201',          # Nameless struct/union
             '-wd4312',          # Conversion from int to pointer
             '-wd4426',          # Optimizations changed 
+            '-wd4464',          # Relative include path contains '..'
             '-wd4505',          # Unreferenced function
             '-wd4514',          # Unreferenced inline function removed
             '-wd4623',          # Default constructor implicitly deleted
@@ -82,7 +83,7 @@ config_win_debug = Config(
         name           = 'Debug',
         platform       = platform_win,
         cmdline_opts   = ['d', 'dbg', 'debug'],
-        compiler_flags = ['-DDEBUG=1', '-Z7', '-Od'],
+        compiler_flags = ['-DCONFIG_DEBUG=1', '-Z7', '-Od'],
         linker_flags   = ['/debug:full']                # Required for debugging after hot reloading
 )
 # This config is a bit confusing and we need to clarify this:
@@ -95,14 +96,14 @@ config_win_develop = Config(
         name           = 'Develop',
         platform       = platform_win,
         cmdline_opts   = ['dev', 'develop'],
-        compiler_flags = ['-DDEVELOP=1', '-Z7', '-O2',],
+        compiler_flags = ['-DCONFIG_DEVELOP=1', '-Z7', '-O2',],
         linker_flags   = ['/debug:full']
 )
 config_win_release = Config(
         name           = 'Release',
         platform       = platform_win,
         cmdline_opts   = ['r', 'rel', 'release'],
-        compiler_flags = ['-DRELEASE=1', '-Z7', '-O2'],
+        compiler_flags = ['-DCONFIG_RELEASE=1', '-Z7', '-O2'],
         linker_flags   = ['/debug:full']
 )
 

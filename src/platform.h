@@ -1,5 +1,6 @@
 
 struct MemoryArena;
+template <typename T> struct Array;
 
 #define PLATFORM_ALLOC(name) void* name( sz sizeBytes, u32 flags )
 typedef PLATFORM_ALLOC(PlatformAlloc);
@@ -7,6 +8,8 @@ typedef PLATFORM_ALLOC(PlatformAlloc);
 typedef PLATFORM_FREE(PlatformFree);
 #define PLATFORM_READ_ENTIRE_FILE(name) Buffer name( char const* filename, MemoryArena* arena )
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
+#define PLATFORM_WRITE_ENTIRE_FILE(name) void name( char const* filename, Array<Buffer> const& chunks )
+typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);
 #define PLATFORM_PRINT_VA(name) void name( const char *fmt, va_list args )
@@ -22,6 +25,7 @@ struct PlatformAPI
     PlatformAlloc* Alloc;
     PlatformFree* Free;
     PlatformReadEntireFileFunc* ReadEntireFile;
+    PlatformWriteEntireFileFunc* WriteEntireFile;
     PlatformPrintFunc* Print;
     PlatformPrintFunc* Error;
     PlatformPrintVAFunc* PrintVA;
@@ -30,7 +34,6 @@ struct PlatformAPI
 #if 0
 #if !RELEASE
     DebugPlatformFreeFileMemoryFunc* DEBUGFreeFileMemory;
-    DebugPlatformWriteEntireFileFunc* DEBUGWriteEntireFile;
     DebugPlatformListAllAssetsFunc* DEBUGListAllAssets;
     DebugPlatformJoinPathsFunc* DEBUGJoinPaths;
     DebugPlatformGetParentPathFunc* DEBUGGetParentPath;

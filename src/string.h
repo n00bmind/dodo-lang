@@ -136,3 +136,8 @@ INLINE sz StringLength( char const* s )
 {
     return strlen( s );
 }
+
+INLINE void StringCopy( char const* src, char* dst, sz dstSize )
+{
+    strncpy( dst, src, dstSize );
+}

@@ -24,6 +24,8 @@ bool globalError = false;
 #include "resolver.cpp"
 #include "codegen_c.cpp"
 
+//#include "../test1.do.cpp"
+
 
 void InitTestMemory()
 {
@@ -107,7 +109,6 @@ void RunTests()
             { "(*names.First()).ident", "(. (* (call (. names First) ())) ident)" },
         };
 
-        int i = 0;
         Lexer lexer;
         Expr* expr = nullptr;
 
@@ -275,7 +276,7 @@ complex_func :: ()
             PushGlobalDeclSymbols( decl );
         }
         {
-            auto idx = globalSymbolList.First();
+            auto idx = globalSymbolsList.First();
             while( idx )
             {
                 Symbol* sym = &*idx;
@@ -342,7 +343,7 @@ complex_func :: ()
             Decl* decl = ParseDecl( &lexer );
             PushGlobalDeclSymbols( decl );
         }
-        for( auto idx = globalSymbolList.First(); idx; ++idx )
+        for( auto idx = globalSymbolsList.First(); idx; ++idx )
         {
             Symbol* sym = &*idx;
             CompleteSymbol( sym );
@@ -350,11 +351,12 @@ complex_func :: ()
 
         GenerateAll();
         String outString( (char*)globalOutArena.base, I32( globalOutArena.used ) );
-        printf( "%.*s", outString.length, outString.data );
+        //printf( "%.*s", outString.length, outString.data );
 
-        __debugbreak();
+        //__debugbreak();
     }
 
+    InitTestMemory();
 }
 
 void Run( int argCount, char const* args[] )
@@ -368,7 +370,6 @@ void Run( int argCount, char const* args[] )
     RunTests();
 #endif
 
-#if 0
     Array<String> argsList( &globalArena, argCount );
     // Skip exe path from args list
     for( int i = 1; i < argCount; ++i )
@@ -387,11 +388,40 @@ void Run( int argCount, char const* args[] )
     InitResolver();
 
     String inputFilename = argsList[0];
-    char const* filename_str = inputFilename.CString( globalTmpArena );
+    char const* filename_str = inputFilename.CString( &globalTmpArena );
     // TODO Temp memory scopes
     // FIXME Null terminate!
-    Buffer readResult = globalPlatform.ReadEntireFile( filename_str, globalTmpArena );
+    Buffer readResult = globalPlatform.ReadEntireFile( filename_str, &globalTmpArena );
 
-    Parse( String( readResult ), filename_str );
-#endif
+    Array<Decl*> fileDecls = Parse( String( readResult ), filename_str );
+    ResolveAll( fileDecls );
+    GenerateAll();
+
+    // Collect all output arena pages in order and write them to disk
+    Array<Buffer> pages( &globalArena, globalOutArena.pageCount );
+    pages.ResizeToCapacity();
+
+    MemoryArena arena = globalOutArena;
+    for( int i = pages.count - 1; i >= 0; --i )
+    {
+        pages[i].data = arena.base;
+        pages[i].size = arena.used;
+
+        if( i != 0 )
+        {
+            MemoryArenaHeader* header = GetArenaHeader( &arena );
+            arena.base = header->base;
+            arena.size = header->size;
+            arena.used = header->used;
+        }
+    }
+
+    char outPath[PLATFORM_PATH_MAX] = {};
+    inputFilename.CopyTo( outPath );
+
+    sz available = Sz( PLATFORM_PATH_MAX - inputFilename.length );
+    ASSERT( available >= sizeof(".cpp") );
+    StringCopy( ".cpp", outPath + inputFilename.length, available );
+
+    globalPlatform.WriteEntireFile( outPath, pages );
 }
