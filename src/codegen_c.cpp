@@ -315,10 +315,10 @@ void EmitVarDecl( Decl* decl, char const* name, bool nested )
     OutIndent();
     if( decl->var.isConst )
     {
-        if( nested )
+        //if( nested )
             OUTSTR( "static constexpr " );
-        else
-            OUTSTR( "const " );
+        //else
+            //OUTSTR( "const " );
     }
 
     TypeSpec* typeSpec = decl->var.type;
@@ -402,8 +402,7 @@ void EmitStmt( Stmt* stmt )
             EmitExpr( stmt->expr );
             break;
         case Stmt::Decl:
-            OutIndent();
-            EmitDecl( stmt->decl );
+            EmitDecl( stmt->decl, nullptr, true );
             break;
         case Stmt::Assign:
             OutIndent();
@@ -464,7 +463,7 @@ void EmitStmt( Stmt* stmt )
             OutIndent();
             OUTSTR( "for( " );
             // TODO 
-            EmitExpr( stmt->for_.cond );
+            //EmitExpr( stmt->for_.cond );
             OUTSTR( " )" );
             OutNL();
             EmitStmtBlock( stmt->for_.block );

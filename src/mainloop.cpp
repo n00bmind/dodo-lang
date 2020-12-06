@@ -16,7 +16,7 @@ MemoryArena globalArena;
 MemoryArena globalTmpArena;
 MemoryArena globalOutArena;
 InternStringBuffer globalInternStrings;
-bool globalError = false;
+int globalErrorCount = 0;
 
 #include "common.cpp"
 #include "lexer.cpp"
@@ -394,34 +394,43 @@ void Run( int argCount, char const* args[] )
     Buffer readResult = globalPlatform.ReadEntireFile( filename_str, &globalTmpArena );
 
     Array<Decl*> fileDecls = Parse( String( readResult ), filename_str );
-    ResolveAll( fileDecls );
-    GenerateAll();
-
-    // Collect all output arena pages in order and write them to disk
-    Array<Buffer> pages( &globalArena, globalOutArena.pageCount );
-    pages.ResizeToCapacity();
-
-    MemoryArena arena = globalOutArena;
-    for( int i = pages.count - 1; i >= 0; --i )
+    if( !globalErrorCount )
     {
-        pages[i].data = arena.base;
-        pages[i].size = arena.used;
-
-        if( i != 0 )
-        {
-            MemoryArenaHeader* header = GetArenaHeader( &arena );
-            arena.base = header->base;
-            arena.size = header->size;
-            arena.used = header->used;
-        }
+        ResolveAll( fileDecls );
+        if( !globalErrorCount )
+            GenerateAll();
     }
 
-    char outPath[PLATFORM_PATH_MAX] = {};
-    inputFilename.CopyTo( outPath );
+    if( globalErrorCount )
+        globalPlatform.Error( "\nCompilation found %d errors.", globalErrorCount );
+    else
+    {
+        // Collect all output arena pages in order and write them to disk
+        Array<Buffer> pages( &globalArena, globalOutArena.pageCount );
+        pages.ResizeToCapacity();
 
-    sz available = Sz( PLATFORM_PATH_MAX - inputFilename.length );
-    ASSERT( available >= sizeof(".cpp") );
-    StringCopy( ".cpp", outPath + inputFilename.length, available );
+        MemoryArena arena = globalOutArena;
+        for( int i = pages.count - 1; i >= 0; --i )
+        {
+            pages[i].data = arena.base;
+            pages[i].size = arena.used;
 
-    globalPlatform.WriteEntireFile( outPath, pages );
+            if( i != 0 )
+            {
+                MemoryArenaHeader* header = GetArenaHeader( &arena );
+                arena.base = header->base;
+                arena.size = header->size;
+                arena.used = header->used;
+            }
+        }
+
+        char outPath[PLATFORM_PATH_MAX] = {};
+        inputFilename.CopyTo( outPath );
+
+        sz available = Sz( PLATFORM_PATH_MAX - inputFilename.length );
+        ASSERT( available >= sizeof(".cpp") );
+        StringCopy( ".cpp", outPath + inputFilename.length, available );
+
+        globalPlatform.WriteEntireFile( outPath, pages );
+    }
 }

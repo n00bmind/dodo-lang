@@ -4,3 +4,4 @@ bin/
 .session.vim
 *.swp
 *.rdbg
+*.do.cpp

@@ -248,6 +248,16 @@ struct BucketArray
             return base->data[index];
         }
 
+        bool operator ==( Idx<IsConst> const& other ) const
+        {
+            return base == other.base && index == other.index;
+        }
+
+        bool operator !=( Idx<IsConst> const& other ) const
+        {
+            return base != other.base || index != other.index;
+        }
+
         ValueRef operator *() const
         {
             ASSERT( IsValid() );

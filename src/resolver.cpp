@@ -1,3 +1,8 @@
+// TODO Inline any single-use functions!
+// TODO Inline any single-use functions!
+// TODO Inline any single-use functions!
+// TODO Inline any single-use functions!
+
 struct Type;
 
 struct ConstValue
@@ -28,6 +33,7 @@ struct Symbol
         Unresolved = 0,
         Resolving,
         Resolved,
+        Tainted,            // Failed to resolve. Stop emitting errors on it
     };
 
     char const* name;
@@ -162,6 +168,11 @@ sz TypeSize( Type* type )
     return type->size;
 }
 
+bool IsTainted( Type* type )
+{
+    return type->symbol && type->symbol->state == Symbol::Tainted;
+}
+
 
 struct ResolvedExpr
 {
@@ -238,6 +249,8 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     ASSERT( expr->kind == Expr::Name );
 
     Symbol* sym = ResolveName( expr->name, expr->pos );
+    if( !sym )
+        return resolvedNull;
 
     if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
@@ -262,15 +275,19 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
     // TODO Modules
     ResolvedExpr left = ResolveExpr( expr->field.base );
     Type* type = left.type;
+    
+    if( !type || IsTainted( type ) )
+        return resolvedNull;
+
     CompleteType( type, expr->pos );
 
-    if( type && type->kind == Type::Pointer )
+    if( type->kind == Type::Pointer )
     {
         left = NewResolvedLvalue( type->ptr.base );
         type = left.type;
         CompleteType( type, expr->pos );
     }
-    if( !type || !(type->kind == Type::Struct || type->kind == Type::Union) )
+    if( !(type->kind == Type::Struct || type->kind == Type::Union) )
     {
         RSLV_ERROR( expr->pos, "Can only reference fields on aggregates or pointers to aggregates" );
         return resolvedNull;
@@ -430,15 +447,18 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
     ResolvedExpr left = ResolveExpr( expr->binary.left );
     ResolvedExpr right = ResolveExpr( expr->binary.right );
 
-    if( left.type != intType )
+    if( left.type )
     {
-        RSLV_ERROR( expr->pos, "Only ints supported in binary expressions for now!" );
-        return resolvedNull;
-    }
-    if( left.type != right.type )
-    {
-        RSLV_ERROR( expr->pos, "Type mismatch in binary expression (left is '%s', right is '%s')", left.type->name, right.type->name );
-        return resolvedNull;
+        if( left.type != intType )
+        {
+            RSLV_ERROR( expr->pos, "Only ints supported in binary expressions for now!" );
+            return resolvedNull;
+        }
+        if( right.type && left.type != right.type )
+        {
+            RSLV_ERROR( expr->pos, "Type mismatch in binary expression (left is '%s', right is '%s')", left.type->name, right.type->name );
+            return resolvedNull;
+        }
     }
 
     if( left.isConst && right.isConst )
@@ -459,11 +479,13 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     CompleteType( expectedType, expr->pos );
 
     sz slotCount = 0;
-    // TODO Unions?
     if( expectedType->kind == Type::Array )
         slotCount = expectedType->array.count;
     else if( expectedType->kind == Type::Struct )
         slotCount = Sz( expectedType->aggregate.fields.count );
+    else if( expectedType->kind == Type::Union )
+        // TODO Check that we're using a single designated initializer
+        slotCount = 1;
     else
     {
         RSLV_ERROR( expr->pos, "Compound literals can only be used to initialize struct or array types" );
@@ -501,6 +523,9 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Call );
     ResolvedExpr result = ResolveExpr( expr->call.func );
+    if( !result.type )
+        return resolvedNull;
+
     CompleteType( result.type, expr->pos );
 
     if( result.type->kind != Type::Func )
@@ -600,6 +625,8 @@ Type* ResolveTypeSpec( TypeSpec* spec )
 
             char const* name = spec->names.Last();
             Symbol* sym = ResolveName( name, pos );
+            if( !sym )
+                break;
             if( sym->kind != Symbol::Type )
             {
                 RSLV_ERROR( pos, "'%s' must denote a type", name );
@@ -881,6 +908,9 @@ int CountAggregateItems( Array<Decl*> const& items )
 
 void CompleteType( Type* type, SourcePos const& pos )
 {
+    if( !type )
+        return;
+
     ASSERT( type->kind );
 
     if( type->kind == Type::Completing )
@@ -973,12 +1003,13 @@ BucketArray<Symbol>::Idx<false> EnterScope()
 
 void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
 {
-    globalScopeStack.PopUntil( scopeStartIdx );
+    if( globalScopeStack.Last() != scopeStartIdx )
+        globalScopeStack.PopUntil( scopeStartIdx );
 }
 
 void ResolveSymbol( Symbol* sym )
 {
-    if( sym->state == Symbol::Resolved )
+    if( sym->state == Symbol::Resolved || sym->state == Symbol::Tainted )
         // Nothing to do
         return;
 
@@ -1067,7 +1098,11 @@ void ResolveSymbol( Symbol* sym )
         INVALID_DEFAULT_CASE
     }
 
-    sym->state = Symbol::Resolved;
+    if( sym->type )
+        sym->state = Symbol::Resolved;
+    else
+        sym->state = Symbol::Tainted;
+
     globalOrderedSymbols.Push( sym );
 }
 
@@ -1093,6 +1128,7 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
 }
 
 void ResolveStmtBlock( StmtList const& block, Type* returnType );
+void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols );
 
 void ResolveStmt( Stmt* stmt, Type* returnType )
 {
@@ -1100,22 +1136,42 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
     switch( stmt->kind )
     {
         case Stmt::Block:
-        ResolveStmtBlock( stmt->block, returnType );
-        break;
+            ResolveStmtBlock( stmt->block, returnType );
+            break;
+        case Stmt::Expr:
+            ResolveExpr( stmt->expr );
+            break;
+        case Stmt::Decl:
+        {
+            Decl* decl = stmt->decl;
 
+            Array<Symbol*> symbols( &globalTmpArena, decl->names.count );
+            for( char const* name : decl->names )
+            {
+                Symbol* newSymbol = globalScopeStack.PushEmpty();
+                symbols.Push( newSymbol );
+            }
+            NewDeclSymbols( stmt->decl, symbols );
+
+            for( Symbol* sym : symbols )
+                ResolveSymbol( sym );
+        } break;
         case Stmt::Assign:
         {
             ResolvedExpr left = ResolveExpr( stmt->assign.left );
             ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
-            if( left.type != right.type )
+            if( left.type && right.type && left.type != right.type )
             {
                 RSLV_ERROR( stmt->pos, "Type mismatch in assignment (left is '%s', right is '%s')",
                             left.type->name, right.type->name );
             }
-            if( !left.isLvalue )
-                RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to non-lvalue" );
-            if( left.isConst )
-                RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
+            if( left.type )
+            {
+                if( !left.isLvalue )
+                    RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to non-lvalue" );
+                if( left.isConst )
+                    RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
+            }
 
         } break;
 
@@ -1144,11 +1200,12 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
             // TODO 
             auto forScopeIdx = EnterScope();
 
+#if 0
             //ResolveStmt( stmt->for_.init, returnType);
             ResolveConditionalExpr( stmt->for_.cond );
             ResolveStmtBlock( stmt->for_.block, returnType );
             //ResolveStmt( stmt->for_.next, returnType );
-
+#endif
             LeaveScope( forScopeIdx );
         } break;
 
@@ -1180,7 +1237,7 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
             {
                 // TODO Return multiple values
                 ResolvedExpr result = ResolveExpr( stmt->expr, returnType );
-                if( result.type != returnType )
+                if( result.type && result.type != returnType )
                 {
                     RSLV_ERROR( stmt->expr->pos, "Type mismatch in return expression (expected '%s', got '%s')",
                                 returnType->name, result.type->name );
@@ -1229,6 +1286,7 @@ void ResolveFuncBody( Symbol* sym )
     {
         Type* argType = type->func.args[i];
         CompleteType( argType, a.pos );
+        // TODO Maybe we should be doing the same as for decl statements
         PushLocalSymbol( NewVarSymbol( a.name, argType ) );
     }
     CompleteType( type->func.returnType, decl->func.returnType->pos );
@@ -1268,9 +1326,10 @@ void ResolveSymbols()
     }
 }
 
-Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
+void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols )
 {
     ASSERT( decl->names );
+    ASSERT( newSymbols.count && decl->names.count );
 
     Symbol::Kind kind = Symbol::None;
     switch( decl->kind )
@@ -1291,9 +1350,7 @@ Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
         INVALID_DEFAULT_CASE;
     }
 
-    // TODO Temp?
-    Array<Symbol*> result( &globalTmpArena, decl->names.count );
-
+    int i = 0;
     for( char const* name : decl->names )
     {
         if( GetSymbol( name ) != nullptr )
@@ -1302,7 +1359,8 @@ Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
             continue;
         }
 
-        Symbol* sym = globalSymbolsList.PushEmpty( true );
+        Symbol* sym = newSymbols[i++];
+        *sym = {};
         sym->decl = decl;
         sym->name = name;
         sym->kind = kind;
@@ -1313,11 +1371,18 @@ Array<Symbol*> PushGlobalDeclSymbols( Decl* decl )
             sym->state = Symbol::Resolved;
             sym->type = NewIncompleteType( sym );
         }
-        
-        result.Push( sym );
     }
+}
 
-    return result;
+void PushGlobalDeclSymbols( Decl* decl )
+{
+    Array<Symbol*> symbols( &globalTmpArena, decl->names.count );
+    for( char const* name : decl->names )
+    {
+        Symbol* newSymbol = globalSymbolsList.PushEmpty();
+        symbols.Push( newSymbol );
+    }
+    NewDeclSymbols( decl, symbols );
 }
 
 Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
@@ -1352,7 +1417,10 @@ void InitResolver()
 void ResolveAll( Array<Decl*> const& globalDecls )
 {
     for( Decl* decl : globalDecls )
+    {
         PushGlobalDeclSymbols( decl );
+    }
+
     for( auto idx = globalSymbolsList.First(); idx; ++idx )
     {
         Symbol* sym = &*idx;
