@@ -33,7 +33,7 @@ struct Symbol
         Unresolved = 0,
         Resolving,
         Resolved,
-        Tainted,            // Failed to resolve. Stop emitting errors on it
+        Tainted,            // Failed to resolve. Stop emitting errors about it
     };
 
     char const* name;
@@ -42,6 +42,8 @@ struct Symbol
     ConstValue value;
     Kind kind;
     State state;
+    // TODO Namespaces?
+    bool isLocal;
 };
 
 // TODO Hashtable!
@@ -998,13 +1000,13 @@ void PushLocalSymbol( Symbol const& sym )
 
 BucketArray<Symbol>::Idx<false> EnterScope()
 {
-    return globalScopeStack.Last();
+    return globalScopeStack.End();
 }
 
 void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
 {
-    if( globalScopeStack.Last() != scopeStartIdx )
-        globalScopeStack.PopUntil( scopeStartIdx );
+    globalScopeStack.PopUntil( scopeStartIdx );
+    ASSERT( globalScopeStack.End() == scopeStartIdx );
 }
 
 void ResolveSymbol( Symbol* sym )
@@ -1035,8 +1037,8 @@ void ResolveSymbol( Symbol* sym )
             if( decl->var.type )
                 type = ResolveTypeSpec( decl->var.type );
 
-            // TODO Multiple names/inits?
-            // (Should maybe separate any comma expressions when separating the names above)
+            // TODO Multiple names with multiple inits?
+            // (Should maybe separate any comma expressions when separating the names, but rn we don't separate names for fields)
             //auto& names = decl->var.names;
             if( decl->var.initExpr )
             {
@@ -1103,7 +1105,8 @@ void ResolveSymbol( Symbol* sym )
     else
         sym->state = Symbol::Tainted;
 
-    globalOrderedSymbols.Push( sym );
+    if( !sym->isLocal )
+        globalOrderedSymbols.Push( sym );
 }
 
 Symbol NewVarSymbol( char const* name, Type* type )
@@ -1128,7 +1131,7 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
 }
 
 void ResolveStmtBlock( StmtList const& block, Type* returnType );
-void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols );
+Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal );
 
 void ResolveStmt( Stmt* stmt, Type* returnType )
 {
@@ -1143,16 +1146,9 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
             break;
         case Stmt::Decl:
         {
-            Decl* decl = stmt->decl;
-
-            Array<Symbol*> symbols( &globalTmpArena, decl->names.count );
-            for( char const* name : decl->names )
-            {
-                Symbol* newSymbol = globalScopeStack.PushEmpty();
-                symbols.Push( newSymbol );
-            }
-            NewDeclSymbols( stmt->decl, symbols );
-
+            // TODO Right now we treat local decls same as globals, meaning we don't enforce any ordering, which seems fine for
+            // user defined types (and maybe constants too), but at the very least for variables this is no good!
+            Array<Symbol*> symbols = CreateDeclSymbols( stmt->decl, true );
             for( Symbol* sym : symbols )
                 ResolveSymbol( sym );
         } break;
@@ -1316,20 +1312,9 @@ Symbol* ResolveName( char const* name, SourcePos const& pos )
     return sym;
 }
 
-void ResolveSymbols()
-{
-    auto idx = globalSymbolsList.First();
-    while( idx )
-    {
-        ResolveSymbol( &*idx );
-        idx.Next();
-    }
-}
-
-void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols )
+Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
 {
     ASSERT( decl->names );
-    ASSERT( newSymbols.count && decl->names.count );
 
     Symbol::Kind kind = Symbol::None;
     switch( decl->kind )
@@ -1350,20 +1335,21 @@ void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols )
         INVALID_DEFAULT_CASE;
     }
 
-    int i = 0;
+    Array<Symbol*> result( &globalTmpArena, decl->names.count );
     for( char const* name : decl->names )
     {
-        if( GetSymbol( name ) != nullptr )
-        {
-            RSLV_ERROR( decl->pos, "Symbol '%s' already declared", name );
-            continue;
-        }
+        Symbol* prevSymbol = GetSymbol( name );
 
-        Symbol* sym = newSymbols[i++];
-        *sym = {};
+        Symbol* sym = nullptr;
+        if( isLocal )
+            sym = globalScopeStack.PushEmpty();
+        else
+            sym = globalSymbolsList.PushEmpty();
+
         sym->decl = decl;
         sym->name = name;
         sym->kind = kind;
+        sym->isLocal = isLocal;
         sym->state = Symbol::Unresolved;
 
         if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
@@ -1371,18 +1357,23 @@ void NewDeclSymbols( Decl* decl, Array<Symbol*> newSymbols )
             sym->state = Symbol::Resolved;
             sym->type = NewIncompleteType( sym );
         }
+
+        if( prevSymbol != nullptr )
+        {
+            RSLV_ERROR( decl->pos, "Symbol '%s' already declared", name );
+            RSLV_INFO( prevSymbol->decl->pos, "Symbol '%s' was declared here", name );
+            sym->state = Symbol::Tainted;
+        }
+
+        result.Push( sym );
     }
+
+    return result;
 }
 
 void PushGlobalDeclSymbols( Decl* decl )
 {
-    Array<Symbol*> symbols( &globalTmpArena, decl->names.count );
-    for( char const* name : decl->names )
-    {
-        Symbol* newSymbol = globalSymbolsList.PushEmpty();
-        symbols.Push( newSymbol );
-    }
-    NewDeclSymbols( decl, symbols );
+    CreateDeclSymbols( decl, false );
 }
 
 Symbol* PushGlobalTypeSymbol( char const* name, Type* type )

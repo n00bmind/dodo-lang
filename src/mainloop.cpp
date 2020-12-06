@@ -24,7 +24,7 @@ int globalErrorCount = 0;
 #include "resolver.cpp"
 #include "codegen_c.cpp"
 
-//#include "../test1.do.cpp"
+//#include "../test2.do.cpp"
 
 
 void InitTestMemory()
@@ -431,6 +431,7 @@ void Run( int argCount, char const* args[] )
         ASSERT( available >= sizeof(".cpp") );
         StringCopy( ".cpp", outPath + inputFilename.length, available );
 
-        globalPlatform.WriteEntireFile( outPath, pages );
+        if( globalPlatform.WriteEntireFile( outPath, pages ) )
+            globalPlatform.Print( "Done." );
     }
 }

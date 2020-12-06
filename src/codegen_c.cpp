@@ -277,10 +277,10 @@ void EmitFuncDecl( Decl* decl )
 
 void EmitForwardDecls()
 {
-    for( auto idx = globalSymbolsList.First(); idx; ++idx )
+    for( auto idx = globalOrderedSymbols.First(); idx; ++idx )
     {
-        Symbol const& sym = *idx;
-        Decl* decl = sym.decl;
+        Symbol const* sym = *idx;
+        Decl* decl = sym->decl;
         if( !decl )
             continue;
 
@@ -288,20 +288,26 @@ void EmitForwardDecls()
         {
             case Decl::Struct:
             {
-                //Outf( "struct %s;\n", sym.name );
+                //Outf( "struct %s;\n", sym->name );
                 OUTSTR( "struct " );
-                Out( sym.name );
+                Out( sym->name );
                 OUTSTR( ";" );
                 OutNL();
             } break;
             case Decl::Union:
             {
-                //Outf( "union %s;\n", sym.name );
+                //Outf( "union %s;\n", sym->name );
                 OUTSTR( "union " );
-                Out( sym.name );
+                Out( sym->name );
                 OUTSTR( ";" );
                 OutNL();
             } break;
+            case Decl::Func:
+            {
+                EmitFuncDecl( decl );
+                OUTSTR( ";" );
+                OutNL();
+            }
         }
     }
 }
@@ -552,7 +558,7 @@ void EmitOrderedSymbols()
 
         Decl* decl = sym->decl;
         if( !decl )
-            return;
+            continue;
 
         EmitDecl( decl, sym );
     }
@@ -560,6 +566,12 @@ void EmitOrderedSymbols()
 
 void GenerateAll()
 {
+    // FIXME This doesnt work when we have functions accepting full user types
+    // For that we need to do:
+    // · Forward declare user types
+    // · Declare user types in full
+    // · Forward declare functions
+    // · Declare functions
     OUTSTR( "///// Forward declarations" );
     OutNL();
     EmitForwardDecls();

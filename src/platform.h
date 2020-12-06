@@ -8,7 +8,7 @@ typedef PLATFORM_ALLOC(PlatformAlloc);
 typedef PLATFORM_FREE(PlatformFree);
 #define PLATFORM_READ_ENTIRE_FILE(name) Buffer name( char const* filename, MemoryArena* arena )
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
-#define PLATFORM_WRITE_ENTIRE_FILE(name) void name( char const* filename, Array<Buffer> const& chunks )
+#define PLATFORM_WRITE_ENTIRE_FILE(name) bool name( char const* filename, Array<Buffer> const& chunks )
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);

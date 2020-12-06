@@ -395,26 +395,16 @@ struct BucketArray
 
     T Pop()
     {
-        T result = Remove( { last, last->count - 1 } );
+        T result = Remove( Last() );
         return result;
     }
 
+    // Inclusive
     // TODO Need a way to convert between index const-ness when it makes sense, otherwise this IsConst shit is shit
     void PopUntil( const Idx<false>& index )
     {
-        ASSERT( index.IsValid() );
-
-        while( last != index.base && last != &first )
-        {
-            // Place last bucket in the free list
-            last->next = firstFree;
-            firstFree = last;
-
-            last = last->prev;
-        }
-
-        ASSERT( last == index.base );
-        last->count = index.index + 1;
+        while( index.IsValid() )
+            Pop();
     }
 
     typedef bool (*Comparator)( T const& a, T const& b );
@@ -489,26 +479,12 @@ struct BucketArray
         last = &first;
     }
 
-    Idx<false> First()
-    {
-        return { &first, 0 };
-    }
-
-    Idx<true> First() const
-    {
-        Idx<true> result( &first, 0 );
-        return result;
-    }
-
-    Idx<false> Last()
-    {
-        return { last, last->count ? last->count - 1 : 0 };
-    }
-
-    Idx<true> Last() const
-    {
-        return { last, last->count ? last->count - 1 : 0 };
-    }
+    Idx<false> First()          { return { &first, 0 }; }
+    Idx<true>  First() const    { return { &first, 0 }; }
+    Idx<false> Last()           { return { last, last->count - 1 }; }
+    Idx<true>  Last()  const    { return { last, last->count - 1 }; }
+    Idx<false> End()            { return { last, last->count }; }
+    Idx<true>  End()   const    { return { last, last->count }; }
 
     T& operator[]( const Idx<false>& idx )
     {

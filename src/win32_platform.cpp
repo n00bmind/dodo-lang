@@ -113,7 +113,7 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
     if( outFile == INVALID_HANDLE_VALUE )
     {
         globalPlatform.Error( "Could not open '%s' for writing", filename );
-        return;
+        return false;
     }
 
     for( int i = 0; i < chunks.count; ++i )
@@ -125,9 +125,11 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
         if( !WriteFile( outFile, chunk.data, U32( chunk.size ), &bytesWritten, NULL ) )
         {
             globalPlatform.Error( "Failed writing %d bytes to '%s'", chunk.size, filename );
-            return;
+            return false;
         }
     }
+
+    return true;
 }
 
 ASSERT_HANDLER(DefaultAssertHandler)
