@@ -27,6 +27,14 @@ int globalErrorCount = 0;
 //#include "../test2.do.cpp"
 
 
+void InitInternStrings()
+{
+    InitArena( &globalInternStrings.arena );
+    //new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
+    // TODO Can we get rid of this after parsing and just keep the arena?
+    INIT( globalInternStrings.entries ) Hashtable<String, InternString, MemoryArena>( &globalArena, 0, StringHash, StringsEqual );
+}
+
 void InitTestMemory()
 {
     ClearArena( &globalArena );
@@ -34,13 +42,13 @@ void InitTestMemory()
     ClearArena( &globalOutArena );
     ClearArena( &globalInternStrings.arena );
 
-    // Init intern strings
-    InitArena( &globalInternStrings.arena );
-    new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
+    InitInternStrings();
 }
 
 void RunTests()
 {
+    TestHashtable();
+
     {
         static char const* testTokenStrings[] =
         {
@@ -359,12 +367,14 @@ complex_func :: ()
     InitTestMemory();
 }
 
-void Run( int argCount, char const* args[] )
+bool Run( int argCount, char const* args[] )
 {
+    f64 time = globalPlatform.CurrentTimeMillis();
+    f64 startTime = time;
+
     InitArena( &globalArena, MEGABYTES(16) );
     InitArena( &globalTmpArena, MEGABYTES(16) );
     InitArena( &globalOutArena, MEGABYTES(16) );
-    InitArena( &globalInternStrings.arena );
 
 #if !CONFIG_RELEASE
     RunTests();
@@ -379,30 +389,49 @@ void Run( int argCount, char const* args[] )
     if( argsList.count == 0 )
     {
         globalPlatform.Error( "Need an input file" );
-        return;
+        return false;
     }
 
-    // Init intern strings
-    new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
-
+    InitInternStrings();
     InitResolver();
 
     String inputFilename = argsList[0];
     char const* filename_str = inputFilename.CString( &globalTmpArena );
     // TODO Temp memory scopes
-    // FIXME Null terminate!
+    // TODO Null terminate?
     Buffer readResult = globalPlatform.ReadEntireFile( filename_str, &globalTmpArena );
+    if( !readResult.data )
+        return false;
+
+    // Do work!
+    f64 parseTime = 0, resolveTime = 0, generateTime = 0;
+    f64 lapTime = globalPlatform.CurrentTimeMillis();
 
     Array<Decl*> fileDecls = Parse( String( readResult ), filename_str );
+    time = globalPlatform.CurrentTimeMillis();
+    parseTime = time - lapTime;
+    lapTime = time;
+
     if( !globalErrorCount )
     {
         ResolveAll( fileDecls );
+        time = globalPlatform.CurrentTimeMillis();
+        resolveTime = time - lapTime;
+        lapTime = time;
+
         if( !globalErrorCount )
+        {
             GenerateAll();
+            time = globalPlatform.CurrentTimeMillis();
+            generateTime = time - lapTime;
+        }
     }
 
     if( globalErrorCount )
+    {
         globalPlatform.Error( "\nCompilation found %d errors.", globalErrorCount );
+        return false;
+    }
     else
     {
         // Collect all output arena pages in order and write them to disk
@@ -431,7 +460,17 @@ void Run( int argCount, char const* args[] )
         ASSERT( available >= sizeof(".cpp") );
         StringCopy( ".cpp", outPath + inputFilename.length, available );
 
-        if( globalPlatform.WriteEntireFile( outPath, pages ) )
-            globalPlatform.Print( "Done." );
+        bool success = globalPlatform.WriteEntireFile( outPath, pages ); 
+        if( success )
+        {
+            f64 totalTime = globalPlatform.CurrentTimeMillis() - startTime;
+            globalPlatform.Print( "Compilation took %.3f seconds.\n", totalTime * 0.001f );
+            globalPlatform.Print( "Parsing:   %.3f s.\n", parseTime * 0.001f );
+            globalPlatform.Print( "Resolving: %.3f s.\n", resolveTime * 0.001f );
+            globalPlatform.Print( "C codegen: %.3f s.\n", generateTime * 0.001f );
+            globalPlatform.Print( "\nDONE." );
+        }
+
+        return success;
     }
 }

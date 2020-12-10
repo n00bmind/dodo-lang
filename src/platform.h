@@ -10,6 +10,10 @@ typedef PLATFORM_FREE(PlatformFree);
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_WRITE_ENTIRE_FILE(name) bool name( char const* filename, Array<Buffer> const& chunks )
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
+
+#define PLATFORM_CURRENT_TIME_MILLIS(name) f64 name()
+typedef PLATFORM_CURRENT_TIME_MILLIS(PlatformCurrentTimeMillis);
+
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);
 #define PLATFORM_PRINT_VA(name) void name( const char *fmt, va_list args )
@@ -26,6 +30,7 @@ struct PlatformAPI
     PlatformFree* Free;
     PlatformReadEntireFileFunc* ReadEntireFile;
     PlatformWriteEntireFileFunc* WriteEntireFile;
+    PlatformCurrentTimeMillis* CurrentTimeMillis;
     PlatformPrintFunc* Print;
     PlatformPrintFunc* Error;
     PlatformPrintVAFunc* PrintVA;
@@ -38,7 +43,6 @@ struct PlatformAPI
     DebugPlatformJoinPathsFunc* DEBUGJoinPaths;
     DebugPlatformGetParentPathFunc* DEBUGGetParentPath;
     // FIXME Remove. Replace with passed elapsed time in GameInput
-    DebugPlatformCurrentTimeMillis* DEBUGCurrentTimeMillis;
 
     bool DEBUGquit;
 #endif

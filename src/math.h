@@ -115,7 +115,16 @@ void MurmurHash3_x64_128 ( const void * key, const int len,
 u32 Hash32( void const* key, const int len )
 {
     u32 buf[4];
-    MurmurHash3_x64_128( key, len, 0x0BADF00D, buf );
+    MurmurHash3_x64_128( key, len, 0x1337C0D3, buf );
 
     return buf[0];
 }
+
+u64 Hash64( void const* key, const int len )
+{
+    u64 buf[2];
+    MurmurHash3_x64_128( key, len, 0x1337C0D3, buf );
+
+    return buf[0];
+}
+

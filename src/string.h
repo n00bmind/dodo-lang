@@ -141,3 +141,8 @@ INLINE void StringCopy( char const* src, char* dst, sz dstSize )
 {
     strncpy( dst, src, dstSize );
 }
+
+INLINE u64 StringHash( String const& str )
+{
+    return Hash64( str.data, str.length );
+}

@@ -290,6 +290,12 @@ IsPowerOf2( i64 value )
     return value > 0 && (value & (value - 1)) == 0;
 }
 
+INLINE bool
+IsPowerOf2( i32 value )
+{
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
 INLINE sz
 Align( sz size, sz alignment )
 {

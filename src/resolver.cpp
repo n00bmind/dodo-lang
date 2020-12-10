@@ -39,11 +39,12 @@ struct Symbol
     char const* name;
     Decl* decl;
     ::Type* type;
+    // TODO Store constants separately?
     ConstValue value;
-    Kind kind;
-    State state;
+    u32 kind : 16;
+    u32 state : 15;
     // TODO Namespaces?
-    bool isLocal;
+    u32 isLocal : 1;
 };
 
 // TODO Hashtable!

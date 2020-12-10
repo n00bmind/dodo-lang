@@ -11,6 +11,8 @@
 PlatformAPI globalPlatform;
 const sz PlatformAPI::PointerSize = 8;
 
+internal i64 globalPerfCounterFrequency;
+
 
 PLATFORM_ALLOC(Win32Alloc)
 {
@@ -132,6 +134,14 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
     return true;
 }
 
+PLATFORM_CURRENT_TIME_MILLIS(Win32CurrentTimeMillis)
+{
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter( &counter );
+    f64 result = (f64)counter.QuadPart / globalPerfCounterFrequency * 1000;
+    return result;
+}
+
 ASSERT_HANDLER(DefaultAssertHandler)
 {
     // TODO Logging
@@ -155,12 +165,16 @@ int main( int argCount, char const* args[] )
     globalPlatform.Free = Win32Free;
     globalPlatform.ReadEntireFile = Win32ReadEntireFile;
     globalPlatform.WriteEntireFile = Win32WriteEntireFile;
+    globalPlatform.CurrentTimeMillis = Win32CurrentTimeMillis;
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
     globalPlatform.PrintVA = Win32PrintVA;
     globalPlatform.ErrorVA = Win32ErrorVA;
 
-    Run( argCount, args );
+    LARGE_INTEGER perfCounterFreqMeasure;
+    QueryPerformanceFrequency( &perfCounterFreqMeasure );
+    globalPerfCounterFrequency = perfCounterFreqMeasure.QuadPart;
 
-    return 0;
+    bool result = Run( argCount, args );
+    return result ? 0 : 1;
 }

@@ -63,5 +63,5 @@ T$index :: struct
 if __name__ == '__main__':
     template = Template(template_str)
 
-    for i in range(10):
+    for i in range(4 * 1024):
         print(template.substitute({'index': i}))

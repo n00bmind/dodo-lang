@@ -31,18 +31,101 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 
-// TODO ASAP Add a tag per allocation (even the same arena can contain different stuff)
-#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), alignof(type), ## __VA_ARGS__ )
-#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), alignof(type), ## __VA_ARGS__ )
-#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), alignof(char), ## __VA_ARGS__ )
-#define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, DefaultMemoryAlignment, ## __VA_ARGS__ )
+struct MemoryParams
+{
+    enum Tags
+    {
+        Unknown = 0,
+    };
 
-#define INIT(var) new (&var)
+    enum Flags
+    {
+        None = 0,
+        ClearToZero = 0x1,                  // Zeroed upon allocation
+        Temporary = 0x2,              // No guaranteed persistence beyond allocation scope
+    };
 
+    u32 flags;
+    u16 alignment;
+    u16 tag;
+
+    bool Flag( u32 flag ) { return (flags & flag) == flag; }
+};
+
+inline MemoryParams
+DefaultMemoryParams()
+{
+    MemoryParams result = {};
+    result.flags = MemoryParams::ClearToZero;
+    result.alignment = 0;
+    return result;
+}
+
+inline MemoryParams
+NoClear()
+{
+    MemoryParams result = DefaultMemoryParams();
+    result.flags &= ~MemoryParams::ClearToZero;
+    return result;
+}
+
+inline MemoryParams
+Aligned( u16 alignment )
+{
+    MemoryParams result = DefaultMemoryParams();
+    result.alignment = alignment;
+    return result;
+}
+
+inline MemoryParams
+Temporary()
+{
+    MemoryParams result = DefaultMemoryParams();
+    result.flags |= MemoryParams::Temporary;
+    return result;
+}
+
+#define INIT(var) new (&(var))
+
+#define ALLOC_FUNC(type) void* Alloc( type* alloc, sz sizeBytes, MemoryParams params = DefaultMemoryParams() )
+#define FREE_FUNC(type)  void Free( type* alloc, void* memoryBlock )
+
+#define ALLOC_STRUCT(alloc, type, ...)          (type *)Alloc( alloc, sizeof(type), ## __VA_ARGS__ )
+#define ALLOC_ARRAY(alloc, type, count, ...)    (type *)Alloc( alloc, (count)*sizeof(type), ## __VA_ARGS__ )
+#define ALLOC_STRING(alloc, count, ...)         (char *)Alloc( alloc, (count)*sizeof(char), ## __VA_ARGS__ )
+#define ALLOC_SIZE(alloc, size, ...)            Alloc( alloc, size, ## __VA_ARGS__ )
+#define FREE(alloc, mem)                        Free( alloc, mem )
+
+struct LazyAllocator
+{
+};
+
+ALLOC_FUNC( LazyAllocator )
+{
+    ASSERT( !params.alignment );
+    ASSERT( !params.Flag( MemoryParams::Temporary ) );
+    
+    void* result = malloc( sizeBytes );
+
+    if( params.Flag( MemoryParams::ClearToZero ) )
+        PZERO( result, sizeBytes );
+
+    return result;
+}
+
+FREE_FUNC( LazyAllocator )
+{
+    free( memoryBlock );
+}
 
 ///// MEMORY ARENA
 // Linear memory arena that can grow in pages of a certain size
 // Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested, similar to a stack allocator)
+
+#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), alignof(char), ## __VA_ARGS__ )
+#define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, DefaultMemoryAlignment, ## __VA_ARGS__ )
 
 static const sz DefaultArenaPageSize = MEGABYTES( 1 );
 static const sz DefaultMemoryAlignment = alignof(u64);
@@ -66,20 +149,6 @@ struct MemoryArena
     i32 pageCount;
 
     i32 tempCount;
-};
-
-enum MemoryFlags
-{
-    MemoryFlags_None = 0,
-    MemoryFlags_ClearToZero = 0x1,                  // Zeroed upon allocation
-    MemoryFlags_TemporaryMemory = 0x2,              // No guaranteed persistence beyond allocation scope
-};
-
-struct MemoryParams
-{
-    u32 flags;
-    u16 alignment;
-    u16 tag;
 };
 
 // Initialize an arena of a fixed size on the given block of memory
@@ -148,43 +217,10 @@ IsInitialized( const MemoryArena& arena )
     return arena.base && arena.size;
 }
 
-inline MemoryParams
-DefaultMemoryParams()
-{
-    MemoryParams result = {};
-    result.flags = MemoryFlags_ClearToZero;
-    result.alignment = 0;
-    return result;
-}
-
-inline MemoryParams
-NoClear()
-{
-    MemoryParams result = DefaultMemoryParams();
-    result.flags &= ~MemoryFlags_ClearToZero;
-    return result;
-}
-
-inline MemoryParams
-Aligned( u16 alignment )
-{
-    MemoryParams result = DefaultMemoryParams();
-    result.alignment = alignment;
-    return result;
-}
-
-inline MemoryParams
-Temporary()
-{
-    MemoryParams result = DefaultMemoryParams();
-    result.flags |= MemoryFlags_TemporaryMemory;
-    return result;
-}
-
 inline void *
 _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = DefaultMemoryParams() )
 {
-    if( !(params.flags & MemoryFlags_TemporaryMemory) )
+    if( !(params.flags & MemoryParams::Temporary) )
         // Need to pass temp memory flag if the arena has an ongoing temp memory block
         ASSERT( arena->tempCount == 0 );
 
@@ -235,7 +271,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
     arena->used += alignedSize;
 
     // Have already moved up the block's pointer, so just clear the requested size
-    if( params.flags & MemoryFlags_ClearToZero )
+    if( params.flags & MemoryParams::ClearToZero )
         PZERO( result, size );
 
     return result;
@@ -257,6 +293,18 @@ MakeSubArena( MemoryArena* arena, sz size, MemoryParams params = NoClear() )
     result.pageCount = arena->pageCount;
 
     return result;
+}
+
+//#define ALLOC_FUNC(type) void* Alloc( type* alloc, sz sizeBytes, MemoryParams params = DefaultMemoryParams() )
+ALLOC_FUNC( MemoryArena )
+{
+    void *result = _PushSize( alloc, sizeBytes, DefaultMemoryAlignment, params );
+    return result;
+}
+
+FREE_FUNC( MemoryArena )
+{
+    // NOTE No-op
 }
 
 struct TemporaryMemory

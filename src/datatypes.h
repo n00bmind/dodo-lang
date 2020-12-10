@@ -587,7 +587,20 @@ just a couple entries away and hence will still be in the same cache line, so we
 we fail the first hit.
 
 Now, for generic keys & values, that picture changes significantly, and having both keys & values inlined is now quite probably bad
-for cache efficiency. So, for the generic case (and to be able to validate these assumptions through proper testing) we're going to want
+for cache efficiency. Here then, we'd have them separate, which means a minimum of _two_ cache misses per lookup: */
+
+template <typename T>
+struct ItemHashtable
+{
+    u64* keys;
+    T* values;
+
+    i32 count;
+    i32 capacity;
+};
+
+/*
+So, for the generic case (and to be able to validate these assumptions through proper testing) we're going to want
 to be able to have either keys + values as separate or as interleaved.
 
 The problem is how to do this without having to write the code twice and without affecting performance.
@@ -595,4 +608,159 @@ We could somehow templatize an internal structure that dictates the layout, base
 would be through pass-through methods in that structure, which I guess is fine as long as they're inlined?
 */
 
+template <typename K>
+u64 DefaultHashFunc( K const& key )
+{
+    return Hash64( &key, sizeof(K) );
+}
+template <typename K>
+bool DefaultEqFunc( K const& a, K const& b )
+{
+    return a == b;
+}
+
+template <typename K>
+const K ZeroKey = K();
+
+// NOTE Type K must have a default constructor, and all keys must be different to this default-constructed value
+template <typename K, typename V, typename Allocator>
+struct Hashtable
+{
+    using HashFunc = u64 (*)( K const& key );
+    using KeysEqFunc = bool (*)( K const& a, K const& b );
+
+    K* keys;
+    V* values;
+
+    Allocator* allocator;
+    HashFunc hashFunc;
+    KeysEqFunc eqFunc;
+    i32 count;
+    i32 capacity;
+
+
+    Hashtable()
+        : keys( nullptr )
+        , values( nullptr )
+        , allocator( nullptr )
+        , hashFunc( nullptr )
+        , eqFunc( nullptr )
+        , count( 0 )
+        , capacity( 0 )
+    {}
+
+    Hashtable( Allocator* allocator_, int expectedSize = 0, HashFunc hashFunc_ = DefaultHashFunc<K>,
+               KeysEqFunc eqFunc_ = DefaultEqFunc<K> )
+        : keys( nullptr )
+        , values( nullptr )
+        , allocator( allocator_ )
+        , hashFunc( hashFunc_ )
+        , eqFunc( eqFunc_ )
+        , count( 0 )
+        , capacity( 0 )
+    {
+        if( expectedSize )
+            Grow( 2 * expectedSize );
+    }
+
+    V* Get( K const& key )
+    {
+        ASSERT( !eqFunc( key, ZeroKey<K> ) );
+
+        if( count == 0 )
+            return nullptr;
+
+        u64 hash = hashFunc( key );
+        u32 i = hash & (capacity - 1);
+
+        ASSERT( count < capacity );
+        for( ;; )
+        {
+            if( eqFunc( keys[i], key ) )
+                return &values[i];
+            else if( eqFunc( keys[i], ZeroKey<K> ) )
+                return nullptr;
+
+            i++;
+            if( i == U32( capacity ) )
+                i = 0;
+        }
+    }
+
+    V* Put( K const& key, V const& value )
+    {
+        ASSERT( !eqFunc( key, ZeroKey<K> ) );
+
+        // Super conservative but easy to work with
+        if( 2 * count >= capacity )
+            Grow( 2 * capacity );
+        ASSERT( 2 * count < capacity );
+
+        u64 hash = hashFunc( key );
+        u32 i = hash & (capacity - 1);
+
+        ASSERT( count < capacity );
+        for( ;; )
+        {
+            if( eqFunc( keys[i], ZeroKey<K> ) )
+            {
+                keys[i] = key;
+                values[i] = value;
+                ++count;
+                return &values[i];
+            }
+            else if( eqFunc( keys[i], key ) )
+            {
+                values[i] = value;
+                return &values[i];
+            }
+
+            i++;
+            if( i == U32( capacity ) )
+                i = 0;
+        }
+    }
+
+    // TODO Deleting based on Robid Hood or similar
+
+private:
+    void Grow( int newCapacity )
+    {
+        newCapacity = Max( newCapacity, 16 );
+        ASSERT( IsPowerOf2( newCapacity ) );
+
+        int oldCapacity = capacity;
+        K* oldKeys = keys;
+        V* oldValues = values;
+
+        count = 0;
+        capacity = newCapacity;
+        void* newMemory = ALLOC_SIZE( allocator, capacity * (sizeof(K) + sizeof(V)), NoClear() );
+        keys   = (K*)newMemory;
+        values = (V*)((u8*)newMemory + capacity * sizeof(K));
+
+        for( int i = 0; i < capacity; ++i )
+            INIT( keys[i] ) K();
+        for( int i = 0; i < oldCapacity; ++i )
+        {
+            if( !eqFunc( oldKeys[i], ZeroKey<K> ) )
+                Put( oldKeys[i], oldValues[i] );
+        }
+
+        FREE( allocator, oldKeys ); // Handles both
+    }
+};
+
+
+void TestHashtable()
+{
+    persistent LazyAllocator lazyAllocator;
+    Hashtable<void*, void*, LazyAllocator> table( &lazyAllocator );
+
+    const int N = 1024 * 1024;
+    for( int i = 1; i < N; ++i )
+        table.Put( (void*)i, (void*)(i + 1) );
+    for( int i = 1; i < N; ++i )
+        ASSERT( *table.Get( (void*)i ) == (void*)(i + 1) );
+}
 

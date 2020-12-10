@@ -5,28 +5,24 @@ internal int escapeToChar[256];
 
 
 
-internal bool InternsAreEqual( InternString const& a, InternString const& b )
-{
-    return a.hash == b.hash
-        && StringsEqual( String( a.data, a.length ), String( b.data, b.length ) );
-}
-
-internal InternString* Intern( String const& string, u16 flags = 0 )
+internal InternString* Intern( String const& string, u32 flags = 0 )
 {
     InternString* result = nullptr;
-    InternString intern = { string.data, Hash32( string.data, string.length ), I16( string.length ) };
 
-    InternString* entry = globalInternStrings.entries.Find( intern, InternsAreEqual );
+    InternString* entry = globalInternStrings.entries.Get( string );
     if( entry )
         result = entry;
     else
     {
+        // Copy string data to permanent arena
         char* stringData = PUSH_STRING( &globalInternStrings.arena, string.length + 1 );
         string.CopyToNullTerminated( stringData );
 
-        intern.data = stringData;
-        intern.flags = flags;
-        result = globalInternStrings.entries.Push( intern );
+        InternString newIntern = {};
+        newIntern.data = stringData;
+        newIntern.length = string.length;
+        newIntern.flags = flags;
+        result = globalInternStrings.entries.Put( string, newIntern );
     }
     
     return result;

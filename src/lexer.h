@@ -139,16 +139,17 @@ struct InternString
     };
     
     char const* data;
-    u32 hash;
-    i16 length;
-    u16 flags;
+    i32 length;
+    u32 flags;
 };
 
 struct InternStringBuffer
 {
     MemoryArena arena;
     // TODO This should be a _growable_ hashtable (with linear probing!)?
-    BucketArray<InternString> entries;
+    //BucketArray<InternString> entries;
+    // TODO Can this just live in temporary memory and be discarded after parsing is done?
+    Hashtable<String, InternString, MemoryArena> entries;
 };
 
 #define KEYWORDS(x ) \
