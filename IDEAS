@@ -60,7 +60,9 @@ ________________________________________________________________________________
 
 - First class discriminated unions, as a simple subtyping mechanism. Can be switched over in a case statement. Could be defined 'partial' to allow extending with new subtypes?.
 
-- 'using' in structs, to encourage composition (and for subtyping too).
+- 'using' in structs & function args, to encourage composition (and for subtyping too).
+  Allow passing a struct that is 'using' another to a function that expects the latter.
+  TODO What about using through pointers?
 
 - Inline assembly ofc (!)
 
@@ -79,8 +81,13 @@ ________________________________________________________________________________
 - Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default
   for all instances), or when declaring each instance.
 
-- Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
+- Do we want to disallow indexing pointers with [] (unchecked) so it feels less safe than indexing arrays (always checked)? (still allow pointer arithmetic ofc)
 
+- Bake the concept of handles in the type system, as a better pointer anywhere it makes sense (with the possibility of obtaining the actual pointer for speed when desired)
+- 'Optional' types, specially for pointers (https://youtu.be/TH9VCN6UkyQ?t=4689)
+
+- Captures and "hard" captures, not just for functions but for simple code blocks too (https://youtu.be/5Nc68IdNKdg?t=3128) (more like "restricted scope" in this sense)
+  This is perfect for pure functions!
 ________________________________________________________________________________ 
 
 
