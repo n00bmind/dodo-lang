@@ -622,10 +622,22 @@ bool DefaultEqFunc( K const& a, K const& b )
 template <typename K>
 const K ZeroKey = K();
 
+enum HashTableFlags
+{
+    HTF_None = 0,
+    HTF_FixedSize = 0x1,    // For stable pointers to content, must provide expectedSize as appropriate
+};
+
 // NOTE Type K must have a default constructor, and all keys must be different to this default-constructed value
 template <typename K, typename V, typename Allocator>
 struct Hashtable
 {
+    struct Item
+    {
+        K const& key;
+        V& value;
+    };
+
     using HashFunc = u64 (*)( K const& key );
     using KeysEqFunc = bool (*)( K const& a, K const& b );
 
@@ -637,6 +649,7 @@ struct Hashtable
     KeysEqFunc eqFunc;
     i32 count;
     i32 capacity;
+    u32 flags;
 
 
     Hashtable()
@@ -647,9 +660,10 @@ struct Hashtable
         , eqFunc( nullptr )
         , count( 0 )
         , capacity( 0 )
+        , flags( 0 )
     {}
 
-    Hashtable( Allocator* allocator_, int expectedSize = 0, HashFunc hashFunc_ = DefaultHashFunc<K>,
+    Hashtable( Allocator* allocator_, int expectedSize = 0, u32 flags_ = 0, HashFunc hashFunc_ = DefaultHashFunc<K>,
                KeysEqFunc eqFunc_ = DefaultEqFunc<K> )
         : keys( nullptr )
         , values( nullptr )
@@ -658,9 +672,10 @@ struct Hashtable
         , eqFunc( eqFunc_ )
         , count( 0 )
         , capacity( 0 )
+        , flags( flags_ )
     {
         if( expectedSize )
-            Grow( 2 * expectedSize );
+            Grow( NextPowerOf2( 2 * expectedSize ) );
     }
 
     V* Get( K const& key )
@@ -687,7 +702,7 @@ struct Hashtable
         }
     }
 
-    V* Put( K const& key, V const& value )
+    V* PutEmpty( K const& key, const bool clear = true )
     {
         ASSERT( !eqFunc( key, ZeroKey<K> ) );
 
@@ -705,13 +720,15 @@ struct Hashtable
             if( eqFunc( keys[i], ZeroKey<K> ) )
             {
                 keys[i] = key;
-                values[i] = value;
+                if( clear )
+                    INIT( values[i] ) V();
                 ++count;
                 return &values[i];
             }
             else if( eqFunc( keys[i], key ) )
             {
-                values[i] = value;
+                if( clear )
+                    INIT( values[i] ) V();
                 return &values[i];
             }
 
@@ -721,11 +738,106 @@ struct Hashtable
         }
     }
 
+    V* Put( K const& key, V const& value )
+    {
+        V* result = PutEmpty( key, false );
+        ASSERT( result );
+
+        *result = value;
+        return result;
+    }
+
     // TODO Deleting based on Robid Hood or similar
+
+    template <typename E>
+    struct BaseIterator
+    {
+        Hashtable const& table;
+        K* current;
+
+        BaseIterator( Hashtable const& table_ )
+            : table( table_ )
+        {
+            current = table.keys - 1;
+            Next();
+        }
+
+        explicit operator bool() const { return current != nullptr; }
+
+        virtual E operator *() const = 0;
+
+        BaseIterator& operator ++()
+        {
+            Next();
+            return *this;
+        }
+
+    private:
+        void Next()
+        {
+            do
+            {
+                current++;
+            }
+            while( current < table.keys + table.capacity && 
+                table.eqFunc( *current, ZeroKey<K> ) );
+
+            if( current >= table.keys + table.capacity )
+                current = nullptr;
+        }
+    };
+
+    struct ItemIterator : public BaseIterator<Item>
+    {
+        ItemIterator( Hashtable const& table_ )
+            : BaseIterator( table_ )
+        {}
+
+        Item operator *() const override
+        {
+            ASSERT( current );
+            V& currentValue = table.values[ current - table.keys ];
+            Hashtable::Item result = { *current, currentValue };
+            return result;
+        }
+    };
+
+    struct KeyIterator : public BaseIterator<K const&>
+    {
+        KeyIterator( Hashtable const& table_ )
+            : BaseIterator( table_ )
+        {}
+
+        K const& operator *() const override
+        {
+            ASSERT( current );
+            return *current;
+        }
+    };
+
+    struct ValueIterator : public BaseIterator<V&>
+    {
+        ValueIterator( Hashtable const& table_ )
+            : BaseIterator( table_ )
+        {}
+
+        V& operator *() const override
+        {
+            ASSERT( current );
+            V& currentValue = table.values[ current - table.keys ];
+            return currentValue;
+        }
+    };
+
+    ItemIterator Items() { return ItemIterator( *this ); }
+    KeyIterator Keys() { return KeyIterator( *this ); }
+    ValueIterator Values() { return ValueIterator( *this ); }
 
 private:
     void Grow( int newCapacity )
     {
+        ASSERT( !(flags & HTF_FixedSize) || !capacity );
+
         newCapacity = Max( newCapacity, 16 );
         ASSERT( IsPowerOf2( newCapacity ) );
 

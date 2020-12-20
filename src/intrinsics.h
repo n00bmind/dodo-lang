@@ -296,6 +296,12 @@ IsPowerOf2( i32 value )
     return value > 0 && (value & (value - 1)) == 0;
 }
 
+INLINE bool
+IsPowerOf2( u32 value )
+{
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
 INLINE sz
 Align( sz size, sz alignment )
 {
@@ -312,10 +318,12 @@ Align( const void* address, sz alignment )
     return result;
 }
 
-// TODO What if the value already is a power of two?
 INLINE u32
 NextPowerOf2( u32 value )
 {
+    if( IsPowerOf2( value ) )
+        return value;
+
     u32 result = 0;
 
 #if _MSC_VER
@@ -333,6 +341,13 @@ NextPowerOf2( u32 value )
 #endif
 
     return result;
+}
+
+INLINE i32
+NextPowerOf2( i32 value )
+{
+    u32 result = NextPowerOf2( U32( value ) );
+    return I32( result );
 }
 
 // TODO Rewrite this stuff enforcing sizes with templates

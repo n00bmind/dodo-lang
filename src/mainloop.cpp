@@ -18,6 +18,7 @@ MemoryArena globalOutArena;
 InternStringBuffer globalInternStrings;
 int globalErrorCount = 0;
 
+
 #include "common.cpp"
 #include "lexer.cpp"
 #include "parser.cpp"
@@ -32,7 +33,7 @@ void InitInternStrings()
     InitArena( &globalInternStrings.arena );
     //new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
     // TODO Can we get rid of this after parsing and just keep the arena?
-    INIT( globalInternStrings.entries ) Hashtable<String, InternString, MemoryArena>( &globalArena, 0, StringHash, StringsEqual );
+    INIT( globalInternStrings.entries ) Hashtable<String, InternString, MemoryArena>( &globalArena, 0, 0, StringHash, StringsEqual );
 }
 
 void InitTestMemory()
@@ -43,6 +44,15 @@ void InitTestMemory()
     ClearArena( &globalInternStrings.arena );
 
     InitInternStrings();
+}
+
+int CountSymbols( Array<Decl*> const& fileDecls )
+{
+    int result = 0;
+    for( Decl* d : fileDecls )
+        result += d->names.count;
+
+    return result;
 }
 
 void RunTests()
@@ -257,7 +267,18 @@ complex_func :: ()
 
     {
         InitTestMemory();
-        InitResolver();
+
+        Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
+        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        {
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Decl* decl = ParseDecl( &lexer );
+            globalDecls.Push( decl );
+        }
+
+        int globalSymbolsCount = CountSymbols( globalDecls );
+        // Plus 1 type symbol pushed below
+        InitResolver( globalSymbolsCount + 1 );
 
         Type* intPtr = NewPtrType( intType );
         ASSERT( NewPtrType( intType ) == intPtr );
@@ -277,17 +298,14 @@ complex_func :: ()
         PushGlobalTypeSymbol( foo, intType );
         ASSERT( GetSymbol( foo ) && GetSymbol( foo )->type == intType );
 
-        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        for( Decl* d : globalDecls )
+            PushGlobalDeclSymbols( d );
+
         {
-            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
-            Decl* decl = ParseDecl( &lexer );
-            PushGlobalDeclSymbols( decl );
-        }
-        {
-            auto idx = globalSymbolsList.First();
-            while( idx )
+            auto it = globalSymbols.Values();
+            while( it )
             {
-                Symbol* sym = &*idx;
+                Symbol* sym = &*it;
 
 #if 0
                 if( sym->decl )
@@ -303,7 +321,7 @@ complex_func :: ()
 #endif
 
                 CompleteSymbol( sym );
-                idx.Next();
+                ++it;
             }
         }
 
@@ -332,7 +350,17 @@ complex_func :: ()
 
     {
         InitTestMemory();
-        InitResolver();
+
+        Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
+        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        {
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Decl* decl = ParseDecl( &lexer );
+            globalDecls.Push( decl );
+        }
+
+        int globalSymbolsCount = CountSymbols( globalDecls );
+        InitResolver( globalSymbolsCount );
 
         char* cdecl1 = TypeToCdecl( intType, "x" );
         char* cdecl2 = TypeToCdecl( NewPtrType( intType ), "x" );
@@ -345,15 +373,11 @@ complex_func :: ()
         Array<Type*> emptyArgs( &globalTmpArena, 0 );
         char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
 
-        for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
+        for( Decl* d : globalDecls )
+            PushGlobalDeclSymbols( d );
+        for( auto it = globalSymbols.Values(); it; ++it )
         {
-            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
-            Decl* decl = ParseDecl( &lexer );
-            PushGlobalDeclSymbols( decl );
-        }
-        for( auto idx = globalSymbolsList.First(); idx; ++idx )
-        {
-            Symbol* sym = &*idx;
+            Symbol* sym = &*it;
             CompleteSymbol( sym );
         }
 
@@ -393,7 +417,6 @@ bool Run( int argCount, char const* args[] )
     }
 
     InitInternStrings();
-    InitResolver();
 
     String inputFilename = argsList[0];
     char const* filename_str = inputFilename.CString( &globalTmpArena );
@@ -414,6 +437,9 @@ bool Run( int argCount, char const* args[] )
 
     if( !globalErrorCount )
     {
+        int globalSymbolsCount = CountSymbols( fileDecls );
+        InitResolver( globalSymbolsCount );
+
         ResolveAll( fileDecls );
         time = globalPlatform.CurrentTimeMillis();
         resolveTime = time - lapTime;

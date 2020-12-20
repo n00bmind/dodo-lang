@@ -55,8 +55,10 @@ ________________________________________________________________________________
 - Think about how we could make "signed"/"unsigned" not be part of the type system, and instead treat integers as in assembly, where only the relevant _operations_ are separate for signed or unsigned. This poses problems in principle as its difficult for a programmer to trace
   signedness for unknown values (i.e: a parameter passed to a function), so think how the language/compiler could help with this and make it "transparent".
     · The simplest idea I can think of so far is have any quantities the compiler handles be signed numbers (i32, i64, etc.). That would be all literals, sizes, etc.
-      Then a totally separate type with no direct conversion called 'bits' (b32, b64..) would be used for those cases that need flags, bitmasks, hashes, etc. There is no conversion between these whatsoever, other than a straight cast.
-      Interacting with C would convert anything that fits to the next bigger iXX quantity up to i64, and where that's not possible (size_t), a runtime debug check similar to array bounds checking would be used.
+      Then a totally separate type with no direct conversion called 'bits' (b32, b64..) would be used for those cases that need flags, bitmasks, hashes, etc. There is no conversion
+      between these whatsoever, other than a straight cast.
+      Interacting with C would convert anything that fits to the next bigger iXX quantity up to i64, and where that's not possible (size_t), a runtime debug check similar to
+      array bounds checking would be used.
 
 - First class discriminated unions, as a simple subtyping mechanism. Can be switched over in a case statement. Could be defined 'partial' to allow extending with new subtypes?.
 
@@ -68,7 +70,7 @@ ________________________________________________________________________________
 
 - A way to declare an enum as a "flags" bitfield, with correct automatic values and convenient operations to test/set
 
-- A way to tag pure functions?
+- A way to tag pure functions? (see captures below)
 
 - Member functions are ooooobviously forbidden! Prefer the "using model" of Jai, where function arguments can be preceded by 'using',
   which means their internals are available inside the function scope directly, without qualifying them. Also, we could extend that so
@@ -84,10 +86,11 @@ ________________________________________________________________________________
 - Do we want to disallow indexing pointers with [] (unchecked) so it feels less safe than indexing arrays (always checked)? (still allow pointer arithmetic ofc)
 
 - Bake the concept of handles in the type system, as a better pointer anywhere it makes sense (with the possibility of obtaining the actual pointer for speed when desired)
-- 'Optional' types, specially for pointers (https://youtu.be/TH9VCN6UkyQ?t=4689)
+- 'Optional' types, specially for pointers? (https://youtu.be/TH9VCN6UkyQ?t=4689)
 
 - Captures and "hard" captures, not just for functions but for simple code blocks too (https://youtu.be/5Nc68IdNKdg?t=3128) (more like "restricted scope" in this sense)
   This is perfect for pure functions!
+  Does this "imply" closures?
 ________________________________________________________________________________ 
 
 
