@@ -6,6 +6,9 @@ template <typename T> struct Array;
 typedef PLATFORM_ALLOC(PlatformAlloc);
 #define PLATFORM_FREE(name) void name( void* memoryBlock )
 typedef PLATFORM_FREE(PlatformFree);
+
+#define PLATFORM_GET_ABSOLUTE_PATH(name) bool name( char const* filename, char* outBuffer, sz outBufferLen )
+typedef PLATFORM_GET_ABSOLUTE_PATH(PlatformGetAbsolutePathFunc);
 #define PLATFORM_READ_ENTIRE_FILE(name) Buffer name( char const* filename, MemoryArena* arena )
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_WRITE_ENTIRE_FILE(name) bool name( char const* filename, Array<Buffer> const& chunks )
@@ -20,14 +23,13 @@ typedef PLATFORM_PRINT(PlatformPrintFunc);
 typedef PLATFORM_PRINT_VA(PlatformPrintVAFunc);
 
 
-#define PLATFORM_PATH_MAX 1024
-
 struct PlatformAPI
 {
     static const sz PointerSize;
 
     PlatformAlloc* Alloc;
     PlatformFree* Free;
+    PlatformGetAbsolutePathFunc* GetAbsolutePath;
     PlatformReadEntireFileFunc* ReadEntireFile;
     PlatformWriteEntireFileFunc* WriteEntireFile;
     PlatformCurrentTimeMillis* CurrentTimeMillis;

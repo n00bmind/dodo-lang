@@ -568,3 +568,8 @@ T9 :: struct
     a: [n9]int;
 }
 
+main :: ( argc: int, argv: **int ) -> int
+{
+    result := fact_rec9( 10 );
+    return 42;
+}

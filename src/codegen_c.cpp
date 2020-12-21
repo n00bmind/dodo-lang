@@ -11,7 +11,7 @@ INLINE void Out( char const* str, sz len = 0 )
 #define INDENT_STR "                                                                            "
 
 internal sz globalIndent = 0;
-internal int globalLineNumber = 1;
+internal SourcePos globalPos = {};
 
 internal INLINE void OutIndent()
 {
@@ -23,7 +23,7 @@ internal INLINE void OutIndent()
 internal INLINE void OutNL()
 {
     Out( "\n" );
-    globalLineNumber++;
+    globalPos.lineNumber++;
 }
 
 char* Strf( char const* fmt, ... )
@@ -49,10 +49,17 @@ char* Strf( char const* fmt, ... )
 
 internal void EmitPos( SourcePos const& pos )
 {
-    if( pos.lineNumber != globalLineNumber )
+    if( pos.lineNumber != globalPos.lineNumber || pos.filename != globalPos.filename )
     {
-        Out( Strf( "#line %d \"%s\"\n", pos.lineNumber, pos.filename ) );
-        globalLineNumber = pos.lineNumber;
+        Out( Strf( "#line %d", pos.lineNumber ) );
+        if( pos.filename != globalPos.filename )
+        {
+            OUTSTR( " " );
+            // TODO
+            Out( Strf( "\"%s\"", pos.filename ) );
+        }
+        OutNL();
+        globalPos = pos;
     }
 }
 
@@ -96,14 +103,14 @@ char* TypeToCdecl( Type* type, char const* symbolName )
         case Type::Union:
             return Strf( "%s%s%s", CdeclType( type ), *symbolName ? " " : "", symbolName );
         case Type::Pointer:
-            return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), *symbolName ) );
+            return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Array:
             // TODO This will obviously not be enough for our arrays
-            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.count ), *symbolName ) );
+            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.count ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Func:
         {
             char* result = nullptr;
-            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), *symbolName ) );
+            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
             for( Type*& arg : type->func.args )
                 result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeToCdecl( arg, "" ) );
 
@@ -126,7 +133,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             // TODO Multiple names
             return Strf( "%s%s%s", type->names[0], *symbolName ? " " : "", symbolName );
         case TypeSpec::Pointer:
-            return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), *symbolName ) );
+            return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case TypeSpec::Array:
         {
             // FIXME Do something less hacky!
@@ -135,7 +142,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             EmitExpr( type->array.count );
             char* countStr = (char*)(startBase + startUsed);
             // TODO This will obviously not be enough for our arrays
-            char* result = TypeSpecToCdecl( type->array.base, OptParen( Strf( "%s[%s]", symbolName, countStr ), *symbolName ) );
+            char* result = TypeSpecToCdecl( type->array.base, OptParen( Strf( "%s[%s]", symbolName, countStr ), !IsNullOrEmpty( symbolName ) ) );
             ASSERT( globalOutArena.base == startBase );
             globalOutArena.used = startUsed;
             return result;
@@ -143,7 +150,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
         case TypeSpec::Func:
         {
             char* result = nullptr;
-            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), *symbolName ) );
+            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
 
             for( TypeSpec*& arg : type->func.args )
                 result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeSpecToCdecl( arg, "" ) );
@@ -299,7 +306,6 @@ void EmitForwardDecls()
         {
             case Decl::Struct:
             {
-                //Outf( "struct %s;\n", sym->name );
                 OUTSTR( "struct " );
                 Out( sym->name );
                 OUTSTR( ";" );
@@ -307,18 +313,11 @@ void EmitForwardDecls()
             } break;
             case Decl::Union:
             {
-                //Outf( "union %s;\n", sym->name );
                 OUTSTR( "union " );
                 Out( sym->name );
                 OUTSTR( ";" );
                 OutNL();
             } break;
-            case Decl::Func:
-            {
-                EmitFuncDecl( decl );
-                OUTSTR( ";" );
-                OutNL();
-            }
         }
     }
 }
@@ -399,10 +398,10 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 
         case Decl::Func:
         {
-            OutIndent();
+            // Only function prototypes at this stage
+            // TODO Most of these are completely unnecessary
             EmitFuncDecl( decl );
-            OutNL();
-            EmitStmtBlock( decl->func.body );
+            OUTSTR( ";" );
         } break;
     }
 
@@ -575,16 +574,34 @@ void EmitOrderedSymbols()
 
         EmitDecl( decl, sym );
     }
+
+    // Do just function bodies at the end
+    for( auto idx = globalOrderedSymbols.First(); idx; ++idx )
+    {
+        Symbol* sym = *idx;
+
+        Decl* decl = sym->decl;
+        if( !decl || decl->kind != Decl::Func )
+            continue;
+
+        EmitPos( decl->pos );
+        OutIndent();
+        EmitFuncDecl( decl );
+        OutNL();
+        EmitStmtBlock( decl->func.body );
+        OutNL();
+    }
 }
+
+char const* globalPreamble =
+R"STR(#include <stdio.h>
+)STR";
 
 void GenerateAll()
 {
-    // FIXME This doesnt work when we have functions accepting full user types
-    // For that we need to do:
-    // · Forward declare user types
-    // · Declare user types in full
-    // · Forward declare functions
-    // · Declare functions
+    Out( globalPreamble );
+    OutNL();
+
     OUTSTR( "///// Forward declarations" );
     OutNL();
     EmitForwardDecls();

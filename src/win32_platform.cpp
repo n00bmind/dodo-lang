@@ -11,7 +11,7 @@
 PlatformAPI globalPlatform;
 const sz PlatformAPI::PointerSize = 8;
 
-internal i64 globalPerfCounterFrequency;
+internal f64 globalPerfCounterFrequency;
 
 
 PLATFORM_ALLOC(Win32Alloc)
@@ -53,6 +53,32 @@ PLATFORM_PRINT(Win32Error)
 PLATFORM_PRINT_VA(Win32ErrorVA)
 {
     vfprintf( stderr, fmt, args );
+}
+
+PLATFORM_GET_ABSOLUTE_PATH(Win32GetAbsolutePath)
+{
+    bool result = true;
+    char path[MAX_PATH];
+
+    DWORD ret = GetFullPathName( filename, ARRAYCOUNT(path), path, nullptr );
+    if( ret && ret < outBufferLen )
+    {
+        // Escape backslashes
+        char* outp = outBuffer;
+        for( sz i = 0; i < outBufferLen; ++i )
+        {
+            *outp++ = path[i];
+            if( path[i] == '\\' )
+                *outp++ = '\\';
+        }
+    }
+    else
+    {
+        globalPlatform.Error( "ERROR: Couldn't find path for '%s'", filename );
+        result = false;
+    }
+
+    return result;
 }
 
 PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
@@ -163,6 +189,7 @@ int main( int argCount, char const* args[] )
     globalPlatform = {};
     globalPlatform.Alloc = Win32Alloc;
     globalPlatform.Free = Win32Free;
+    globalPlatform.GetAbsolutePath = Win32GetAbsolutePath;
     globalPlatform.ReadEntireFile = Win32ReadEntireFile;
     globalPlatform.WriteEntireFile = Win32WriteEntireFile;
     globalPlatform.CurrentTimeMillis = Win32CurrentTimeMillis;
@@ -173,7 +200,7 @@ int main( int argCount, char const* args[] )
 
     LARGE_INTEGER perfCounterFreqMeasure;
     QueryPerformanceFrequency( &perfCounterFreqMeasure );
-    globalPerfCounterFrequency = perfCounterFreqMeasure.QuadPart;
+    globalPerfCounterFrequency = (f64)perfCounterFreqMeasure.QuadPart;
 
     bool result = Run( argCount, args );
     return result ? 0 : 1;

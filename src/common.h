@@ -134,7 +134,7 @@ I32( ptrdiff_t value )
 INLINE i32
 I32( f32 value )
 {
-    ASSERT( I32MIN <= value && value <= I32MAX );
+    ASSERT( (f32)I32MIN <= value && value <= (f32)I32MAX );
     return (i32)value;
 }
 

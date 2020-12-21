@@ -387,9 +387,12 @@ bool Run( int argCount, char const* args[] )
     InitInternStrings();
 
     String inputFilename = argsList[0];
-    char const* filename_str = inputFilename.CString( &globalTmpArena );
+    char absPath[256];
+    if( !globalPlatform.GetAbsolutePath( inputFilename.data, absPath, ARRAYCOUNT(absPath) ) )
+        return false;
+
     // TODO Temp memory scopes
-    Buffer readResult = globalPlatform.ReadEntireFile( filename_str, &globalTmpArena );
+    Buffer readResult = globalPlatform.ReadEntireFile( absPath, &globalTmpArena );
     if( !readResult.data )
         return false;
 
@@ -397,7 +400,7 @@ bool Run( int argCount, char const* args[] )
     f64 parseTime = 0, resolveTime = 0, generateTime = 0;
     f64 lapTime = globalPlatform.CurrentTimeMillis();
 
-    Array<Decl*> fileDecls = Parse( String( readResult ), filename_str );
+    Array<Decl*> fileDecls = Parse( String( readResult ), absPath );
     time = globalPlatform.CurrentTimeMillis();
     parseTime = time - lapTime;
     lapTime = time;
@@ -446,10 +449,10 @@ bool Run( int argCount, char const* args[] )
             }
         }
 
-        char outPath[PLATFORM_PATH_MAX] = {};
+        char outPath[256] = {};
         inputFilename.CopyTo( outPath );
 
-        sz available = Sz( PLATFORM_PATH_MAX - inputFilename.length );
+        sz available = ARRAYCOUNT(outPath) - inputFilename.length;
         ASSERT( available >= sizeof(".cpp") );
         StringCopy( ".cpp", outPath + inputFilename.length, available );
 

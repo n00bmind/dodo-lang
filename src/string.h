@@ -81,6 +81,11 @@ struct String
 };
 
 
+INLINE bool IsNullOrEmpty( char const* str )
+{
+    return str == nullptr || *str == 0;
+}
+
 INLINE bool IsNewline( char c )
 {
     bool result = (c == '\n' || c == '\r' );
