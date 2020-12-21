@@ -144,14 +144,14 @@ struct MemoryArena
     sz size;
     sz used;
 
-    // This is always zero for fixed-size mode
+    // This is always zero for static arenas
     sz pageSize;
     i32 pageCount;
 
     i32 tempCount;
 };
 
-// Initialize an arena of a fixed size on the given block of memory
+// Initialize a static (fixed-size) arena on the given block of memory
 inline void
 InitArena( MemoryArena *arena, void *base, sz size )
 {
@@ -240,7 +240,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
     sz alignedSize = size + waste;
     if( arena->used + alignedSize > arena->size )
     {
-        ASSERT( arena->pageSize, "Fixed-size arena cannot fit requested size" );
+        ASSERT( arena->pageSize, "Static arena overflow (size %llu)", arena->size );
 
         // NOTE We require headers to not change the cache alignment of a page
         ASSERT( sizeof(MemoryArenaHeader) == 64 );

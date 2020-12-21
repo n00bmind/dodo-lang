@@ -11,6 +11,7 @@ INLINE void Out( char const* str, sz len = 0 )
 #define INDENT_STR "                                                                            "
 
 internal sz globalIndent = 0;
+internal int globalLineNumber = 1;
 
 internal INLINE void OutIndent()
 {
@@ -22,6 +23,7 @@ internal INLINE void OutIndent()
 internal INLINE void OutNL()
 {
     Out( "\n" );
+    globalLineNumber++;
 }
 
 char* Strf( char const* fmt, ... )
@@ -43,6 +45,15 @@ char* Strf( char const* fmt, ... )
         va_end( args );
     }
     return buf;
+}
+
+internal void EmitPos( SourcePos const& pos )
+{
+    if( pos.lineNumber != globalLineNumber )
+    {
+        Out( Strf( "#line %d \"%s\"\n", pos.lineNumber, pos.filename ) );
+        globalLineNumber = pos.lineNumber;
+    }
 }
 
 char const* CdeclType( Type* type )
@@ -401,6 +412,8 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 
 void EmitStmt( Stmt* stmt )
 {
+    EmitPos( stmt->pos );
+
     switch( stmt->kind )
     {
         case Stmt::Expr:

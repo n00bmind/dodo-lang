@@ -48,6 +48,7 @@ struct Symbol
 };
 
 Hashtable<char const*, Symbol, LazyAllocator> globalSymbols;
+BucketArray<Symbol*> globalSymbolsList;
 
 // Local scopes for functions
 BucketArray<Symbol> globalScopeStack;
@@ -1366,7 +1367,9 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
 
 void PushGlobalDeclSymbols( Decl* decl )
 {
-    CreateDeclSymbols( decl, false );
+    Array<Symbol*> symbols = CreateDeclSymbols( decl, false );
+    for( Symbol* s : symbols )
+        globalSymbolsList.Push( s );
 }
 
 Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
@@ -1375,19 +1378,23 @@ Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
     // Use interned string for both key and value!
     name = internName->data;
 
-    Symbol result = {};
-    result.name = name;
-    result.type = type;
-    result.kind = Symbol::Type;
-    result.state = Symbol::Resolved;
+    Symbol sym = {};
+    sym.name = name;
+    sym.type = type;
+    sym.kind = Symbol::Type;
+    sym.state = Symbol::Resolved;
 
-    return globalSymbols.Put( name, result );
+    Symbol* result = globalSymbols.Put( name, sym );
+    globalSymbolsList.Push( result );
+
+    return result;
 }
 
 
 void InitResolver( int globalSymbolsCount )
 {
     INIT( globalScopeStack ) BucketArray<Symbol>( &globalArena, 1024 );
+    INIT( globalSymbolsList ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
     // TODO Make a generic type comparator so we can turn this into a hashtable
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
@@ -1420,8 +1427,8 @@ void ResolveAll( Array<Decl*> const& globalDecls )
         PushGlobalDeclSymbols( decl );
     }
 
-    for( auto it = globalSymbols.Values(); it; ++it )
+    for( auto it = globalSymbolsList.First(); it; ++it )
     {
-        CompleteSymbol( &*it );
+        CompleteSymbol( *it );
     }
 }

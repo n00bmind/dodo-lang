@@ -31,9 +31,9 @@ int globalErrorCount = 0;
 void InitInternStrings()
 {
     InitArena( &globalInternStrings.arena );
-    //new (&globalInternStrings.entries) BucketArray<InternString>( &globalArena, 1024 );
     // TODO Can we get rid of this after parsing and just keep the arena?
-    INIT( globalInternStrings.entries ) Hashtable<String, InternString, MemoryArena>( &globalArena, 0, 0, StringHash, StringsEqual );
+    INIT( globalInternStrings.entries ) Hashtable<String, InternString, MemoryArena>(
+                &globalArena, 0, 0, StringHash, StringsEqual );
 }
 
 void InitTestMemory()
@@ -298,32 +298,7 @@ complex_func :: ()
         PushGlobalTypeSymbol( foo, intType );
         ASSERT( GetSymbol( foo ) && GetSymbol( foo )->type == intType );
 
-        for( Decl* d : globalDecls )
-            PushGlobalDeclSymbols( d );
-
-        {
-            auto it = globalSymbols.Values();
-            while( it )
-            {
-                Symbol* sym = &*it;
-
-#if 0
-                if( sym->decl )
-                {
-                    char buf[1024] = {};
-                    char* outBuf = buf;
-                    sz len = ARRAYCOUNT(buf);
-                    int indent = 0;
-
-                    DebugPrintSExpr( sym->decl, outBuf, len, indent );
-                    printf( "Completing %s\n", buf );
-                }
-#endif
-
-                CompleteSymbol( sym );
-                ++it;
-            }
-        }
+        ResolveAll( globalDecls );
 
         //printf( "\n-----------------------\n" );
         auto idx2 = globalOrderedSymbols.First();
@@ -373,14 +348,7 @@ complex_func :: ()
         Array<Type*> emptyArgs( &globalTmpArena, 0 );
         char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
 
-        for( Decl* d : globalDecls )
-            PushGlobalDeclSymbols( d );
-        for( auto it = globalSymbols.Values(); it; ++it )
-        {
-            Symbol* sym = &*it;
-            CompleteSymbol( sym );
-        }
-
+        ResolveAll( globalDecls );
         GenerateAll();
         String outString( (char*)globalOutArena.base, I32( globalOutArena.used ) );
         //printf( "%.*s", outString.length, outString.data );
@@ -393,9 +361,6 @@ complex_func :: ()
 
 bool Run( int argCount, char const* args[] )
 {
-    f64 time = globalPlatform.CurrentTimeMillis();
-    f64 startTime = time;
-
     InitArena( &globalArena, MEGABYTES(16) );
     InitArena( &globalTmpArena, MEGABYTES(16) );
     InitArena( &globalOutArena, MEGABYTES(16) );
@@ -403,6 +368,9 @@ bool Run( int argCount, char const* args[] )
 #if !CONFIG_RELEASE
     RunTests();
 #endif
+
+    f64 time = globalPlatform.CurrentTimeMillis();
+    f64 startTime = time;
 
     Array<String> argsList( &globalArena, argCount );
     // Skip exe path from args list
@@ -421,7 +389,6 @@ bool Run( int argCount, char const* args[] )
     String inputFilename = argsList[0];
     char const* filename_str = inputFilename.CString( &globalTmpArena );
     // TODO Temp memory scopes
-    // TODO Null terminate?
     Buffer readResult = globalPlatform.ReadEntireFile( filename_str, &globalTmpArena );
     if( !readResult.data )
         return false;
