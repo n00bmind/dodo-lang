@@ -4,8 +4,10 @@
 Close to the metal, C-like machine control, but with the more useful constructs for higher-level and functional programming from Python (without going too crazy).
 In a way, it would be an attempt to make pythonic constructs fast, i.e: make them usable for the Long Descent.
 It seems logical to have two 'sub-languages':
-- A JAI-style low level strongly typed basic syntax, with the most minimal data structures (this includes basically first-class structs, unions, arrays & strings). The total code surface for this must be really really minimal.
-- A pythonic higher level syntax that builds on top of the previous one, with more advanced (publicly reviewed) data structures in a 'standard library' that is actually good. Any abstractions must be really straightforward and easy to 'unravel', code should still be very small.
+- A JAI-style low level strongly typed basic syntax, with the most minimal data structures (this includes basically first-class structs, unions, enums, arrays & strings).
+  The total code surface for this must be really really minimal.
+- A pythonic higher level syntax that builds on top of the previous one, with more advanced (publicly reviewed) data structures in a 'standard library' that is actually good.
+  Any abstractions must be really straightforward and easy to 'unravel', code should still be very small.
 - A third tier would be a more generic library of useful 'tools' that would be completely optional and offered just to quickly kickstart new programs etc.
 All layers should be pretty independent of one another, specially the last one, but ideally also the second layer would be removable, even though it would be included by default.
 Think where things like polymorphism & generics fall in this division.
@@ -24,6 +26,22 @@ ________________________________________________________________________________
 - Maybe even do something like in Python where there is a kind of "correspondence" between function args and struct fields,
   and you can trivially pack/unpack structs as function args
 
+- Bake the concept of _handles_ in the type system, as a better pointer anywhere it makes sense (with the possibility of obtaining the actual pointer for speed when desired)
+  In fact lately I've been thinking that on 64 bit machines specially, using 32 bit handles where possible would not only be safer, but also save a lot of memory!
+  Think of ways in which the language could promote handles and "discourage" straight pointer use.
+
+- For arrays and strings, there is a question of what do the types actually represent in memory. Is an array a fat pointer to the actual list of items, or is it a normal pointer to the
+  items with a preamble in front with the necessary metadata (basically just a count)? 
+  Fat pointer:
+    · Faster access to the count, meaning range checks in debug will be faster
+    · Much easier to interop with stuff returned from C. Just create a fat wrapper to the actual pointer returned.
+    · Fat! Fat pointers are really fat on 64bit, so arrays of arrays and arrays of strings waste a ton of bits for no real reason.
+  Normal pointer:
+    · Hard to interop with. A plain old buffer in memory cannot be converted into this without an extra copy.
+
+  Think about how different subtypes of arrays could specify sizes for the base pointer as part of the type definition, similar to the "relative pointers" concept from JAI.
+  Maybe also the base pointer could instead be a smaller handle, but then handles we'd need a concept of a non-opaque handle where the language knows what's inside and can use it.
+
 - Precedence table, like in Bitwise's Ion, highest to lowest:
   · postfix: () [] .
   · unary: ! + - ~ &(addr) *(deref)
@@ -38,20 +56,6 @@ ________________________________________________________________________________
 - Modules/packages are the main way of organizing code. All .do files in the same directory are automatically part of the same module. Code can be freely moved from one big file to several separate smaller ones (or the other way around) _with no other action necessary_.
   Modules are imported all at once by specifying the name of the folder.
 
-- Reflection must be very natural like in C#, not requiring knowledge of internal structures like in JAI. I must be able to query info about types by just writing type.attribute (i.e: int.size, userVar.type, etc.), and the compiler will translate to the
-  relevant meta structures.
-
-- We do want a Context so that we don't have to drag commonly used stuff across a ton of functions. However we don't want something dynamic and implicit and "hidden" like in JAI, but something more functional-like, and completely explicit and statically checked,
-  and which can be examined at any time in a debugger. I propose a very minimal set of fixed things in the default Context (like an allocator), plus a separate arguments section on every function, with a type and a name for each arg, but where the name is _both_ the name that
-  will be used inside the function body and also the name that will be "captured" from the calling scope, similar to lambdas in C++. Like lambdas, you just specify this in the function declaration, not everytime you call it. Unlike lambdas, the names apply to the _calling_
-  scope, not the declaring scope. In case the same name is not available in the calling scope, an error will be shown and the correct name will have to be specified during the call. The caller can override the Context arguments explicitly if he desires to do so too.
-
-- What Jon Blow does where he's developing an actual "big" program (game) to soundly inform many decisions about the language is very very good, however I think it'd be more convenient to have several different "small to medium" programs instead of one.
-  These should be programs solving disparate problems relevant in the respective domain(s) the language wants to address, and could even merge at some point if that makes sense. This would allow several things:
-  - Have a broader picture of what the final application of the language among different technical areas will look like.
-  - Provide an easy way to determine what needs to be moved over to the core libraries, as several of those programs will begin to show what pieces of functionality are needed over an over across areas.
-  - Provide many pieces of real working code that can be easily converted into automated tests that can be added to a testsuite to continuously run during the whole language development and beyond.
-
 - Think about how we could make "signed"/"unsigned" not be part of the type system, and instead treat integers as in assembly, where only the relevant _operations_ are separate for signed or unsigned. This poses problems in principle as its difficult for a programmer to trace
   signedness for unknown values (i.e: a parameter passed to a function), so think how the language/compiler could help with this and make it "transparent".
     · The simplest idea I can think of so far is have any quantities the compiler handles be signed numbers (i32, i64, etc.). That would be all literals, sizes, etc.
@@ -65,6 +69,20 @@ ________________________________________________________________________________
 - 'using' in structs & function args, to encourage composition (and for subtyping too).
   Allow passing a struct that is 'using' another to a function that expects the latter.
   TODO What about using through pointers?
+
+- Reflection must be very natural like in C#, not requiring knowledge of internal structures like in JAI. I must be able to query info about types by just writing type.attribute (i.e: int.size, userVar.type, etc.), and the compiler will translate to the
+  relevant meta structures.
+
+- We do want a Context so that we don't have to drag commonly used stuff across a ton of functions. However we don't want something dynamic and implicit and "hidden" like in JAI, but something more functional-like, and completely explicit and statically checked,
+  and which can be examined at any time in a debugger. I propose a very minimal set of fixed things in the default Context (like an allocator), plus a separate arguments section on every function, with a type and a name for each arg, but where the name is _both_ the name that
+  will be used inside the function body and also the name that will be "captured" from the calling scope, similar to lambdas in C++. Like lambdas, you just specify this in the function declaration, not everytime you call it. Unlike lambdas, the names apply to the _calling_
+  scope, not the declaring scope. In case the same name is not available in the calling scope, an error will be shown and the correct name will have to be specified during the call. The caller can override the Context arguments explicitly if he desires to do so too.
+
+- What Jon Blow does where he's developing an actual "big" program (game) to soundly inform many decisions about the language is very very good, however I think it'd be more convenient to have several different "small to medium" programs instead of one.
+  These should be programs solving disparate problems relevant in the respective domain(s) the language wants to address, and could even merge at some point if that makes sense. This would allow several things:
+  - Have a broader picture of what the final application of the language among different technical areas will look like.
+  - Provide an easy way to determine what needs to be moved over to the core libraries, as several of those programs will begin to show what pieces of functionality are needed over an over across areas.
+  - Provide many pieces of real working code that can be easily converted into automated tests that can be added to a testsuite to continuously run during the whole language development and beyond.
 
 - Inline assembly ofc (!)
 
@@ -85,7 +103,6 @@ ________________________________________________________________________________
 
 - Do we want to disallow indexing pointers with [] (unchecked) so it feels less safe than indexing arrays (always checked)? (still allow pointer arithmetic ofc)
 
-- Bake the concept of handles in the type system, as a better pointer anywhere it makes sense (with the possibility of obtaining the actual pointer for speed when desired)
 - 'Optional' types, specially for pointers? (https://youtu.be/TH9VCN6UkyQ?t=4689)
 
 - Captures and "hard" captures, not just for functions but for simple code blocks too (https://youtu.be/5Nc68IdNKdg?t=3128) (more like "restricted scope" in this sense)
