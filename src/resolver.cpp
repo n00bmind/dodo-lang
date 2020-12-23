@@ -10,10 +10,14 @@ struct ConstValue
     union
     {
         void* ptrValue;
-        i64 intValue;
         f64 floatValue;
-        bool boolValue;
+        i64 intValue;
+        u64 bitsValue;
     };
+    // TODO 
+    u32 sizeBytes;
+
+    bool BoolValue() { return bitsValue != 0ull; }
 };
 
 struct Symbol
@@ -40,7 +44,7 @@ struct Symbol
     Decl* decl;
     ::Type* type;
     // TODO Store constants separately?
-    ConstValue value;
+    ConstValue constValue;
     u32 kind : 16;
     u32 state : 15;
     // TODO Namespaces?
@@ -73,6 +77,7 @@ struct Type
         Completing,
         Void,
         Bool,
+        Bits,
         Int,
         Float,
         Pointer,
@@ -180,7 +185,7 @@ bool IsTainted( Type* type )
 struct ResolvedExpr
 {
     Type* type;
-    ConstValue value;
+    ConstValue constValue;
     bool isLvalue;
     bool isConst;
 };
@@ -207,7 +212,7 @@ ResolvedExpr NewResolvedConst( Type* type, i64 intValue )
     ResolvedExpr result = {};
     result.type = type;
     result.isConst = true;
-    result.value.intValue = intValue;
+    result.constValue.intValue = intValue;
     return result;
 }
 
@@ -216,7 +221,7 @@ ResolvedExpr NewResolvedConst( Type* type, f64 floatValue )
     ResolvedExpr result = {};
     result.type = type;
     result.isConst = true;
-    result.value.floatValue = floatValue;
+    result.constValue.floatValue = floatValue;
     return result;
 }
 
@@ -244,7 +249,7 @@ ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
 i64 ResolveConstExprInt( Expr* expr )
 {
     ResolvedExpr result = ResolveConstExpr( expr, intType );
-    return result.value.intValue;
+    return result.constValue.intValue;
 }
 
 ResolvedExpr ResolveNameExpr( Expr* expr )
@@ -259,7 +264,7 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
         return NewResolvedLvalue( sym->type );
     else if( sym->kind == Symbol::Const )
         // TODO 
-        return NewResolvedConst( intType, sym->value.intValue );
+        return NewResolvedConst( intType, sym->constValue.intValue );
     else if( sym->kind == Symbol::Func )
         return NewResolvedRvalue( sym->type );
     else
@@ -368,7 +373,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             }
 
             if( operand.isConst )
-                return NewResolvedConst( type, EvalIntUnaryExpr( expr->unary.op, operand.value.intValue ) );
+                return NewResolvedConst( type, EvalIntUnaryExpr( expr->unary.op, operand.constValue.intValue ) );
             else
                 return NewResolvedRvalue( type );
         } break;
@@ -459,13 +464,15 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         }
         if( right.type && left.type != right.type )
         {
-            RSLV_ERROR( expr->pos, "Type mismatch in binary expression (left is '%s', right is '%s')", left.type->name, right.type->name );
+            RSLV_ERROR( expr->pos, "Type mismatch in binary expression (left is '%s', right is '%s')",
+                        left.type->name, right.type->name );
             return resolvedNull;
         }
     }
 
     if( left.isConst && right.isConst )
-        return NewResolvedConst( intType, EvalIntBinaryExpr( expr->binary.op, left.value.intValue, right.value.intValue, expr->pos ) );
+        return NewResolvedConst( intType, EvalIntBinaryExpr( expr->binary.op, left.constValue.intValue,
+                                                             right.constValue.intValue, expr->pos ) );
     else
         return NewResolvedRvalue( left.type );
 }
@@ -580,7 +587,7 @@ ResolvedExpr ResolveTernaryExpr( Expr* expr, Type* expectedType )
     }
 
     if( cond.isConst )
-        return cond.value.boolValue ? thenExpr : elseExpr;
+        return cond.constValue.BoolValue() ? thenExpr : elseExpr;
     else
         return NewResolvedRvalue( thenExpr.type );
 }
@@ -716,7 +723,10 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
         case Expr::Float:
             result = NewResolvedConst( floatType, expr->literal.floatValue );
             break;
-        // TODO String
+        case Expr::Str:
+            // TODO 
+            //result = NewResolvedConst( .. );
+            break;
 
         case Expr::Name:
             result = ResolveNameExpr( expr );
@@ -1057,7 +1067,7 @@ void ResolveSymbol( Symbol* sym )
             if( !init.isConst )
                 RSLV_ERROR( pos, "Initializer for constant '%s' is not a constant expression", sym->name );
 
-            sym->value = init.value;
+            sym->constValue = init.constValue;
             decl->resolvedType = sym->type = init.type;
         } break;
 

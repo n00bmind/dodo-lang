@@ -386,8 +386,8 @@ bool Run( int argCount, char const* args[] )
 
     InitInternStrings();
 
-    String inputFilename = argsList[0];
-    char absPath[256];
+    String inputFilename( argsList[0] );
+    char absPath[256] = {};
     if( !globalPlatform.GetAbsolutePath( inputFilename.data, absPath, ARRAYCOUNT(absPath) ) )
         return false;
 

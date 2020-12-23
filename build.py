@@ -84,7 +84,7 @@ config_win_debug = Config(
         platform       = platform_win,
         cmdline_opts   = ['d', 'dbg', 'debug'],
         compiler_flags = ['-DCONFIG_DEBUG=1', '-Z7', '-Od'],
-        linker_flags   = ['/debug:full']                # Required for debugging after hot reloading
+        linker_flags   = ['/debug:full']                # Required for debugging after hot reloading (and RemedyBG)
 )
 # This config is a bit confusing and we need to clarify this:
 # The choice of whether we have certain "development" features (like an editor mode) is a platform thing

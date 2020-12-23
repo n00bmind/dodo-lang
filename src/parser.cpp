@@ -781,13 +781,15 @@ FuncArg ParseFuncArg( Lexer* lexer )
     return result;
 }
 
-Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList const& body, TypeSpec* returnType )
+Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList const& body,
+                   TypeSpec* returnType, char const* directive )
 {
     Decl* result = NewDecl( pos, Decl::Func, name );
     new( &result->func.args ) Array<FuncArg>( &globalArena, args.count );
     args.CopyTo( &result->func.args );
     result->func.body = body;
     result->func.returnType = returnType;
+    result->directive = directive;
 
     return result;
 }
@@ -844,7 +846,7 @@ StmtList ParseStmtBlock( Lexer* lexer )
 }
 
 
-Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
+Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, char const* directive, Lexer* lexer )
 {
     bool isConst = false;
     Expr* initExpr = nullptr;
@@ -906,6 +908,7 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
             NextToken( lexer );
             if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
             {
+                // TODO Omit arg names for foreign funcs
                 args.Push( ParseFuncArg( lexer ) );
                 while( MatchToken( TokenKind::Comma, lexer->token ) )
                 {
@@ -923,13 +926,20 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
                 returnType = ParseTypeSpec( lexer );
             }
 
-            RequireToken( TokenKind::OpenBrace, lexer );
             StmtList body = {};
-            if( lexer->IsValid() )
-                body = ParseStmtBlock( lexer );
+            bool isForeign = directive == globalDirectives[ Directive::Foreign ];
+
+            if( isForeign )
+                RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+            else
+            {
+                RequireToken( TokenKind::OpenBrace, lexer );
+                if( lexer->IsValid() )
+                    body = ParseStmtBlock( lexer );
+            }
 
             if( lexer->IsValid() )
-                return NewFuncDecl( pos, namesExpr->name, args, body, returnType );
+                return NewFuncDecl( pos, namesExpr->name, args, body, returnType, directive );
         }
         else
         {
@@ -983,55 +993,61 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, Lexer* lexer )
     return nullptr;
 }
 
-Decl* ParseDecl( Lexer* lexer )
+char const* ParseDirective( Lexer* lexer )
 {
-    SourcePos pos = lexer->token.pos;
-
+    // Directives are always optional
+    char const* result = nullptr;
     if( MatchToken( TokenKind::Pound, lexer->token ) )
     {
-        // TODO Directives
+        NextToken( lexer );
+        result = RequireDirective( lexer );
+        NextToken( lexer );
+    }
+
+    return result;
+}
+
+Decl* ParseDecl( Lexer* lexer )
+{
+    char const* directive = ParseDirective( lexer );
+
+    SourcePos pos = lexer->token.pos;
+    BucketArray<Token> names( &globalTmpArena, 8, Temporary() );
+
+    RequireToken( TokenKind::Name, lexer );
+    names.Push( lexer->token );
+
+    NextToken( lexer );
+    while( MatchToken( TokenKind::Comma, lexer->token ) )
+    {
+        NextToken( lexer );
+        RequireToken( TokenKind::Name, lexer );
+        names.Push( lexer->token );
+        
+        NextToken( lexer );
+    }
+
+    Expr* expr = nullptr;
+    if( names.count > 1 )
+    {
+        BucketArray<Expr*> exprs( &globalTmpArena, names.count, Temporary() );
+        auto idx = names.First();
+        while( idx )
+        {
+            Token const& token = *idx;
+            exprs.Push( NewNameExpr( token.pos, token.ident ) );
+
+            idx.Next();
+        }
+        expr = NewCommaExpr( pos, exprs );
     }
     else
     {
-        BucketArray<Token> names( &globalTmpArena, 8, Temporary() );
-
-        RequireToken( TokenKind::Name, lexer );
-        names.Push( lexer->token );
-
-        NextToken( lexer );
-        while( MatchToken( TokenKind::Comma, lexer->token ) )
-        {
-            NextToken( lexer );
-            RequireToken( TokenKind::Name, lexer );
-            names.Push( lexer->token );
-            
-            NextToken( lexer );
-        }
-
-        Expr* expr = nullptr;
-        if( names.count > 1 )
-        {
-            BucketArray<Expr*> exprs( &globalTmpArena, names.count, Temporary() );
-            auto idx = names.First();
-            while( idx )
-            {
-                Token const& token = *idx;
-                exprs.Push( NewNameExpr( token.pos, token.ident ) );
-
-                idx.Next();
-            }
-            expr = NewCommaExpr( pos, exprs );
-        }
-        else
-        {
-            ASSERT( names.count == 1 );
-            expr = NewNameExpr( pos, (*names.First()).ident );
-        }
-
-        return ParseNamedDecl( pos, expr, lexer );
+        ASSERT( names.count == 1 );
+        expr = NewNameExpr( pos, (*names.First()).ident );
     }
 
-    return nullptr;
+    return ParseNamedDecl( pos, expr, directive, lexer );
 }
 
 Stmt* NewStmt( SourcePos const& pos, Stmt::Kind kind )
@@ -1085,7 +1101,7 @@ Stmt* ParseSimpleStmt( SourcePos const& pos, Lexer* lexer )
     if( (expr->kind == Expr::Comma || expr->kind == Expr::Name) &&
         MatchToken( TokenKind::Colon, lexer->token ) )
     {
-        Decl* decl = ParseNamedDecl( pos, expr, lexer );
+        Decl* decl = ParseNamedDecl( pos, expr, nullptr, lexer );
 
         if( lexer->IsValid() )
             result = NewDeclStmt( pos, decl );

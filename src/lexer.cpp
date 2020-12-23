@@ -1,5 +1,6 @@
 
 internal char const* globalKeywords[Keyword::Values::count];
+internal char const* globalDirectives[Directive::Values::count];
 internal int charToDigit[256];
 internal int escapeToChar[256];
 
@@ -37,11 +38,16 @@ Lexer::Lexer( String const& input, char const* filename_ )
     pos = { filename_, 1, 1 };
     token = {};
 
-    // Intern keywords
+    // Intern keywords & directives
     for( Keyword const& k : Keyword::Values::items )
     {
         InternString* intern = Intern( String( k.name ), InternString::Keyword );
         globalKeywords[k.index] = intern->data;
+    }
+    for( Directive const& k : Directive::Values::items )
+    {
+        InternString* intern = Intern( String( k.name ), InternString::Directive );
+        globalDirectives[k.index] = intern->data;
     }
 
     // Escape sequences
@@ -194,6 +200,8 @@ internal void NextTokenRaw( Lexer* lexer )
     Token& token = lexer->token;
     char const*& stream = lexer->stream.data;
 
+    char stringLiteralQuote = '\'';
+
     token = {};
     token.text = lexer->stream;
     token.pos = lexer->pos;
@@ -296,11 +304,15 @@ internal void NextTokenRaw( Lexer* lexer )
 
             if( intern->flags & InternString::Keyword )
                 token.kind = TokenKind::Keyword;
+            else if( intern->flags & InternString::Directive )
+                token.kind = TokenKind::Directive;
         } break;
 #undef IDENT
 
 #undef CASE
         // TODO Chars
+        case '\"':
+            stringLiteralQuote = '\"';
         case '\'':
         {
             lexer->Advance();
@@ -310,7 +322,7 @@ internal void NextTokenRaw( Lexer* lexer )
             BucketArray<char> strValue( &globalTmpArena, 16, Temporary() );
 
             // TODO Multiline strings
-            while( stream[0] && stream[0] != '\'' )
+            while( stream[0] && stream[0] != stringLiteralQuote )
             {
                 char c = stream[0];
 
@@ -557,7 +569,7 @@ void RequireToken( TokenKind::Enum wantedKind, Lexer* lexer )
     Token const& token = lexer->token;
     if( token.kind != wantedKind )
     {
-        PARSE_ERROR( token.pos, "Unexpected token type (wanted '%s', got '%s')",
+        PARSE_ERROR( token.pos, "Expected token '%s' (got '%s')",
                TokenKind::Values::names[wantedKind], TokenKind::Values::names[token.kind] );
     }
 }
@@ -582,6 +594,18 @@ void RequireKeywordAndAdvance( int kw, Lexer* lexer )
 {
     RequireKeyword( kw, lexer );
     NextToken( lexer );
+}
+
+char const* RequireDirective( Lexer* lexer )
+{
+    Token const& token = lexer->token;
+    if( token.kind != TokenKind::Directive )
+    {
+        PARSE_ERROR( token.pos, "Expected directive (got '%s')",
+               TokenKind::Values::names[token.kind] );
+    }
+
+    return token.ident;
 }
 
 bool MatchToken( TokenKind::Enum wantedKind, Token const& token )

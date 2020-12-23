@@ -197,6 +197,7 @@ struct Decl
     Type* resolvedType;
     SourcePos pos;
     Array<char const*> names;
+    char const* directive;
     Kind kind;
 
     union

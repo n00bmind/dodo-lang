@@ -74,6 +74,7 @@ enum TokenFlags : u32
     \
     x(Name,             "identifier",   ( "IDN", 0 )) \
     x(Keyword,          "keyword",      ( "KWD", 0 )) \
+    x(Directive,        "directive",    ( "DIR", 0 )) \
     x(StringLiteral,    "string",       ( "STR", 0 )) \
     x(IntLiteral,       "integer",      ( "INT", 0 )) \
     x(FloatLiteral,     "float",        ( "FLT", 0 )) \
@@ -84,6 +85,35 @@ enum TokenFlags : u32
 
 STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
 #undef TOKENS
+
+
+#define KEYWORDS(x) \
+    x( Struct,  "struct" ) \
+    x( Union,   "union" ) \
+    x( Enum,    "enum" ) \
+    x( Sizeof,  "sizeof" ) \
+    x( If,      "if" ) \
+    x( Else,    "else" ) \
+    x( While,   "while" ) \
+    x( Do,      "do" ) \
+    x( For,     "for" ) \
+    x( Switch,  "switch" ) \
+    x( Case,    "case" ) \
+    x( Default, "default" ) \
+    x( Break,   "break" ) \
+    x( Continue,"continue" ) \
+    x( Return,  "return" ) \
+    x( As,      "as" ) \
+
+STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
+#undef KEYWORDS
+
+
+#define DIRECTIVES(x) \
+    x( Foreign, "foreign" ) \
+
+STRUCT_ENUM_WITH_NAMES(Directive, DIRECTIVES)
+#undef DIRECTIVES
 
 
 struct SourcePos
@@ -136,6 +166,7 @@ struct InternString
     {
         None = 0,
         Keyword = 0x1,
+        Directive = 0x2,
     };
     
     char const* data;
@@ -146,32 +177,9 @@ struct InternString
 struct InternStringBuffer
 {
     MemoryArena arena;
-    // TODO This should be a _growable_ hashtable (with linear probing!)?
-    //BucketArray<InternString> entries;
     // TODO Can this just live in temporary memory and be discarded after parsing is done?
     Hashtable<String, InternString, MemoryArena> entries;
 };
-
-#define KEYWORDS(x ) \
-    x( Struct,  "struct" ) \
-    x( Union,   "union" ) \
-    x( Enum,    "enum" ) \
-    x( Sizeof,  "sizeof" ) \
-    x( If,      "if" ) \
-    x( Else,    "else" ) \
-    x( While,   "while" ) \
-    x( Do,      "do" ) \
-    x( For,     "for" ) \
-    x( Switch,  "switch" ) \
-    x( Case,    "case" ) \
-    x( Default, "default" ) \
-    x( Break,   "break" ) \
-    x( Continue,"continue" ) \
-    x( Return,  "return" ) \
-    x( As,      "as" ) \
-
-STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
-#undef KEYWORDS
 
 
 struct Lexer

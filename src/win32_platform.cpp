@@ -58,19 +58,22 @@ PLATFORM_PRINT_VA(Win32ErrorVA)
 PLATFORM_GET_ABSOLUTE_PATH(Win32GetAbsolutePath)
 {
     bool result = true;
-    char path[MAX_PATH];
+    char path[MAX_PATH] = {};
 
     DWORD ret = GetFullPathName( filename, ARRAYCOUNT(path), path, nullptr );
-    if( ret && ret < outBufferLen )
+    if( ret && ret < outBufferLen - 1 )
     {
         // Escape backslashes
         char* outp = outBuffer;
-        for( sz i = 0; i < outBufferLen; ++i )
+        for( sz i = 0; i < outBufferLen - 1; ++i )
         {
             *outp++ = path[i];
             if( path[i] == '\\' )
                 *outp++ = '\\';
+            else if( path[i] == 0 )
+                break;
         }
+        *outp = '\0';
     }
     else
     {
