@@ -175,7 +175,9 @@ void EmitExpr( Expr* expr )
             Out( Strf( "%f", expr->literal.floatValue ) );
             break;
         case Expr::Str:
+            OUTSTR( "\"" );
             Out( expr->literal.strValue.data, Sz( expr->literal.strValue.length ) );
+            OUTSTR( "\"" );
             break;
         case Expr::Name:
             Out( expr->name );
@@ -398,6 +400,9 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 
         case Decl::Func:
         {
+            if( IsForeign( decl ) )
+                break;
+
             // Only function prototypes at this stage
             // TODO Most of these are completely unnecessary
             EmitFuncDecl( decl );
@@ -418,6 +423,7 @@ void EmitStmt( Stmt* stmt )
         case Stmt::Expr:
             OutIndent();
             EmitExpr( stmt->expr );
+            OUTSTR( ";" );
             break;
         case Stmt::Decl:
             EmitDecl( stmt->decl, nullptr, true );
@@ -581,7 +587,7 @@ void EmitOrderedSymbols()
         Symbol* sym = *idx;
 
         Decl* decl = sym->decl;
-        if( !decl || decl->kind != Decl::Func )
+        if( !decl || decl->kind != Decl::Func || IsForeign( decl ) )
             continue;
 
         EmitPos( decl->pos );
@@ -594,8 +600,7 @@ void EmitOrderedSymbols()
 }
 
 char const* globalPreamble =
-R"STR(#include <stdio.h>
-)STR";
+#include "preamble.inl"
 
 void GenerateAll()
 {

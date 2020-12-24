@@ -38,6 +38,7 @@ ________________________________________________________________________________
     · Fat! Fat pointers are really fat on 64bit, so arrays of arrays and arrays of strings waste a ton of bits for no real reason.
   Normal pointer:
     · Hard to interop with. A plain old buffer in memory cannot be converted into this without an extra copy.
+    · Slimer, and easier to turn into something even more slim like a small handle, as there's no metadata to drag around.
 
   Think about how different subtypes of arrays could specify sizes for the base pointer as part of the type definition, similar to the "relative pointers" concept from JAI.
   Maybe also the base pointer could instead be a smaller handle, but then handles we'd need a concept of a non-opaque handle where the language knows what's inside and can use it.

@@ -14,14 +14,14 @@
 #define persistent static
 
 
-#define HALT() (__debugbreak(), 1) //( (*(volatile int *)0x0A55 = 0) != 0 )
-#if !RELEASE
+#define HALT() (__debugbreak(), 1)
+#if !CONFIG_RELEASE
 #define ASSERT(expr, ...) \
     ((void)( !(expr) \
              && (globalAssertHandler( __FILE__, __LINE__, IF_ELSE( HAS_ARGS(__VA_ARGS__) )( __VA_ARGS__ )( #expr ) ), 1) \
              && HALT()))
 #else
-#define ASSERT(expr) ((void)0)
+#define ASSERT(expr, ...) ((void)0)
 #endif
 
 #define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )
@@ -30,7 +30,7 @@ typedef ASSERT_HANDLER(AssertHandlerFunc);
 ASSERT_HANDLER(DefaultAssertHandler);
 AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 
-#if !RELEASE
+#if !CONFIG_RELEASE
 #define NOT_IMPLEMENTED ASSERT(!"NotImplemented")
 #else
 #define NOT_IMPLEMENTED NotImplemented!!!

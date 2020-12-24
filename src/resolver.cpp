@@ -9,6 +9,7 @@ struct ConstValue
 {
     union
     {
+        String strValue = {};
         void* ptrValue;
         f64 floatValue;
         i64 intValue;
@@ -51,15 +52,6 @@ struct Symbol
     u32 isLocal : 1;
 };
 
-Hashtable<char const*, Symbol, LazyAllocator> globalSymbols;
-BucketArray<Symbol*> globalSymbolsList;
-
-// Local scopes for functions
-BucketArray<Symbol> globalScopeStack;
-BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
-// Ordered global symbols for linearized codegen
-BucketArray<Symbol*> globalOrderedSymbols;
-
 
 struct TypeField
 {
@@ -82,6 +74,7 @@ struct Type
         Float,
         Pointer,
         Array,
+        String,
         Struct,
         Union,
         Enum,
@@ -90,13 +83,9 @@ struct Type
         TypeVar,
     };
 
-    // TODO Fill up! Can we just use the symbol?
     char const* name;
-    // TODO Should be decl?
-    Symbol* symbol;   // NOTE Only aggregates and enums will have one
-    // TODO Remove?
-    Decl* decl;
-    // TODO Do size & alignment for all types
+    // NOTE Only user types (aggregates and enums) will have one
+    Symbol* symbol;
     sz size;
     sz align;
     Kind kind;
@@ -125,49 +114,78 @@ struct Type
     };
 };
 
-// TODO Builtins
-// TODO Type metrics
-Type voidTypeVal = { "void", nullptr, nullptr, 0, 0, Type::Void };
-Type intTypeVal = { "int", nullptr, nullptr, 4, 4, Type::Int };
-Type boolTypeVal = { "bool", nullptr, nullptr, 1, 1, Type::Bool };
-Type floatTypeVal = { "float", nullptr, nullptr, 4, 4, Type::Float };
 
-Type* voidType = &voidTypeVal;
-Type* intType = &intTypeVal;
-Type* boolType = &boolTypeVal;
-Type* floatType = &floatTypeVal;
+Hashtable<char const*, Symbol, LazyAllocator> globalSymbols;
+BucketArray<Symbol*> globalSymbolsList;
+// Ordered global symbols for linearized codegen
+BucketArray<Symbol*> globalOrderedSymbols;
 
-
-#if 0
-struct CachedType
-{
-    Type* type;
-    union
-    {
-        struct
-        {
-            ::Array<Type*> args;
-            // TODO Varargs
-            Type* returnType;
-        } func;
-        struct
-        {
-            Type* base;
-            sz count;
-        } array;
-        struct
-        {
-            Type* base;
-        } ptr;
-    };
-};
-#endif
+// Local scopes for functions
+BucketArray<Symbol> globalScopeStack;
+BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
 
 // List of unique interned types (a.k.a hash consing)
 // TODO Hashtable!
-//BucketArray<CachedType> globalCachedTypes;
 BucketArray<Type*> globalCachedTypes;
 
+
+Type NewBuiltinType( char const* name, Type::Kind kind, sz size, sz alignment )
+{
+    Type result = {};
+    result.name = name;
+    result.kind = kind;
+    result.size = size;
+    result.align = alignment;
+    
+    return result;
+}
+
+// Builtins
+Type globalVoidType = NewBuiltinType( "void", Type::Void, 0, 0 );
+Type globalIntType = NewBuiltinType( "int", Type::Int, 4, 4 );
+Type globalBoolType = NewBuiltinType( "bool", Type::Bool, 1, 1 );
+Type globalFloatType = NewBuiltinType( "float", Type::Float, 4, 4 );
+Type globalStrType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
+
+Type* voidType = &globalVoidType;
+Type* intType = &globalIntType;
+Type* boolType = &globalBoolType;
+Type* floatType = &globalFloatType;
+Type* strType = &globalStrType;
+
+
+Type* NewType( char const* name, Type::Kind kind, sz size, sz alignment )
+{
+    Type* result = PUSH_STRUCT( &globalArena, Type );
+    result->name = name;
+    result->kind = kind;
+    result->size = size;
+    result->align = alignment;
+    
+    return result;
+}
+
+Type* NewPtrType( Type* base )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::Pointer )
+        {
+            if( t->ptr.base == base )
+                return t;
+        }
+        idx.Next();
+    }
+
+    Type* result = NewType( "pointer", Type::Pointer, globalPlatform.PointerSize, globalPlatform.PointerSize );
+    result->ptr.base = base;
+
+    globalCachedTypes.Push( result );
+
+    return result;
+}
 
 sz TypeSize( Type* type )
 {
@@ -175,6 +193,70 @@ sz TypeSize( Type* type )
     ASSERT( type->size );
     return type->size;
 }
+
+sz TypeAlignment( Type* type )
+{
+    ASSERT( type->kind > Type::Completing );
+    // FIXME 
+    //ASSERT( type->align );
+    return type->align;
+}
+
+Type* NewArrayType( Type* base, sz count )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::Array )
+        {
+            if( t->array.base == base && t->array.count == count )
+                return t;
+        }
+        idx.Next();
+    }
+
+    // TODO Dynamic/any size arrays
+    Type* result = NewType( "array", Type::Array, count * TypeSize( base ), TypeAlignment( base ) );
+    result->array.base = base;
+    result->array.count = count;
+
+    globalCachedTypes.Push( result );
+
+    return result;
+}
+
+Type* NewFuncType( Array<Type*> const& args, Type* returnType )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::Func )
+        {
+            if( t->func.args == args && t->func.returnType == returnType )
+                return t;
+        }
+        idx.Next();
+    }
+
+    Type* result = NewType( "function", Type::Func, globalPlatform.PointerSize, globalPlatform.PointerSize );
+    // NOTE Assume passed args are allocated in permanent memory
+    result->func.args = args;
+    result->func.returnType = returnType;
+
+    globalCachedTypes.Push( result );
+
+    return result;
+}
+
+Type* NewIncompleteType( char const* name, Symbol* sym )
+{
+    Type* result = NewType( name, Type::Incomplete, 0, 0 );
+    result->symbol = sym;
+    return result;
+}
+
 
 bool IsTainted( Type* type )
 {
@@ -222,6 +304,15 @@ ResolvedExpr NewResolvedConst( Type* type, f64 floatValue )
     result.type = type;
     result.isConst = true;
     result.constValue.floatValue = floatValue;
+    return result;
+}
+
+ResolvedExpr NewResolvedConst( Type* type, String const& strValue )
+{
+    ResolvedExpr result = {};
+    result.type = type;
+    result.isConst = true;
+    result.constValue.strValue = strValue;
     return result;
 }
 
@@ -724,8 +815,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             result = NewResolvedConst( floatType, expr->literal.floatValue );
             break;
         case Expr::Str:
-            // TODO 
-            //result = NewResolvedConst( .. );
+            result = NewResolvedConst( strType, expr->literal.strValue );
             break;
 
         case Expr::Name:
@@ -774,120 +864,17 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
     return result;
 }
 
-Type* NewType( Type::Kind kind, sz size )
-{
-    Type* result = PUSH_STRUCT( &globalArena, Type );
-    result->kind = kind;
-    result->size = size;
-    
-    return result;
-}
-
-Type* NewPtrType( Type* base )
-{
-    auto idx = globalCachedTypes.First(); 
-    while( idx )
-    {
-        Type* t = *idx;
-        if( t->kind == Type::Pointer )
-        {
-            if( t->ptr.base == base )
-                return t;
-        }
-        idx.Next();
-    }
-
-    Type* result = NewType( Type::Pointer, globalPlatform.PointerSize );
-    result->ptr.base = base;
-
-#if 0
-    CachedType cached = {};
-    cached.type = result;
-    cached.ptr.base = base;
-#endif
-    globalCachedTypes.Push( result );
-
-    return result;
-}
-
-Type* NewArrayType( Type* base, sz count )
-{
-    auto idx = globalCachedTypes.First(); 
-    while( idx )
-    {
-        Type* t = *idx;
-        if( t->kind == Type::Array )
-        {
-            if( t->array.base == base && t->array.count == count )
-                return t;
-        }
-        idx.Next();
-    }
-
-    // TODO Dynamic/any size arrays
-    Type* result = NewType( Type::Array, count * TypeSize( base ) );
-    result->array.base = base;
-    result->array.count = count;
-
-#if 0
-    CachedType cached = {};
-    cached.type = result;
-    cached.array.base = base;
-    cached.array.count = count;
-#endif
-    globalCachedTypes.Push( result );
-
-    return result;
-}
-
-Type* NewFuncType( Array<Type*> const& args, Type* returnType )
-{
-    auto idx = globalCachedTypes.First(); 
-    while( idx )
-    {
-        Type* t = *idx;
-        if( t->kind == Type::Func )
-        {
-            if( t->func.args == args && t->func.returnType == returnType )
-                return t;
-        }
-        idx.Next();
-    }
-
-    Type* result = NewType( Type::Func, globalPlatform.PointerSize );
-    // NOTE Assume passed args are allocated in permanent memory
-    result->func.args = args;
-    result->func.returnType = returnType;
-
-#if 0
-    CachedType cached = {};
-    cached.type = result;
-    cached.array.base = base;
-    cached.array.count = count;
-#endif
-    globalCachedTypes.Push( result );
-
-    return result;
-}
-
-Type* NewIncompleteType( Symbol* sym )
-{
-    Type* result = NewType( Type::Incomplete, 0 );
-    result->symbol = sym;
-    return result;
-}
-
 void CompleteStructType( Type* type, Array<TypeField> const& fields )
 {
     ASSERT( type->kind == Type::Completing );
     type->kind = Type::Struct;
     type->aggregate.fields = fields;
 
+    // TODO Alignment, field offsets, etc.
     type->size = 0;
     for( TypeField const& f : type->aggregate.fields )
     {
         ASSERT( f.type->kind > Type::Completing );
-        // TODO Alignment, field offset, etc.
         type->size += TypeSize( f.type );
     }
 }
@@ -898,11 +885,11 @@ void CompleteUnionType( Type* type, Array<TypeField> const& fields )
     type->kind = Type::Union;
     type->aggregate.fields = fields;
 
+    // TODO Alignment, field offsets, etc.
     type->size = 0;
     for( TypeField const& f : type->aggregate.fields )
     {
         ASSERT( f.type->kind > Type::Completing );
-        // TODO Alignment, field offset, etc.
         type->size = Max( type->size, TypeSize( f.type ) );
     }
 }
@@ -1359,7 +1346,7 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
         if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
         {
             sym->state = Symbol::Resolved;
-            sym->type = NewIncompleteType( sym );
+            sym->type = NewIncompleteType( name, sym );
         }
 
         if( prevSymbol != nullptr )
@@ -1374,6 +1361,12 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
 
     return result;
 }
+
+INLINE bool IsForeign( Decl* decl )
+{
+    return decl->directive == globalDirectives[ Directive::Foreign ];
+}
+
 
 void PushGlobalDeclSymbols( Decl* decl )
 {
@@ -1409,25 +1402,26 @@ void InitResolver( int globalSymbolsCount )
     // TODO Make a generic type comparator so we can turn this into a hashtable
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
-    struct TypeSymbol
+    struct BuiltinType
     {
-        char const* name;
+        char const* symbolName;
         Type* type;
     };
-    TypeSymbol builtinTypes[] =
+    BuiltinType builtinTypes[] =
     {
         { "void", voidType },
         { "bool", boolType },
         { "int", intType },
         { "float", floatType },
+        { "str", strType },
     };
 
     INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,
         I32( globalSymbolsCount + ARRAYCOUNT(builtinTypes) ), HTF_FixedSize );
 
     globalCurrentScopeStart = globalScopeStack.First();
-    for( TypeSymbol const& s : builtinTypes )
-        PushGlobalTypeSymbol( s.name, s.type );
+    for( BuiltinType const& s : builtinTypes )
+        PushGlobalTypeSymbol( s.symbolName, s.type );
 }
 
 void ResolveAll( Array<Decl*> const& globalDecls )

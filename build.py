@@ -48,6 +48,7 @@ platform_win = Platform(
             '-wd4464',          # Relative include path contains '..'
             '-wd4505',          # Unreferenced function
             '-wd4514',          # Unreferenced inline function removed
+            '-wd4582',          # Constructor is not impliclty called
             '-wd4623',          # Default constructor implicitly deleted
             '-wd4625',          # Copy constructor implicitly deleted
             '-wd4626',          # Assignment operator implicitly deleted

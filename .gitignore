@@ -5,3 +5,5 @@ bin/
 *.swp
 *.rdbg
 *.do.cpp
+*.exe
+*.obj

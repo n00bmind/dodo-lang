@@ -39,7 +39,7 @@ struct PlatformAPI
     PlatformPrintVAFunc* ErrorVA;
 
 #if 0
-#if !RELEASE
+#if !CONFIG_RELEASE
     DebugPlatformFreeFileMemoryFunc* DEBUGFreeFileMemory;
     DebugPlatformListAllAssetsFunc* DEBUGListAllAssets;
     DebugPlatformJoinPathsFunc* DEBUGJoinPaths;

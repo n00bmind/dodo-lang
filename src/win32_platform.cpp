@@ -1,7 +1,3 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdint.h>
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 

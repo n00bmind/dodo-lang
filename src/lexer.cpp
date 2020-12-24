@@ -618,7 +618,7 @@ bool MatchKeyword( int kw, Token const& token )
     return token.ident == globalKeywords[ kw ];
 }
 
-#if !CFG_RELEASE
+#if !CONFIG_RELEASE
 void DebugDumpScan( String const& program, char const* filename )
 {
     Lexer lexer = Lexer( program, filename );
