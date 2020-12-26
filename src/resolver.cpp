@@ -142,16 +142,28 @@ Type NewBuiltinType( char const* name, Type::Kind kind, sz size, sz alignment )
 
 // Builtins
 Type globalVoidType = NewBuiltinType( "void", Type::Void, 0, 0 );
-Type globalIntType = NewBuiltinType( "int", Type::Int, 4, 4 );
 Type globalBoolType = NewBuiltinType( "bool", Type::Bool, 1, 1 );
-Type globalFloatType = NewBuiltinType( "float", Type::Float, 4, 4 );
 Type globalStrType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
+Type globalI8Type = NewBuiltinType( "i8", Type::Int, 1, 1 );
+Type globalI16Type = NewBuiltinType( "i16", Type::Int, 2, 2 );
+Type globalI32Type = NewBuiltinType( "i32", Type::Int, 4, 4 );
+Type globalI64Type = NewBuiltinType( "i64", Type::Int, 8, 8 );
+Type globalIntType = NewBuiltinType( "int", Type::Int, 8, 8 );
+Type globalF32Type = NewBuiltinType( "f32", Type::Float, 4, 4 );
+Type globalF64Type = NewBuiltinType( "f64", Type::Float, 8, 8 );
+Type globalFloatType = NewBuiltinType( "float", Type::Float, 8, 8 );
 
 Type* voidType = &globalVoidType;
-Type* intType = &globalIntType;
 Type* boolType = &globalBoolType;
-Type* floatType = &globalFloatType;
 Type* strType = &globalStrType;
+Type* i8Type = &globalI8Type;
+Type* i16Type = &globalI16Type;
+Type* i32Type = &globalI32Type;
+Type* i64Type = &globalI64Type;
+Type* intType = &globalIntType;
+Type* f32Type = &globalF32Type;
+Type* f64Type = &globalF64Type;
+Type* floatType = &globalFloatType;
 
 
 Type* NewType( char const* name, Type::Kind kind, sz size, sz alignment )
@@ -289,8 +301,41 @@ ResolvedExpr NewResolvedLvalue( Type* type )
     return result;
 }
 
-ResolvedExpr NewResolvedConst( Type* type, i64 intValue )
+ResolvedExpr NewResolvedConst( Type* type, i64 intValue, SourcePos const& pos )
 {
+    i64 min = 0, max = 0;
+    switch( type->size )
+    {
+        case 1:
+            min = I8MIN;
+            max = I8MAX;
+            break;
+        case 2:
+            min = I16MIN;
+            max = I16MAX;
+            break;
+        case 4:
+            min = I32MIN;
+            max = I32MAX;
+            break;
+        case 8:
+            min = I64MIN;
+            max = I64MAX;
+            break;
+        INVALID_DEFAULT_CASE;
+    }
+
+    if( intValue < min )
+    {
+        RSLV_ERROR( pos, "Integer constant expression overflow (minimum representable value is %lld)", min );
+        return resolvedNull;
+    }
+    if( intValue > max )
+    {
+        RSLV_ERROR( pos, "Integer constant expression overflow (maximum representable value is %lld)", max );
+        return resolvedNull;
+    }
+
     ResolvedExpr result = {};
     result.type = type;
     result.isConst = true;
@@ -298,8 +343,33 @@ ResolvedExpr NewResolvedConst( Type* type, i64 intValue )
     return result;
 }
 
-ResolvedExpr NewResolvedConst( Type* type, f64 floatValue )
+ResolvedExpr NewResolvedConst( Type* type, f64 floatValue, SourcePos const& pos )
 {
+    f64 min = 0, max = 0;
+    switch( type->size )
+    {
+        case 4:
+            min = F32MIN;
+            max = F32MAX;
+            break;
+        case 8:
+            min = F64MIN;
+            max = F64MAX;
+            break;
+        INVALID_DEFAULT_CASE;
+    }
+
+    if( floatValue < min )
+    {
+        RSLV_ERROR( pos, "Floating point constant expression overflow (minimum representable value is %f)", min );
+        return resolvedNull;
+    }
+    if( floatValue > max )
+    {
+        RSLV_ERROR( pos, "Floating point constant expression overflow (maximum representable value is %f)", max );
+        return resolvedNull;
+    }
+
     ResolvedExpr result = {};
     result.type = type;
     result.isConst = true;
@@ -354,8 +424,7 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
     else if( sym->kind == Symbol::Const )
-        // TODO 
-        return NewResolvedConst( intType, sym->constValue.intValue );
+        return NewResolvedConst( intType, sym->constValue.intValue, expr->pos );
     else if( sym->kind == Symbol::Func )
         return NewResolvedRvalue( sym->type );
     else
@@ -459,12 +528,14 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
         {
             if( type->kind != Type::Int )
             {
-                RSLV_ERROR( expr->pos, "Can only use unary '%s' with ints for now!", TokenKind::Values::names[ expr->unary.op ] );
+                RSLV_ERROR( expr->pos, "Can only use unary '%s' with ints for now!",
+                            TokenKind::Values::names[ expr->unary.op ] );
                 return resolvedNull;
             }
 
             if( operand.isConst )
-                return NewResolvedConst( type, EvalIntUnaryExpr( expr->unary.op, operand.constValue.intValue ) );
+                return NewResolvedConst( type, EvalIntUnaryExpr( expr->unary.op, operand.constValue.intValue ),
+                                         expr->pos );
             else
                 return NewResolvedRvalue( type );
         } break;
@@ -563,7 +634,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
 
     if( left.isConst && right.isConst )
         return NewResolvedConst( intType, EvalIntBinaryExpr( expr->binary.op, left.constValue.intValue,
-                                                             right.constValue.intValue, expr->pos ) );
+                                                             right.constValue.intValue, expr->pos ), expr->pos );
     else
         return NewResolvedRvalue( left.type );
 }
@@ -807,12 +878,11 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
     ResolvedExpr result = {};
     switch( expr->kind )
     {
-        // TODO Type sizes
         case Expr::Int:
-            result = NewResolvedConst( intType, expr->literal.intValue );
+            result = NewResolvedConst( intType, expr->literal.intValue, expr->pos );
             break;
         case Expr::Float:
-            result = NewResolvedConst( floatType, expr->literal.floatValue );
+            result = NewResolvedConst( floatType, expr->literal.floatValue, expr->pos );
             break;
         case Expr::Str:
             result = NewResolvedConst( strType, expr->literal.strValue );
@@ -852,7 +922,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             Type* type = size.type;
             CompleteType( type, expr->pos );
 
-            result = NewResolvedConst( intType, I64( TypeSize( type ) ) );
+            result = NewResolvedConst( intType, I64( TypeSize( type ) ), expr->pos );
         } break;
         // TODO Typeof
 
@@ -1121,16 +1191,18 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
     return cond;
 }
 
-void ResolveStmtBlock( StmtList const& block, Type* returnType );
+bool ResolveStmtBlock( StmtList const& block, Type* returnType );
 Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal );
 
-void ResolveStmt( Stmt* stmt, Type* returnType )
+bool ResolveStmt( Stmt* stmt, Type* returnType )
 {
+    bool returns = false;
+
     // TODO Check all control paths return a value
     switch( stmt->kind )
     {
         case Stmt::Block:
-            ResolveStmtBlock( stmt->block, returnType );
+            returns = ResolveStmtBlock( stmt->block, returnType );
             break;
         case Stmt::Expr:
             ResolveExpr( stmt->expr );
@@ -1165,16 +1237,18 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
         case Stmt::If:
         {
             ResolvedExpr cond = ResolveConditionalExpr( stmt->if_.cond );
-            ResolveStmtBlock( stmt->if_.thenBlock, returnType );
+            returns = ResolveStmtBlock( stmt->if_.thenBlock, returnType );
 
             for( ElseIf const& ei : stmt->if_.elseIfs )
             {
                 ResolvedExpr elseIfCond = ResolveConditionalExpr( ei.cond );
-                ResolveStmtBlock( ei.block, returnType );
+                returns = ResolveStmtBlock( ei.block, returnType ) && returns;
             }
 
             if( stmt->if_.elseBlock.stmts.count )
-                ResolveStmtBlock( stmt->if_.elseBlock, returnType );
+                returns = ResolveStmtBlock( stmt->if_.elseBlock, returnType ) && returns;
+            else
+                returns = false;
         } break;
 
         case Stmt::While:
@@ -1198,20 +1272,31 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
 
         case Stmt::Switch:
         {
+            bool hasDefault = false;
+
+            returns = true;
             ResolvedExpr result = ResolveExpr( stmt->switch_.expr );
             for( SwitchCase const& c : stmt->switch_.cases )
             {
-                if( !c.isDefault )
+                if( c.isDefault )
+                {
+                    if( hasDefault )
+                        RSLV_ERROR( c.block.pos, "Multiple default clauses in switch statement" );
+                    hasDefault = true;
+                }
+                else
                 {
                     // TODO Comma expressions
                     ResolvedExpr caseResult = ResolveExpr( c.expr );
                     // FIXME All these type comparisons should consider compatible types not just equality!
                     if( caseResult.type != result.type )
                         RSLV_ERROR( c.expr->pos, "Type mismatch in case expression" );
-
-                    ResolveStmtBlock( c.block, returnType );
                 }
+
+                returns = ResolveStmtBlock( c.block, returnType ) && returns;
             }
+
+            returns = returns && hasDefault;
         } break;
 
         case Stmt::Break:
@@ -1237,23 +1322,34 @@ void ResolveStmt( Stmt* stmt, Type* returnType )
                     RSLV_ERROR( stmt->pos, "Empty return expression for function with non-void return type" );
                 }
             }
+            
+            returns = true;
         } break;
 
         default:
         NOT_IMPLEMENTED;
     }
+
+    return returns;
 }
 
-void ResolveStmtBlock( StmtList const& block, Type* returnType )
+bool ResolveStmtBlock( StmtList const& block, Type* returnType )
 {
     auto scopeIdx = EnterScope();
 
+    bool returns = false;
     for( Stmt* stmt : block.stmts )
     {
-        ResolveStmt( stmt, returnType );
+        returns = ResolveStmt( stmt, returnType ) || returns;
     }
 
     LeaveScope( scopeIdx );
+    return returns;
+}
+
+INLINE bool IsForeign( Decl* decl )
+{
+    return decl->directive == globalDirectives[ Directive::Foreign ];
 }
 
 void ResolveFuncBody( Symbol* sym )
@@ -1276,8 +1372,18 @@ void ResolveFuncBody( Symbol* sym )
         // TODO Maybe we should be doing the same as for decl statements
         PushLocalSymbol( NewVarSymbol( a.name, argType ) );
     }
-    CompleteType( type->func.returnType, decl->func.returnType->pos );
-    ResolveStmtBlock( decl->func.body, type->func.returnType );
+
+    if( type->func.returnType )
+        CompleteType( type->func.returnType, decl->func.returnType->pos );
+    else
+        type->func.returnType = voidType;
+
+    if( !IsForeign( decl ) )
+    {
+        bool returns = ResolveStmtBlock( decl->func.body, type->func.returnType );
+        if( !returns && type->func.returnType != voidType )
+            RSLV_ERROR( decl->pos, "Not all control paths return a value" );
+    }
 
     LeaveScope( scopeIdx );
 }
@@ -1362,11 +1468,6 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
     return result;
 }
 
-INLINE bool IsForeign( Decl* decl )
-{
-    return decl->directive == globalDirectives[ Directive::Foreign ];
-}
-
 
 void PushGlobalDeclSymbols( Decl* decl )
 {
@@ -1411,9 +1512,15 @@ void InitResolver( int globalSymbolsCount )
     {
         { "void", voidType },
         { "bool", boolType },
-        { "int", intType },
-        { "float", floatType },
         { "str", strType },
+        { "i8", i8Type },
+        { "i16", i16Type },
+        { "i32", i32Type },
+        { "i64", i64Type },
+        { "int", intType },
+        { "f32", f32Type },
+        { "f64", f64Type },
+        { "float", floatType },
     };
 
     INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,

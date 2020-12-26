@@ -1,4 +1,4 @@
-R"STR(#include <stdio.h>
+R"~~~(#include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <string.h>
@@ -206,17 +206,17 @@ public:
         , length( 0 )
     {}
 
-    str( char const* cString )
-        : data( cString )
-        , length( I32( strlen( cString ) ) )
+    str( char const* s )
+        : data( s )
+        , length( I32( strlen( s ) ) )
     {}
 
-    str( char const* cString, int len )
-        : data( cString )
+    str( char const* s, int len )
+        : data( s )
         , length( len )
     {}
 
     operator char const*() const { return data; }
 };
-)STR";
+)~~~";
 

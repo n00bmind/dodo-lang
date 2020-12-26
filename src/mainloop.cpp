@@ -1,6 +1,7 @@
 #include <new>
 #include <stdio.h>
 #include <stdint.h>
+#include <float.h>
 #include <math.h>
 
 #include "magic.h"
@@ -361,6 +362,56 @@ complex_func :: ()
     InitTestMemory();
 }
 
+f64 globalTimeMillis = 0;
+
+f64 ElapsedTimeMillis()
+{
+    f64 time = globalPlatform.CurrentTimeMillis();
+    f64 result = time - globalTimeMillis;
+    globalTimeMillis = time;
+
+    return result;
+}
+
+char globalCompilerCmdLine[2048] = {};
+
+char const* BuildCmdLine( char const* compilerName, char const* filename, Array<char const*> const& commonFlags,
+                          Array<char const*> const& configFlags, Array<char const*> const& linkerFlags )
+{
+    char* out = globalCompilerCmdLine;
+
+#define STROUT( s ) \
+    String s##Str( s ); \
+    s##Str.CopyTo( out );\
+    out += s##Str.length;
+
+    STROUT( compilerName );
+    *out++ = ' ';
+    STROUT( filename );
+
+    for( char const* f : commonFlags )
+    {
+        *out++ = ' ';
+        STROUT( f );
+    }
+
+    for( char const* f : configFlags )
+    {
+        *out++ = ' ';
+        STROUT( f );
+    }
+
+    for( char const* f : linkerFlags )
+    {
+        *out++ = ' ';
+        STROUT( f );
+    }
+#undef STROUT
+
+    *out = 0;
+    return globalCompilerCmdLine;
+}
+
 bool Run( int argCount, char const* args[] )
 {
     InitArena( &globalArena, MEGABYTES(16) );
@@ -371,8 +422,7 @@ bool Run( int argCount, char const* args[] )
     RunTests();
 #endif
 
-    f64 time = globalPlatform.CurrentTimeMillis();
-    f64 startTime = time;
+    f64 startTime = globalPlatform.CurrentTimeMillis();
 
     Array<String> argsList( &globalArena, argCount );
     // Skip exe path from args list
@@ -399,13 +449,11 @@ bool Run( int argCount, char const* args[] )
         return false;
 
     // Do work!
-    f64 parseTime = 0, resolveTime = 0, generateTime = 0;
-    f64 lapTime = globalPlatform.CurrentTimeMillis();
+    f64 parseTime = 0, resolveTime = 0, generateTime = 0, compileTime = 0;
+    globalTimeMillis = globalPlatform.CurrentTimeMillis();
 
     Array<Decl*> fileDecls = Parse( String( readResult ), absPath );
-    time = globalPlatform.CurrentTimeMillis();
-    parseTime = time - lapTime;
-    lapTime = time;
+    parseTime = ElapsedTimeMillis();
 
     if( !globalErrorCount )
     {
@@ -413,15 +461,12 @@ bool Run( int argCount, char const* args[] )
         InitResolver( globalSymbolsCount );
 
         ResolveAll( fileDecls );
-        time = globalPlatform.CurrentTimeMillis();
-        resolveTime = time - lapTime;
-        lapTime = time;
+        resolveTime = ElapsedTimeMillis();
 
         if( !globalErrorCount )
         {
             GenerateAll();
-            time = globalPlatform.CurrentTimeMillis();
-            generateTime = time - lapTime;
+            generateTime = ElapsedTimeMillis();
         }
     }
 
@@ -451,6 +496,8 @@ bool Run( int argCount, char const* args[] )
             }
         }
 
+        // Write intermediate C file
+        // TODO Cmdline switch for output dir
         char outPath[256] = {};
         inputFilename.CopyTo( outPath );
 
@@ -458,17 +505,69 @@ bool Run( int argCount, char const* args[] )
         ASSERT( available >= sizeof(".cpp") );
         StringCopy( ".cpp", outPath + inputFilename.length, available );
 
-        bool success = globalPlatform.WriteEntireFile( outPath, pages ); 
-        if( success )
+        if( !globalPlatform.WriteEntireFile( outPath, pages ) )
+            return false;
+
+        // Execute C compiler
+        // TODO Cmdline switch & env. variable for C compiler location
+        static char const* compilerName = "cl.exe";
+
+//#define ARRAY( name, type, count ) \
+        //extern type _##name##_items[count]; \
+        //Array<type> name( _##name##_items, ARRAYCOUNT(_##name##_items) ); \
+        //type _##name##_items[count] =
+
+        //ARRAY( commonFlags, char const*, 9 )
+        char const* commonFlags[] =
+        {
+            "-nologo", "-FC", "-Wall", "-WX", "-Oi", "-GR-", "-EHa-",
+            "-D_HAS_EXCEPTIONS=0", "-D_CRT_SECURE_NO_WARNINGS",
+            "-wd4668",          // Undefined preprocessor macro
+            "-wd4820",          // Padding added
+        };
+        char const* commonLinkerFlags[] =
+        {
+            "/linker", "/opt:ref", "/incremental:no", "/debug:full",
+        };
+
+        char const* debugFlags[] =
+        {
+            "-DCONFIG_DEBUG=1", "-Z7", "-MTd", "-Od",
+        };
+        char const* releaseFlags[] =
+        {
+            "-DCONFIG_RELEASE=1", "-Z7", "-MT", "-O2",
+        };
+
+        bool debug = true;
+        Array<char const*> configFlags = debug
+            ? Array<char const*>( debugFlags, ARRAYCOUNT(debugFlags) )
+            : Array<char const*>( releaseFlags, ARRAYCOUNT(releaseFlags) );
+
+        char const* cmdLine = BuildCmdLine( compilerName,
+                                            outPath,
+                                            Array<char const*>( commonFlags, ARRAYCOUNT(commonFlags) ),
+                                            configFlags,
+                                            Array<char const*>( commonLinkerFlags, ARRAYCOUNT(commonLinkerFlags) ) );
+        
+        // TODO Console colors
+        globalPlatform.Print( cmdLine );
+        globalPlatform.Print( "\n\n" );
+        int exitCode = globalPlatform.ShellExecute( cmdLine );
+        compileTime = ElapsedTimeMillis();
+
+        // Stats
+        if( exitCode == 0 )
         {
             f64 totalTime = globalPlatform.CurrentTimeMillis() - startTime;
             globalPlatform.Print( "Compilation took %.3f seconds.\n", totalTime * 0.001f );
-            globalPlatform.Print( "Parsing:   %.3f s.\n", parseTime * 0.001f );
-            globalPlatform.Print( "Resolving: %.3f s.\n", resolveTime * 0.001f );
-            globalPlatform.Print( "C codegen: %.3f s.\n", generateTime * 0.001f );
+            globalPlatform.Print( "Parsing:       %.3f s.\n", parseTime * 0.001f );
+            globalPlatform.Print( "Resolving:     %.3f s.\n", resolveTime * 0.001f );
+            globalPlatform.Print( "C codegen:     %.3f s.\n", generateTime * 0.001f );
+            globalPlatform.Print( "C compilation: %.3f s.\n", compileTime * 0.001f );
             globalPlatform.Print( "\nDONE." );
         }
 
-        return success;
+        return exitCode == 0;
     }
 }

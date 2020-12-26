@@ -34,7 +34,7 @@ platform_win = Platform(
         compiler              = 'cl.exe',
         toolset               = 'CL',
         common_compiler_flags = [
-            '-MTd', '-nologo', '-FC', '-Wall', '-WX', '-Oi', '-GR-', '-EHa-',
+            '-nologo', '-FC', '-Wall', '-WX', '-Oi', '-GR-', '-EHa-',
             '-D_HAS_EXCEPTIONS=0', '-D_CRT_SECURE_NO_WARNINGS',
             '-wd4061',          # Unhandled enum case in switch
             '-wd4062',          # Unhandled enum case in switch
@@ -84,7 +84,7 @@ config_win_debug = Config(
         name           = 'Debug',
         platform       = platform_win,
         cmdline_opts   = ['d', 'dbg', 'debug'],
-        compiler_flags = ['-DCONFIG_DEBUG=1', '-Z7', '-Od'],
+        compiler_flags = ['-DCONFIG_DEBUG=1', '-Z7', '-MTd', '-Od'],
         linker_flags   = ['/debug:full']                # Required for debugging after hot reloading (and RemedyBG)
 )
 # This config is a bit confusing and we need to clarify this:
@@ -97,14 +97,14 @@ config_win_develop = Config(
         name           = 'Develop',
         platform       = platform_win,
         cmdline_opts   = ['dev', 'develop'],
-        compiler_flags = ['-DCONFIG_DEVELOP=1', '-Z7', '-O2',],
+        compiler_flags = ['-DCONFIG_DEVELOP=1', '-Z7', '-MTd', '-O2',],
         linker_flags   = ['/debug:full']
 )
 config_win_release = Config(
         name           = 'Release',
         platform       = platform_win,
         cmdline_opts   = ['r', 'rel', 'release'],
-        compiler_flags = ['-DCONFIG_RELEASE=1', '-Z7', '-O2'],
+        compiler_flags = ['-DCONFIG_RELEASE=1', '-Z7', '-MT', '-O2'],
         linker_flags   = ['/debug:full']
 )
 

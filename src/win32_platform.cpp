@@ -73,7 +73,7 @@ PLATFORM_GET_ABSOLUTE_PATH(Win32GetAbsolutePath)
     }
     else
     {
-        globalPlatform.Error( "ERROR: Couldn't find path for '%s'", filename );
+        globalPlatform.Error( "Couldn't find path for '%s'", filename );
         result = false;
     }
 
@@ -105,25 +105,25 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
                 }
                 else
                 {
-                    globalPlatform.Error( "ERROR: ReadFile failed for '%s'", filename );
+                    globalPlatform.Error( "ReadFile failed for '%s'", filename );
                     result.data = 0;
                 }
             }
             else
             {
-                globalPlatform.Error( "ERROR: Couldn't allocate buffer for file contents" );
+                globalPlatform.Error( "Couldn't allocate buffer for file contents" );
             }
         }
         else
         {
-            globalPlatform.Error( "ERROR: Failed querying file size for '%s'", filename );
+            globalPlatform.Error( "Failed querying file size for '%s'", filename );
         }
 
         CloseHandle( fileHandle );
     }
     else
     {
-        globalPlatform.Error( "ERROR: Failed opening file '%s' for reading", filename );
+        globalPlatform.Error( "Failed opening file '%s' for reading", filename );
     }
 
     return result;
@@ -156,6 +156,8 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
         }
     }
 
+    CloseHandle( outFile );
+
     return true;
 }
 
@@ -165,6 +167,34 @@ PLATFORM_CURRENT_TIME_MILLIS(Win32CurrentTimeMillis)
     QueryPerformanceCounter( &counter );
     f64 result = (f64)counter.QuadPart / globalPerfCounterFrequency * 1000;
     return result;
+}
+
+PLATFORM_SHELL_EXECUTE(Win32ShellExecute)
+{
+    int exitCode = -1;
+    char outBuffer[2048] = {};
+
+    FILE* pipe = _popen( cmdLine, "rt" );
+    if( pipe == NULL )
+    {
+        _strerror_s( outBuffer, ARRAYCOUNT(outBuffer), "Error executing compiler command" );
+        globalPlatform.Error( outBuffer );
+        globalPlatform.Error( "\n" );
+    }
+    else
+    {
+        while( fgets( outBuffer, ARRAYCOUNT(outBuffer), pipe ) )
+            globalPlatform.Print( outBuffer );
+
+        if( feof( pipe ) )
+            exitCode = _pclose( pipe );
+        else
+        {
+            globalPlatform.Error( "Failed reading compiler pipe to the end\n" );
+        }
+    }
+
+    return exitCode;
 }
 
 ASSERT_HANDLER(DefaultAssertHandler)
@@ -192,6 +222,7 @@ int main( int argCount, char const* args[] )
     globalPlatform.ReadEntireFile = Win32ReadEntireFile;
     globalPlatform.WriteEntireFile = Win32WriteEntireFile;
     globalPlatform.CurrentTimeMillis = Win32CurrentTimeMillis;
+    globalPlatform.ShellExecute = Win32ShellExecute;
     globalPlatform.Print = Win32Print;
     globalPlatform.Error = Win32Error;
     globalPlatform.PrintVA = Win32PrintVA;

@@ -172,9 +172,11 @@ void EmitExpr( Expr* expr )
             Out( Strf( "%lld", expr->literal.intValue ) );
             break;
         case Expr::Float:
+            // TODO Copy the actual token string instead
             Out( Strf( "%f", expr->literal.floatValue ) );
             break;
         case Expr::Str:
+            // TODO Proper escaping of escaped and non-printable stuff
             OUTSTR( "\"" );
             Out( expr->literal.strValue.data, Sz( expr->literal.strValue.length ) );
             OUTSTR( "\"" );

@@ -56,6 +56,7 @@ ________________________________________________________________________________
 
 - Modules/packages are the main way of organizing code. All .do files in the same directory are automatically part of the same module. Code can be freely moved from one big file to several separate smaller ones (or the other way around) _with no other action necessary_.
   Modules are imported all at once by specifying the name of the folder.
+  https://bitwise.handmade.network/episode/bitwise/bitwise020_1/#1728
 
 - Think about how we could make "signed"/"unsigned" not be part of the type system, and instead treat integers as in assembly, where only the relevant _operations_ are separate for signed or unsigned. This poses problems in principle as its difficult for a programmer to trace
   signedness for unknown values (i.e: a parameter passed to a function), so think how the language/compiler could help with this and make it "transparent".
@@ -73,6 +74,7 @@ ________________________________________________________________________________
 
 - Reflection must be very natural like in C#, not requiring knowledge of internal structures like in JAI. I must be able to query info about types by just writing type.attribute (i.e: int.size, userVar.type, etc.), and the compiler will translate to the
   relevant meta structures.
+  See how Ion does it at https://bitwise.handmade.network/episode/bitwise/bitwise019_1/#2274. Consider whether always having all type info is an actual problem (due to sheer size) and if it isn't make it even more integrated.
 
 - We do want a Context so that we don't have to drag commonly used stuff across a ton of functions. However we don't want something dynamic and implicit and "hidden" like in JAI, but something more functional-like, and completely explicit and statically checked,
   and which can be examined at any time in a debugger. I propose a very minimal set of fixed things in the default Context (like an allocator), plus a separate arguments section on every function, with a type and a name for each arg, but where the name is _both_ the name that
@@ -109,6 +111,12 @@ ________________________________________________________________________________
 - Captures and "hard" captures, not just for functions but for simple code blocks too (https://youtu.be/5Nc68IdNKdg?t=3128) (more like "restricted scope" in this sense)
   This is perfect for pure functions!
   Does this "imply" closures?
+
+- For interop with C, have two separate forms of #foreign directive: one for specifying functions and data types
+  (which can be incomplete for opaque structs etc.) that will be usable from the program, which must reference a
+  library by name/tag, and then a second form which describes those referenced names/tags, by listing the header
+  files to include together with actual library filenames for each of the supported platforms, or even C++ source files
+  to compile inline with the native code.
 ________________________________________________________________________________ 
 
 

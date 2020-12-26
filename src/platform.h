@@ -3,9 +3,9 @@ struct MemoryArena;
 template <typename T> struct Array;
 
 #define PLATFORM_ALLOC(name) void* name( sz sizeBytes, u32 flags )
-typedef PLATFORM_ALLOC(PlatformAlloc);
+typedef PLATFORM_ALLOC(PlatformAllocFunc);
 #define PLATFORM_FREE(name) void name( void* memoryBlock )
-typedef PLATFORM_FREE(PlatformFree);
+typedef PLATFORM_FREE(PlatformFreeFunc);
 
 #define PLATFORM_GET_ABSOLUTE_PATH(name) bool name( char const* filename, char* outBuffer, sz outBufferLen )
 typedef PLATFORM_GET_ABSOLUTE_PATH(PlatformGetAbsolutePathFunc);
@@ -15,7 +15,10 @@ typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 
 #define PLATFORM_CURRENT_TIME_MILLIS(name) f64 name()
-typedef PLATFORM_CURRENT_TIME_MILLIS(PlatformCurrentTimeMillis);
+typedef PLATFORM_CURRENT_TIME_MILLIS(PlatformCurrentTimeMillisFunc);
+
+#define PLATFORM_SHELL_EXECUTE(name) int name( char const* cmdLine )
+typedef PLATFORM_SHELL_EXECUTE(PlatformShellExecuteFunc);
 
 #define PLATFORM_PRINT(name) void name( const char *fmt, ... )
 typedef PLATFORM_PRINT(PlatformPrintFunc);
@@ -27,12 +30,13 @@ struct PlatformAPI
 {
     static const sz PointerSize;
 
-    PlatformAlloc* Alloc;
-    PlatformFree* Free;
+    PlatformAllocFunc* Alloc;
+    PlatformFreeFunc* Free;
     PlatformGetAbsolutePathFunc* GetAbsolutePath;
     PlatformReadEntireFileFunc* ReadEntireFile;
     PlatformWriteEntireFileFunc* WriteEntireFile;
-    PlatformCurrentTimeMillis* CurrentTimeMillis;
+    PlatformCurrentTimeMillisFunc* CurrentTimeMillis;
+    PlatformShellExecuteFunc* ShellExecute;
     PlatformPrintFunc* Print;
     PlatformPrintFunc* Error;
     PlatformPrintVAFunc* PrintVA;
