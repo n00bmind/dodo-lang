@@ -1054,9 +1054,33 @@ Symbol* GetSymbol( char const* name )
     return result;
 }
 
-void PushLocalSymbol( Symbol const& sym )
+// TODO Merge into CreateDeclSymbols?
+Symbol* PushSymbol( char const* name, bool isLocal, SourcePos const& pos )
 {
-    globalScopeStack.Push( sym );
+    Symbol* prevSymbol = GetSymbol( name );
+
+    Symbol* sym = nullptr;
+    if( prevSymbol == nullptr )
+    {
+        if( isLocal )
+            sym = globalScopeStack.PushEmpty();
+        else
+            sym = globalSymbols.PutEmpty( name );
+    }
+    else
+    {
+        if( prevSymbol->decl )
+        {
+            RSLV_ERROR( pos, "Symbol '%s' already declared", name );
+            RSLV_INFO( prevSymbol->decl->pos, "Symbol '%s' was declared here", name );
+        }
+        else
+            RSLV_ERROR( pos, "Name '%s' is reserved", name );
+
+        prevSymbol->state = Symbol::Tainted;
+    }
+
+    return sym;
 }
 
 BucketArray<Symbol>::Idx<false> EnterScope()
@@ -1170,17 +1194,6 @@ void ResolveSymbol( Symbol* sym )
         globalOrderedSymbols.Push( sym );
 }
 
-Symbol NewVarSymbol( char const* name, Type* type )
-{
-    Symbol result = {};
-    result.name = name;
-    result.type = type;
-    result.kind = Symbol::Var;
-    result.state = Symbol::Resolved;
-
-    return result;
-}
-
 ResolvedExpr ResolveConditionalExpr( Expr* expr )
 {
     ResolvedExpr cond = ResolveExpr( expr );
@@ -1258,15 +1271,39 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
         } break;
         case Stmt::For:
         {
-            // TODO 
             auto forScopeIdx = EnterScope();
 
-#if 0
-            //ResolveStmt( stmt->for_.init, returnType);
-            ResolveConditionalExpr( stmt->for_.cond );
-            ResolveStmtBlock( stmt->for_.block, returnType );
-            //ResolveStmt( stmt->for_.next, returnType );
-#endif
+            Expr* rangeExpr = stmt->for_.rangeExpr;
+            SourcePos const& pos = rangeExpr->pos;
+            ResolvedExpr lowerBound = ResolveExpr( rangeExpr->range.lowerBound );
+            if( lowerBound.type->kind == Type::Int )
+            {
+                // Need an upper bound for integer ranges
+                if( rangeExpr->range.upperBound )
+                {
+                    ResolvedExpr upperBound = ResolveExpr( rangeExpr->range.upperBound );
+                    if( upperBound.type->kind != Type::Int )
+                        RSLV_ERROR( pos, "Range expression must have integer type" );
+                }
+                else
+                    RSLV_ERROR( pos, "Integer range expression requires an upper bound" );
+            }
+            else
+            {
+                if( rangeExpr->range.upperBound )
+                    RSLV_ERROR( pos, "Range expression must have integer type" );
+
+                if( lowerBound.type->kind != Type::Array && lowerBound.type->kind != Type::String )
+                    RSLV_ERROR( pos, "Iterable expression must be an array or string" );
+
+                CompleteType( lowerBound.type, pos );
+            }
+
+            // Create a synthetic Decl
+            // TODO Support type specifiers? (make this more Decl-like)
+            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr );
+            CreateDeclSymbols( varDecl, true );
+
             LeaveScope( forScopeIdx );
         } break;
 
@@ -1301,7 +1338,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
         case Stmt::Break:
         case Stmt::Continue:
-        // Do nothing
+        // TODO Check there is an enclosing loop (or switch)
         break;
         case Stmt::Return:
         {
@@ -1369,8 +1406,10 @@ void ResolveFuncBody( Symbol* sym )
     {
         Type* argType = type->func.args[i];
         CompleteType( argType, a.pos );
-        // TODO Maybe we should be doing the same as for decl statements
-        PushLocalSymbol( NewVarSymbol( a.name, argType ) );
+
+        // Create a synthetic Decl
+        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr );
+        CreateDeclSymbols( varDecl, true );
     }
 
     if( type->func.returnType )
@@ -1435,34 +1474,23 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
     Array<Symbol*> result( &globalTmpArena, decl->names.count );
     for( char const* name : decl->names )
     {
-        Symbol* prevSymbol = GetSymbol( name );
-
-        Symbol* sym = nullptr;
-        if( isLocal )
-            sym = globalScopeStack.PushEmpty();
-        else
-            sym = globalSymbols.PutEmpty( name );
-
-        sym->decl = decl;
-        sym->name = name;
-        sym->kind = kind;
-        sym->isLocal = isLocal;
-        sym->state = Symbol::Unresolved;
-
-        if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
+        Symbol* sym = PushSymbol( name, isLocal, decl->pos );
+        if( sym )
         {
-            sym->state = Symbol::Resolved;
-            sym->type = NewIncompleteType( name, sym );
-        }
+            sym->decl = decl;
+            sym->name = name;
+            sym->kind = kind;
+            sym->isLocal = isLocal;
+            sym->state = Symbol::Unresolved;
 
-        if( prevSymbol != nullptr )
-        {
-            RSLV_ERROR( decl->pos, "Symbol '%s' already declared", name );
-            RSLV_INFO( prevSymbol->decl->pos, "Symbol '%s' was declared here", name );
-            sym->state = Symbol::Tainted;
-        }
+            if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
+            {
+                sym->state = Symbol::Resolved;
+                sym->type = NewIncompleteType( name, sym );
+            }
 
-        result.Push( sym );
+            result.Push( sym );
+        }
     }
 
     return result;

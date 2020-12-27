@@ -274,7 +274,7 @@ internal void NextTokenRaw( Lexer* lexer )
                 while( IsNumber( *c ) )
                     c++;
 
-                if( *c == '.' || *c == 'e' || *c == 'E' )
+                if( (*c == '.' && *(c+1) != '.') || *c == 'e' || *c == 'E' )
                     ScanFloat( lexer, &token );
                 else
                 {
@@ -407,6 +407,11 @@ internal void NextTokenRaw( Lexer* lexer )
             {
                 token.kind = TokenKind::Dot;
                 lexer->Advance();
+                if( stream[0] == '.' )
+                {
+                    token.kind = TokenKind::Range;
+                    lexer->Advance();
+                }
             }
         } break;
 

@@ -27,7 +27,7 @@ Vector0 :: struct
 fact_iter0 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -84,7 +84,7 @@ Vector1 :: struct
 fact_iter1 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -141,7 +141,7 @@ Vector2 :: struct
 fact_iter2 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -198,7 +198,7 @@ Vector3 :: struct
 fact_iter3 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -255,7 +255,7 @@ Vector4 :: struct
 fact_iter4 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -312,7 +312,7 @@ Vector5 :: struct
 fact_iter5 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -369,7 +369,7 @@ Vector6 :: struct
 fact_iter6 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -426,7 +426,7 @@ Vector7 :: struct
 fact_iter7 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -483,7 +483,7 @@ Vector8 :: struct
 fact_iter8 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -540,7 +540,7 @@ Vector9 :: struct
 fact_iter9 :: ( n: int ) -> int
 {
     r := 1;
-    for( i: 2..n )
+    for( i in 2..n )
     {
         r *= i;
     }
@@ -568,7 +568,7 @@ T9 :: struct
     a: [n9]int;
 }
 
-#foreign puts :: ( str: str ) -> int;
+#foreign puts :: ( s: str ) -> int;
 
 main :: ( argc: int, argv: **int ) -> int
 {

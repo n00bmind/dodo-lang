@@ -33,6 +33,20 @@ struct String
         return result;
     }
 
+    int FindLast( char c )
+    {
+        int result = -1;
+        for( int i = length - 1; i >= 0; --i )
+        {
+            if( data[i] == c )
+            {
+                result = i;
+                break;
+            }
+        }
+
+        return result;
+    }
     void Split( char separator, BucketArray<String>* result )
     {
         i32 nextLength = 0;

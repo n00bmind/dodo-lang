@@ -488,8 +488,16 @@ void EmitStmt( Stmt* stmt )
         case Stmt::For:
             OutIndent();
             OUTSTR( "for( " );
-            // TODO 
-            //EmitExpr( stmt->for_.cond );
+            // TODO Array & string iterables
+            Out( TypeToCdecl( stmt->for_.rangeExpr->range.lowerBound->resolvedType, stmt->for_.indexName ) );
+            OUTSTR( " = " );
+            EmitExpr( stmt->for_.rangeExpr->range.lowerBound );
+            OUTSTR( "; " );
+            Out( stmt->for_.indexName );
+            OUTSTR( " < " );
+            EmitExpr( stmt->for_.rangeExpr->range.upperBound );
+            OUTSTR( "; ++" );
+            Out( stmt->for_.indexName );
             OUTSTR( " )" );
             OutNL();
             EmitStmtBlock( stmt->for_.block );

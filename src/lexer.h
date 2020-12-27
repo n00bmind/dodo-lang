@@ -71,6 +71,7 @@ enum TokenFlags : u32
     x(XorAssign,        "^=",           ( "^= ", AssignOp )) \
     x(LShiftAssign,     "<<=",          ( "<<=", AssignOp )) \
     x(RShiftAssign,     ">>=",          ( ">>=", AssignOp )) \
+    x(Range,            "..",           ( ".. ", 0 )) \
     \
     x(Name,             "identifier",   ( "IDN", 0 )) \
     x(Keyword,          "keyword",      ( "KWD", 0 )) \
@@ -104,6 +105,7 @@ STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( Continue,"continue" ) \
     x( Return,  "return" ) \
     x( As,      "as" ) \
+    x( In,      "in" ) \
 
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS

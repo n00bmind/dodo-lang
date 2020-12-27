@@ -282,6 +282,15 @@ Expr* NewCommaExpr( SourcePos const& pos, BucketArray<Expr*> const& exprList )
     return result;
 }
 
+Expr* NewRangeExpr( SourcePos const& pos, Expr* lowerBound, Expr* upperBound )
+{
+    Expr* result = NewExpr( pos, Expr::Range );
+    result->range.lowerBound = lowerBound;
+    result->range.upperBound = upperBound;
+
+    return result;
+}
+
 CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 {
     SourcePos pos = lexer->token.pos;
@@ -804,6 +813,15 @@ Decl* NewVarDecl( SourcePos const& pos, BucketArray<char const*> const& names, T
     return result;
 }
 
+// For synthetic Decls
+Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr )
+{
+    BucketArray<char const*> names( &globalTmpArena, 1, Temporary() );
+    names.Push( name );
+
+    return NewVarDecl( pos, names, type, initExpr, false );
+}
+
 Stmt* ParseStmt( Lexer* lexer );
 
 StmtList NewStmtList( SourcePos const& pos, Stmt* stmt )
@@ -1182,10 +1200,11 @@ Stmt* NewWhileStmt( SourcePos const& pos, Expr* cond, StmtList const& block, boo
     return result;
 }
 
-Stmt* NewForStmt( SourcePos const& pos, Expr* cond, StmtList const& block )
+Stmt* NewForStmt( SourcePos const& pos, char const* indexName, Expr* rangeExpr, StmtList const& block )
 {
     Stmt* result = NewStmt( pos, Stmt::For );
-    result->for_.cond = cond;
+    result->for_.indexName = indexName;
+    result->for_.rangeExpr = rangeExpr;
     result->for_.block = block;
 
     return result;
@@ -1282,22 +1301,39 @@ Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer )
     return nullptr;
 }
 
+Expr* ParseRangeExpr( SourcePos const& pos, Lexer* lexer )
+{
+    Expr* result = nullptr;
+
+    Expr* lowerBound = ParseAddExpr( lexer );
+    Expr* upperBound = nullptr;
+    if( MatchToken( TokenKind::Range, lexer->token ) )
+    {
+        NextToken( lexer );
+        upperBound = ParseAddExpr( lexer );
+    }
+
+    if( lexer->IsValid() )
+        result = NewRangeExpr( pos, lowerBound, upperBound );
+    return result;
+}
+
 Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer )
 {
     RequireKeywordAndAdvance( Keyword::For, lexer );
     RequireTokenAndAdvance( TokenKind::OpenParen, lexer );
 
-    // TODO 
-    Expr* cond = nullptr;
-    while( !MatchToken( TokenKind::CloseParen, lexer->token ) )
-        NextToken( lexer );
+    RequireToken( TokenKind::Name, lexer );
+    char const* indexName = lexer->token.ident;
+    NextToken( lexer );
+    RequireKeywordAndAdvance( Keyword::In, lexer );
+    Expr* rangeExpr = ParseRangeExpr( lexer->token.pos, lexer );
 
     RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
-
     StmtList block = ParseStmtOrStmtBlock( lexer );
 
     if( lexer->IsValid() )
-        return NewForStmt( pos, cond, block );
+        return NewForStmt( pos, indexName, rangeExpr, block );
 
     return nullptr;
 }
@@ -1625,7 +1661,6 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             DebugPrintSExpr( expr->ternary.elseExpr, outBuf, maxLen );
             APPEND( ")" );
         } break;
-
         case Expr::Comma:
         {
             APPEND( "(" );
@@ -1642,6 +1677,17 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
         {
             APPEND( "(sizeof " );
             DebugPrintSExpr( expr->sizeofExpr, outBuf, maxLen );
+            APPEND( ")" );
+        } break;
+        case Expr::Range:
+        {
+            APPEND( "(" );
+            DebugPrintSExpr( expr->range.lowerBound, outBuf, maxLen );
+            if( expr->range.upperBound )
+            {
+                APPEND( " .. " );
+                DebugPrintSExpr( expr->range.upperBound, outBuf, maxLen );
+            }
             APPEND( ")" );
         } break;
     }
@@ -1722,8 +1768,8 @@ void DebugPrintSExpr( Stmt* stmt, char*& outBuf, sz& maxLen, int& indent )
         } break;
         case Stmt::For:
         {
-            APPEND( "(for " );
-            DebugPrintSExpr( stmt->for_.cond, outBuf, maxLen );
+            APPEND( "(for %s in", stmt->for_.indexName );
+            DebugPrintSExpr( stmt->for_.rangeExpr, outBuf, maxLen );
             APPEND( "\n" );
             DebugPrintStmtList( stmt->for_.block, outBuf, maxLen, indent );
             INDENT APPEND( ")" );

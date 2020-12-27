@@ -139,7 +139,7 @@ void RunTests()
         {
             char buf[256] = {};
 
-            lexer = Lexer( String( t.expr ), "" );
+            lexer = Lexer( String( t.expr ), "<tests>" );
             expr = ParseExpr( &lexer );
 
             char* outBuf = buf;
@@ -182,7 +182,7 @@ complex_func :: ()
     else
         MoarStuff();
 
-    for( i :: 0..array.count; i *= 2; j :: i*4 )
+    for( i in 0..array.count ) //; i *= 2; j :: i*4 )
     {
         lotsa;
         stmts;
@@ -220,7 +220,7 @@ complex_func :: ()
         {
             char buf[16768] = {};
 
-            lexer = Lexer( String( t.expr ), "" );
+            lexer = Lexer( String( t.expr ), "<tests>" );
             decl = ParseDecl( &lexer );
 
             char* outBuf = buf;
@@ -265,7 +265,7 @@ complex_func :: ()
         "bin := 1000 / (2 + 3 * 5) << 10;",
         "aptr: *int = -s[3] as *int;",
         "f :: () { i += 1; }",
-        "h :: (x: int) -> int { if(x) { return -x; } else { return 1; } }",
+        "h :: (hx: int) -> int { if(hx) { return -hx; } else { return 1; } }",
     };
 
     {
@@ -274,7 +274,7 @@ complex_func :: ()
         Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
-            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
             Decl* decl = ParseDecl( &lexer );
             globalDecls.Push( decl );
         }
@@ -332,7 +332,7 @@ complex_func :: ()
         Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
-            Lexer lexer = Lexer( String( testDeclStrings[i] ), "" );
+            Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
             Decl* decl = ParseDecl( &lexer );
             globalDecls.Push( decl );
         }
@@ -376,7 +376,8 @@ f64 ElapsedTimeMillis()
 char globalCompilerCmdLine[2048] = {};
 
 char const* BuildCmdLine( char const* compilerName, char const* filename, Array<char const*> const& commonFlags,
-                          Array<char const*> const& configFlags, Array<char const*> const& linkerFlags )
+                          Array<char const*> const& configFlags, Array<char const*> const& linkerFlags,
+                          char const* outputPath )
 {
     char* out = globalCompilerCmdLine;
 
@@ -401,6 +402,14 @@ char const* BuildCmdLine( char const* compilerName, char const* filename, Array<
         STROUT( f );
     }
 
+    char const* objFlag = " -Fo";
+    STROUT( objFlag );
+    STROUT( outputPath );
+    char const* exeFlag = " -Fe";
+    STROUT( exeFlag );
+    char const* outputPath2 = outputPath;
+    STROUT( outputPath2 );
+
     for( char const* f : linkerFlags )
     {
         *out++ = ' ';
@@ -420,6 +429,11 @@ bool Run( int argCount, char const* args[] )
 
 #if !CONFIG_RELEASE
     RunTests();
+    if( globalErrorCount )
+    {
+        globalPlatform.Error( "Tests found %d errors.", globalErrorCount );
+        return false;
+    }
 #endif
 
     f64 startTime = globalPlatform.CurrentTimeMillis();
@@ -498,14 +512,18 @@ bool Run( int argCount, char const* args[] )
 
         // Write intermediate C file
         // TODO Cmdline switch for output dir
-        char outPath[256] = {};
-        inputFilename.CopyTo( outPath );
+        char cppFilePath[256] = {};
+        inputFilename.CopyTo( cppFilePath );
 
-        sz available = ARRAYCOUNT(outPath) - inputFilename.length;
+        int extIndex = inputFilename.FindLast( '.' );
+        if( extIndex == -1 )
+            extIndex = inputFilename.length;
+
+        sz available = ARRAYCOUNT(cppFilePath) - extIndex;
         ASSERT( available >= sizeof(".cpp") );
-        StringCopy( ".cpp", outPath + inputFilename.length, available );
+        StringCopy( ".cpp", cppFilePath + extIndex, available );
 
-        if( !globalPlatform.WriteEntireFile( outPath, pages ) )
+        if( !globalPlatform.WriteEntireFile( cppFilePath, pages ) )
             return false;
 
         // Execute C compiler
@@ -522,12 +540,16 @@ bool Run( int argCount, char const* args[] )
         {
             "-nologo", "-FC", "-Wall", "-WX", "-Oi", "-GR-", "-EHa-",
             "-D_HAS_EXCEPTIONS=0", "-D_CRT_SECURE_NO_WARNINGS",
+            "-wd4100",          // Unreferenced parameter
+            "-wd4189",          // Initialized but unreferenced local variable
+            "-wd4514",          // Unreferenced inline function removed
             "-wd4668",          // Undefined preprocessor macro
+            "-wd4710",          // Function not inlined
             "-wd4820",          // Padding added
         };
         char const* commonLinkerFlags[] =
         {
-            "/linker", "/opt:ref", "/incremental:no", "/debug:full",
+            "/link", "/opt:ref", "/incremental:no", "/debug:full",
         };
 
         char const* debugFlags[] =
@@ -544,11 +566,22 @@ bool Run( int argCount, char const* args[] )
             ? Array<char const*>( debugFlags, ARRAYCOUNT(debugFlags) )
             : Array<char const*>( releaseFlags, ARRAYCOUNT(releaseFlags) );
 
+        // Output directory
+        char outPath[256] = {};
+        inputFilename.CopyTo( outPath );
+        int sepIndex = inputFilename.FindLast( '\\' );
+        if( sepIndex == -1 )
+            sepIndex = inputFilename.FindLast( '/' );
+
+        sepIndex++;
+        outPath[sepIndex] = '\0';
+
         char const* cmdLine = BuildCmdLine( compilerName,
-                                            outPath,
+                                            cppFilePath,
                                             Array<char const*>( commonFlags, ARRAYCOUNT(commonFlags) ),
                                             configFlags,
-                                            Array<char const*>( commonLinkerFlags, ARRAYCOUNT(commonLinkerFlags) ) );
+                                            Array<char const*>( commonLinkerFlags, ARRAYCOUNT(commonLinkerFlags) ),
+                                            outPath );
         
         // TODO Console colors
         globalPlatform.Print( cmdLine );

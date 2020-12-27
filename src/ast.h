@@ -78,7 +78,7 @@ struct Expr
         Binary,
         Ternary,
         Comma,
-        Range,      // TODO (a..z) (include-exclude?)
+        Range,
         Sizeof,
         //Typeof,
         //OffsetOf,
@@ -146,6 +146,11 @@ struct Expr
 
         Expr* parenExpr;
         Expr* sizeofExpr;
+        struct
+        {
+            Expr* lowerBound;     // Inclusive
+            Expr* upperBound;     // Exclusive, null when iterating over an iterable
+        } range;
     };
 };
 
@@ -206,8 +211,9 @@ struct Decl
         {
             // TODO Lambdas?
             // TODO Varargs
-            // TODO Multiple return types
+            // TODO Default values (this probably should just be a list of decls!)
             Array<FuncArg> args;
+            // TODO Multiple return types
             TypeSpec* returnType;
             StmtList body;
         } func;
@@ -224,6 +230,7 @@ struct Decl
 
         struct
         {
+            // NOTE Synthetic variables may not have a type spec
             TypeSpec* type;
             Expr* initExpr;
             bool isConst;
@@ -285,8 +292,8 @@ struct Stmt
         struct
         {
             StmtList block;
-            // TODO 
-            ::Expr* cond;
+            char const* indexName;
+            ::Expr* rangeExpr;
         } for_;
         struct
         {
