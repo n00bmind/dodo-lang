@@ -271,7 +271,7 @@ complex_func :: ()
     {
         InitTestMemory();
 
-        Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
+        Array<Decl*> globalDecls( &globalArena, I32( ARRAYCOUNT(testDeclStrings) ) );
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
@@ -329,7 +329,7 @@ complex_func :: ()
     {
         InitTestMemory();
 
-        Array<Decl*> globalDecls( &globalArena, ARRAYCOUNT(testDeclStrings) );
+        Array<Decl*> globalDecls( &globalArena, I32( ARRAYCOUNT(testDeclStrings) ) );
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
@@ -342,14 +342,14 @@ complex_func :: ()
 
         char* cdecl1 = TypeToCdecl( intType, "x" );
         char* cdecl2 = TypeToCdecl( NewPtrType( intType ), "x" );
-        char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10 ), "x" );
+        char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10, false ), "x" );
         Array<Type*> args( &globalTmpArena, 2 );
         args.Push( NewPtrType( intType ) );
         args.Push( intType );
         char* cdecl4 = TypeToCdecl( NewFuncType( args, intType ), "x" );
-        char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10 ), "x" );
+        char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10, false ), "x" );
         Array<Type*> emptyArgs( &globalTmpArena, 0 );
-        char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
+        char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10, false ) ), "x" );
 
         ResolveAll( globalDecls );
         GenerateAll();
@@ -563,8 +563,8 @@ bool Run( int argCount, char const* args[] )
 
         bool debug = true;
         Array<char const*> configFlags = debug
-            ? Array<char const*>( debugFlags, ARRAYCOUNT(debugFlags) )
-            : Array<char const*>( releaseFlags, ARRAYCOUNT(releaseFlags) );
+            ? Array<char const*>( debugFlags, I32( ARRAYCOUNT(debugFlags) ) )
+            : Array<char const*>( releaseFlags, I32( ARRAYCOUNT(releaseFlags) ) );
 
         // Output directory
         char outPath[256] = {};
@@ -578,9 +578,9 @@ bool Run( int argCount, char const* args[] )
 
         char const* cmdLine = BuildCmdLine( compilerName,
                                             cppFilePath,
-                                            Array<char const*>( commonFlags, ARRAYCOUNT(commonFlags) ),
+                                            Array<char const*>( commonFlags, I32( ARRAYCOUNT(commonFlags) ) ),
                                             configFlags,
-                                            Array<char const*>( commonLinkerFlags, ARRAYCOUNT(commonLinkerFlags) ),
+                                            Array<char const*>( commonLinkerFlags, I32( ARRAYCOUNT(commonLinkerFlags) ) ),
                                             outPath );
         
         // TODO Console colors

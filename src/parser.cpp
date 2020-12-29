@@ -1486,14 +1486,14 @@ Array<Decl*> Parse( String const& program, char const* filename )
 
 #define INDENT \
 { \
-    len = snprintf( outBuf, maxLen, "%*s", indent * 4, "" ); \
+    len = snprintf( outBuf, Size( maxLen ), "%*s", indent * 4, "" ); \
     outBuf += len; \
     maxLen -= len; \
 } 
 
 #define APPEND(fmt, ...) \
 { \
-    len = snprintf( outBuf, maxLen, fmt, ##__VA_ARGS__ ); \
+    len = snprintf( outBuf, Size( maxLen ), fmt, ##__VA_ARGS__ ); \
     outBuf += len; \
     maxLen -= len; \
 } 

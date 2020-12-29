@@ -28,7 +28,7 @@ struct String
     const char* CString( MemoryArena* arena, MemoryParams params = DefaultMemoryParams() ) const
     {
         char* result = PUSH_ARRAY( arena, char, length + 1, params );
-        PCOPY( data, result, length * sizeof(char) );
+        PCOPY( data, result, length * SIZEOF(char) );
 
         return result;
     }
@@ -77,7 +77,7 @@ struct String
 
     void CopyTo( char* dst ) const
     {
-        strncpy( dst, data, Sz( length ) );
+        strncpy( dst, data, Size( length ) );
     }
 
     void CopyToNullTerminated( char* dst ) const
@@ -137,13 +137,13 @@ INLINE bool IsNumber( char c )
 
 INLINE bool StringsEqual( String const& a, String const& b )
 {
-    return a.length == b.length && strncmp( a.data, b.data, Sz( a.length ) ) == 0;
+    return a.length == b.length && strncmp( a.data, b.data, Size( a.length ) ) == 0;
 }
 
 // NOTE Unsafe!
 INLINE bool StringsEqual( String const& a, char const* b )
 {
-    return b[ a.length ] == 0 && strncmp( a.data, b, Sz( a.length ) ) == 0;
+    return b[ a.length ] == 0 && strncmp( a.data, b, Size( a.length ) ) == 0;
 }
 
 INLINE bool StringsEqual( char const* a, char const* b )
@@ -153,12 +153,12 @@ INLINE bool StringsEqual( char const* a, char const* b )
 
 INLINE sz StringLength( char const* s )
 {
-    return strlen( s );
+    return Sz( strlen( s ) );
 }
 
 INLINE void StringCopy( char const* src, char* dst, sz dstSize )
 {
-    strncpy( dst, src, dstSize );
+    strncpy( dst, src, Size( dstSize ) );
 }
 
 INLINE u64 StringHash( String const& str )

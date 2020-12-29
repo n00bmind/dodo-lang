@@ -12,7 +12,7 @@ internal f64 globalPerfCounterFrequency;
 
 PLATFORM_ALLOC(Win32Alloc)
 {
-    void* result = VirtualAlloc( 0, sizeBytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
+    void* result = VirtualAlloc( 0, Size( sizeBytes ), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
     return result;
 }
 
@@ -56,7 +56,7 @@ PLATFORM_GET_ABSOLUTE_PATH(Win32GetAbsolutePath)
     bool result = true;
     char path[MAX_PATH] = {};
 
-    DWORD ret = GetFullPathName( filename, ARRAYCOUNT(path), path, nullptr );
+    DWORD ret = GetFullPathName( filename, U32( ARRAYCOUNT(path) ), path, nullptr );
     if( ret && ret < outBufferLen - 1 )
     {
         // Escape backslashes
@@ -177,13 +177,13 @@ PLATFORM_SHELL_EXECUTE(Win32ShellExecute)
     FILE* pipe = _popen( cmdLine, "rt" );
     if( pipe == NULL )
     {
-        _strerror_s( outBuffer, ARRAYCOUNT(outBuffer), "Error executing compiler command" );
+        _strerror_s( outBuffer, Size( ARRAYCOUNT(outBuffer) ), "Error executing compiler command" );
         globalPlatform.Error( outBuffer );
         globalPlatform.Error( "\n" );
     }
     else
     {
-        while( fgets( outBuffer, ARRAYCOUNT(outBuffer), pipe ) )
+        while( fgets( outBuffer, I32( ARRAYCOUNT(outBuffer) ), pipe ) )
             globalPlatform.Print( outBuffer );
 
         if( feof( pipe ) )
@@ -205,7 +205,7 @@ ASSERT_HANDLER(DefaultAssertHandler)
 
     va_list args;
     va_start( args, msg );
-    vsnprintf( buffer, ARRAYCOUNT(buffer), msg, args );
+    vsnprintf( buffer, Size( ARRAYCOUNT(buffer) ), msg, args );
     va_end( args );
 
     fprintf( stderr, "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );

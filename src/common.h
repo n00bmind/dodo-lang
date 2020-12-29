@@ -40,9 +40,9 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 #define INVALID_DEFAULT_CASE default: { INVALID_CODE_PATH; } break;
 
 
-#define SIZE(s) I64( sizeof(s) )
-#define ARRAYCOUNT(array) (sizeof(array) / sizeof((array)[0]))
-#define OFFSETOF(type, member) ((sz)&(((type *)0)->member))
+#define SIZEOF(s) Sz( sizeof(s) )
+#define ARRAYCOUNT(array) Sz( sizeof(array) / sizeof((array)[0]) )
+#define OFFSETOF(type, member) Sz( &(((type *)0)->member) )
 #define STR(s) _STR(s)
 #define _STR(s) #s
 
@@ -54,10 +54,10 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 #define SET(dest, value) memset( &dest, value, sizeof(dest) )
 #define ZERO(dest) memset( &dest, 0, sizeof(dest) )
 #define EQUAL(source, dest) (memcmp( &source, &dest, sizeof(source) ) == 0)
-#define PCOPY(source, dest, size) memcpy( dest, source, size )
-#define PSET(dest, value, size) memset( dest, value, size )
-#define PZERO(dest, size) memset( dest, 0, size )
-#define PEQUAL(source, dest, size) (memcmp( source, dest, size ) == 0)
+#define PCOPY(source, dest, size) memcpy( dest, source, Size( size ) )
+#define PSET(dest, value, size) memset( dest, value, Size( size ) )
+#define PZERO(dest, size) memset( dest, 0, Size( size ) )
+#define PEQUAL(source, dest, size) (memcmp( source, dest, Size( size ) ) == 0)
 
 
 #if _MSC_VER
@@ -80,7 +80,7 @@ typedef unsigned long long u64;
 typedef float f32;
 typedef double f64;
 
-typedef size_t sz;
+typedef int64_t sz;
 
 #define I8MIN INT8_MIN
 #define I8MAX INT8_MAX
@@ -102,124 +102,129 @@ typedef size_t sz;
 #define F64MIN DBL_MIN
 #define F64INF (f64)INFINITY
 
+// FIXME Update preamble!
+// FIXME Update preamble!
+// FIXME Update preamble!
+// FIXME Update preamble!
+// FIXME Update preamble!
 
-INLINE i8
+INLINE constexpr i8
 I8( i32 value )
 {
     ASSERT( I8MIN <= value && value <= I8MAX );
     return (i8)value;
 }
 
-INLINE i16
-I16( i32 value )
-{
-    ASSERT( I16MIN <= value && value <= I16MAX );
-    return (i16)value;
-}
-
-INLINE i32
-I32( sz value )
-{
-    ASSERT( value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( ptrdiff_t value )
-{
-    ASSERT( I32MIN <= value && value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( f32 value )
-{
-    ASSERT( (f32)I32MIN <= value && value <= (f32)I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( f64 value )
-{
-    ASSERT( I32MIN <= value && value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( u32 value )
-{
-    ASSERT( value <= (u32)I32MAX );
-    return (i32)value;
-}
-
-INLINE i64
-I64( sz value )
-{
-    ASSERT( value <= (sz)I64MAX );
-    return (i64)value;
-}
-
-INLINE u32
-U32( i32 value )
-{
-    ASSERT( value >= 0 );
-    return (u32)value;
-}
-
-INLINE u32
-U32( u64 value )
-{
-    ASSERT( value <= U32MAX );
-    return (u32)value;
-}
-
-INLINE u32
-U32( f64 value )
-{
-    ASSERT( 0 <= value && value <= U32MAX );
-    return (u32)value;
-}
-
-INLINE u16
-U16( i64 value )
-{
-    ASSERT( 0 <= value && value <= U16MAX );
-    return (u16)value;
-}
-
-INLINE u16
-U16( f64 value )
-{
-    ASSERT( 0 <= value && value <= U16MAX );
-    return (u16)value;
-}
-
-INLINE u8
+INLINE constexpr u8
 U8( u32 value )
 {
     ASSERT( value <= U8MAX );
     return (u8)value;
 }
 
-INLINE u8
+INLINE constexpr u8
 U8( i32 value )
 {
     ASSERT( value >= 0 && value <= U8MAX );
     return (u8)value;
 }
 
-INLINE sz
-Sz( i32 value )
+INLINE constexpr i16
+I16( i32 value )
+{
+    ASSERT( I16MIN <= value && value <= I16MAX );
+    return (i16)value;
+}
+
+INLINE constexpr u16
+U16( i64 value )
+{
+    ASSERT( 0 <= value && value <= U16MAX );
+    return (u16)value;
+}
+
+INLINE constexpr u16
+U16( f64 value )
+{
+    ASSERT( 0 <= value && value <= U16MAX );
+    return (u16)value;
+}
+
+INLINE constexpr i32
+I32( sz value )
+{
+    ASSERT( I32MIN <= value && value <= I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( f32 value )
+{
+    ASSERT( (f32)I32MIN <= value && value <= (f32)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( f64 value )
+{
+    ASSERT( I32MIN <= value && value <= I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( u64 value )
+{
+    ASSERT( value <= (u64)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( u32 value )
+{
+    ASSERT( value <= (u32)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr u32
+U32( i32 value )
 {
     ASSERT( value >= 0 );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( u64 value )
+{
+    ASSERT( value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( i64 value )
+{
+    ASSERT( 0 <= value && value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( f64 value )
+{
+    ASSERT( 0 <= value && value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr sz
+Sz( size_t value )
+{
+    ASSERT( value <= (size_t)I64MAX );
     return (sz)value;
 }
 
-INLINE sz
-Sz( i64 value )
+INLINE constexpr size_t
+Size( sz value )
 {
     ASSERT( value >= 0 );
-    return (sz)value;
+    return (size_t)value;
 }
 
 
@@ -318,7 +323,7 @@ struct enumName::Values                                                    \
     {                                                                      \
         xValueList(_ENUM_NAME)                                             \
     };                                                                     \
-    static constexpr int count = ARRAYCOUNT(items);                        \
+    static constexpr sz count = ARRAYCOUNT(items);                         \
                                                                            \
     xValueList(_ENUM_REF)                                                  \
 };                                                                         \

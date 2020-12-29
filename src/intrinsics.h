@@ -180,6 +180,12 @@ Max( u32 a, u32 b )
     return a > b ? a : b;
 }
 
+INLINE i64
+Max( i64 a, i64 b )
+{
+    return a > b ? a : b;
+}
+
 INLINE u64
 Max( u64 a, u64 b )
 {

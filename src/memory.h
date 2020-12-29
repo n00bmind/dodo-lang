@@ -90,9 +90,9 @@ Temporary()
 #define ALLOC_FUNC(type) void* Alloc( type* alloc, sz sizeBytes, MemoryParams params = DefaultMemoryParams() )
 #define FREE_FUNC(type)  void Free( type* alloc, void* memoryBlock )
 
-#define ALLOC_STRUCT(alloc, type, ...)          (type *)Alloc( alloc, sizeof(type), ## __VA_ARGS__ )
-#define ALLOC_ARRAY(alloc, type, count, ...)    (type *)Alloc( alloc, (count)*sizeof(type), ## __VA_ARGS__ )
-#define ALLOC_STRING(alloc, count, ...)         (char *)Alloc( alloc, (count)*sizeof(char), ## __VA_ARGS__ )
+#define ALLOC_STRUCT(alloc, type, ...)          (type *)Alloc( alloc, SIZEOF(type), ## __VA_ARGS__ )
+#define ALLOC_ARRAY(alloc, type, count, ...)    (type *)Alloc( alloc, (count)*SIZEOF(type), ## __VA_ARGS__ )
+#define ALLOC_STRING(alloc, count, ...)         (char *)Alloc( alloc, (count)*SIZEOF(char), ## __VA_ARGS__ )
 #define ALLOC_SIZE(alloc, size, ...)            Alloc( alloc, size, ## __VA_ARGS__ )
 #define FREE(alloc, mem)                        Free( alloc, mem )
 
@@ -105,7 +105,7 @@ ALLOC_FUNC( LazyAllocator )
     ASSERT( !params.alignment );
     ASSERT( !params.Flag( MemoryParams::Temporary ) );
     
-    void* result = malloc( sizeBytes );
+    void* result = malloc( Size( sizeBytes ) );
 
     if( params.Flag( MemoryParams::ClearToZero ) )
         PZERO( result, sizeBytes );
@@ -122,9 +122,9 @@ FREE_FUNC( LazyAllocator )
 // Linear memory arena that can grow in pages of a certain size
 // Can be partitioned into sub arenas and supports "temporary blocks" (which can be nested, similar to a stack allocator)
 
-#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, sizeof(type), alignof(type), ## __VA_ARGS__ )
-#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*sizeof(type), alignof(type), ## __VA_ARGS__ )
-#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*sizeof(char), alignof(char), ## __VA_ARGS__ )
+#define PUSH_STRUCT(arena, type, ...) (type *)_PushSize( arena, SIZEOF(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_ARRAY(arena, type, count, ...) (type *)_PushSize( arena, (count)*SIZEOF(type), alignof(type), ## __VA_ARGS__ )
+#define PUSH_STRING(arena, count, ...) (char *)_PushSize( arena, (count)*SIZEOF(char), alignof(char), ## __VA_ARGS__ )
 #define PUSH_SIZE(arena, size, ...) _PushSize( arena, size, DefaultMemoryAlignment, ## __VA_ARGS__ )
 
 static const sz DefaultArenaPageSize = MEGABYTES( 1 );
@@ -234,7 +234,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
     if( align )
     {
         result = Align( block, align );
-        waste = Sz( (u8*)result - (u8*)block );
+        waste = (u8*)result - (u8*)block;
     }
 
     sz alignedSize = size + waste;
@@ -243,17 +243,17 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
         ASSERT( arena->pageSize, "Static arena overflow (size %llu)", arena->size );
 
         // NOTE We require headers to not change the cache alignment of a page
-        ASSERT( sizeof(MemoryArenaHeader) == 64 );
+        ASSERT( SIZEOF(MemoryArenaHeader) == 64 );
         // Save current page info in next page's header
         MemoryArenaHeader headerInfo = {};
         headerInfo.base = arena->base;
         headerInfo.size = arena->size;
         headerInfo.used = arena->used;
 
-        ASSERT( arena->pageSize > sizeof(MemoryArenaHeader) );
-        sz pageSize = Max( size + sizeof(MemoryArenaHeader), arena->pageSize );
-        arena->base = (u8*)globalPlatform.Alloc( pageSize, 0 ) + sizeof(MemoryArenaHeader);
-        arena->size = pageSize - sizeof(MemoryArenaHeader);
+        ASSERT( arena->pageSize > SIZEOF(MemoryArenaHeader) );
+        sz pageSize = Max( size + SIZEOF(MemoryArenaHeader), arena->pageSize );
+        arena->base = (u8*)globalPlatform.Alloc( pageSize, 0 ) + SIZEOF(MemoryArenaHeader);
+        arena->size = pageSize - SIZEOF(MemoryArenaHeader);
         arena->used = 0;
         ++arena->pageCount;
 
@@ -391,10 +391,10 @@ InsertBlock( MemoryBlock* prev, sz size, void* memory )
 {
     // TODO 'size' includes the MemoryBlock struct itself for now
     // Are we sure we wanna do this??
-    ASSERT( size > sizeof(MemoryBlock) );
+    ASSERT( size > SIZEOF(MemoryBlock) );
     MemoryBlock* block = (MemoryBlock*)memory;
     // TODO Are we sure this shouldn't be the other way around??
-    block->size = size - sizeof(MemoryBlock);
+    block->size = size - SIZEOF(MemoryBlock);
     block->flags = MemoryBlockFlags::None;
     block->prev = prev;
     block->next = prev->next;
@@ -455,13 +455,13 @@ MergeIfPossible( MemoryBlock* first, MemoryBlock* second, MemoryBlock* sentinel 
         !(second->flags & MemoryBlockFlags::Used) )
     {
         // This check only needed so we can support discontiguous memory pools if needed
-        u8* expectedOffset = (u8*)first + sizeof(MemoryBlock) + first->size;
+        u8* expectedOffset = (u8*)first + SIZEOF(MemoryBlock) + first->size;
         if( (u8*)second == expectedOffset )
         {
             second->next->prev = second->prev;
             second->prev->next = second->next;
 
-            first->size += sizeof(MemoryBlock) + second->size;
+            first->size += SIZEOF(MemoryBlock) + second->size;
 
             result = true;
         }

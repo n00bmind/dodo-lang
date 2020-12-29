@@ -41,7 +41,7 @@ struct Array
 
     bool operator ==( Array<T> const& other ) const
     {
-        return count == other.count && PEQUAL( data, other.data, count * sizeof(T) );
+        return count == other.count && PEQUAL( data, other.data, count * SIZEOF(T) );
     }
 
 
@@ -115,7 +115,7 @@ struct Array
     Array<T> Copy( MemoryArena* arena ) const
     {
         Array<T> result( arena, count );
-        PCOPY( data, result.data, count * sizeof(T) );
+        PCOPY( data, result.data, count * SIZEOF(T) );
         result.count = count;
         return result;
     }
@@ -123,20 +123,20 @@ struct Array
     void CopyTo( Array<T>* out ) const
     {
         ASSERT( out->capacity >= count );
-        PCOPY( data, out->data, count * sizeof(T) );
+        PCOPY( data, out->data, count * SIZEOF(T) );
         out->count = count;
     }
 
     void CopyTo( T* buffer ) const
     {
-        PCOPY( data, buffer, count * sizeof(T) );
+        PCOPY( data, buffer, count * SIZEOF(T) );
     }
 
     void CopyFrom( const T* buffer, int count_ )
     {
         ASSERT( count_ > 0 );
         count = count_;
-        PCOPY( buffer, data, count * sizeof(T) );
+        PCOPY( buffer, data, count * SIZEOF(T) );
     }
 
     bool Contains( const T& item ) const
@@ -435,7 +435,7 @@ struct BucketArray
         const Bucket* bucket = &first;
         while( bucket )
         {
-            PCOPY( bucket->data, buffer, bucket->count * sizeof(T) );
+            PCOPY( bucket->data, buffer, bucket->count * SIZEOF(T) );
             buffer += bucket->count;
             bucket = bucket->next;
         }
@@ -450,7 +450,7 @@ struct BucketArray
         const Bucket* bucket = &first;
         while( bucket )
         {
-            PCOPY( bucket->data, buffer, bucket->count * sizeof(T) );
+            PCOPY( bucket->data, buffer, bucket->count * SIZEOF(T) );
             buffer += bucket->count;
             bucket = bucket->next;
         }
@@ -611,7 +611,7 @@ would be through pass-through methods in that structure, which I guess is fine a
 template <typename K>
 u64 DefaultHashFunc( K const& key )
 {
-    return Hash64( &key, sizeof(K) );
+    return Hash64( &key, I32( SIZEOF(K) ) );
 }
 template <typename K>
 bool DefaultEqFunc( K const& a, K const& b )
@@ -847,9 +847,9 @@ private:
 
         count = 0;
         capacity = newCapacity;
-        void* newMemory = ALLOC_SIZE( allocator, capacity * (sizeof(K) + sizeof(V)), NoClear() );
+        void* newMemory = ALLOC_SIZE( allocator, capacity * (SIZEOF(K) + SIZEOF(V)), NoClear() );
         keys   = (K*)newMemory;
-        values = (V*)((u8*)newMemory + capacity * sizeof(K));
+        values = (V*)((u8*)newMemory + capacity * SIZEOF(K));
 
         for( int i = 0; i < capacity; ++i )
             INIT( keys[i] ) K();

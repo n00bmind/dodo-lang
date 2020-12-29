@@ -105,7 +105,8 @@ struct Type
         struct
         {
             Type* base;
-            sz count;
+            sz count;           // 0 = unknown
+            bool isDynamic;
         } array;
         struct
         {
@@ -214,7 +215,7 @@ sz TypeAlignment( Type* type )
     return type->align;
 }
 
-Type* NewArrayType( Type* base, sz count )
+Type* NewArrayType( Type* base, sz count, bool isDynamic )
 {
     auto idx = globalCachedTypes.First(); 
     while( idx )
@@ -232,6 +233,7 @@ Type* NewArrayType( Type* base, sz count )
     Type* result = NewType( "array", Type::Array, count * TypeSize( base ), TypeAlignment( base ) );
     result->array.base = base;
     result->array.count = count;
+    result->array.isDynamic = isDynamic;
 
     globalCachedTypes.Push( result );
 
@@ -654,7 +656,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     if( expectedType->kind == Type::Array )
         slotCount = expectedType->array.count;
     else if( expectedType->kind == Type::Struct )
-        slotCount = Sz( expectedType->aggregate.fields.count );
+        slotCount = expectedType->aggregate.fields.count;
     else if( expectedType->kind == Type::Union )
         // TODO Check that we're using a single designated initializer
         slotCount = 1;
@@ -664,7 +666,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
         return resolvedNull;
     }
 
-    if( Sz( expr->compoundFields.count ) > slotCount )
+    if( expr->compoundFields.count > slotCount )
     {
         RSLV_ERROR( expr->pos, "Too many fields in compound literal" );
         return resolvedNull;
@@ -774,7 +776,6 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     }
 }
 
-Type* NewArrayType( Type* base, sz count );
 Type* NewFuncType( Array<Type*> const& args, Type* returnType );
 
 Type* ResolveTypeSpec( TypeSpec* spec )
@@ -814,16 +815,31 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         } break;
         case TypeSpec::Array:
         {
-            // TODO Dynamic/unknown array size
-            i64 count = ResolveConstExprInt( spec->array.count );
-            // TODO Zero-sized arrays?
-            if( count < 0 )
+            i64 count = 0;
+            bool dynamic = false;
+
+            Expr* countExpr = spec->array.count;
+            if( countExpr )
             {
-                RSLV_ERROR( pos, "Array size must be a positive integer" );
-                return nullptr;
+                if( countExpr->kind == Expr::Range )
+                {
+                    dynamic = true;
+                    if( countExpr->range.lowerBound || countExpr->range.upperBound )
+                        RSLV_ERROR( pos, "Unexpected expression in array type" );
+                }
+                else
+                {
+                    count = ResolveConstExprInt( countExpr );
+                    // TODO Zero-sized arrays?
+                    if( count <= 0 )
+                    {
+                        RSLV_ERROR( pos, "Array size must be a positive integer" );
+                        //return nullptr;
+                    }
+                }
             }
             Type* base = ResolveTypeSpec( spec->array.base );
-            result = NewArrayType( base, Sz( count ) );
+            result = NewArrayType( base, count, dynamic );
         } break;
         case TypeSpec::Func:
         {
@@ -922,7 +938,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             Type* type = size.type;
             CompleteType( type, expr->pos );
 
-            result = NewResolvedConst( intType, I64( TypeSize( type ) ), expr->pos );
+            result = NewResolvedConst( intType, TypeSize( type ), expr->pos );
         } break;
         // TODO Typeof
 
@@ -1552,7 +1568,7 @@ void InitResolver( int globalSymbolsCount )
     };
 
     INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,
-        I32( globalSymbolsCount + ARRAYCOUNT(builtinTypes) ), HTF_FixedSize );
+        globalSymbolsCount + I32( ARRAYCOUNT(builtinTypes) ), HTF_FixedSize );
 
     globalCurrentScopeStart = globalScopeStack.First();
     for( BuiltinType const& s : builtinTypes )

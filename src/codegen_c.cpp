@@ -33,7 +33,7 @@ char* Strf( char const* fmt, ... )
         va_list args;
         va_start( args, fmt );
         // TODO Use an Append function with support for adding one string/int/etc. at a time to remove the need for sprintf at all
-        n = Sz( 1 + vsnprintf( nullptr, 0, fmt, args ) );
+        n = 1 + vsnprintf( nullptr, 0, fmt, args );
         va_end( args );
     }
 
@@ -41,7 +41,7 @@ char* Strf( char const* fmt, ... )
     {
         va_list args;
         va_start( args, fmt );
-        vsnprintf( buf, n, fmt, args );
+        vsnprintf( buf, Size( n ), fmt, args );
         va_end( args );
     }
     return buf;
@@ -178,7 +178,7 @@ void EmitExpr( Expr* expr )
         case Expr::Str:
             // TODO Proper escaping of escaped and non-printable stuff
             OUTSTR( "\"" );
-            Out( expr->literal.strValue.data, Sz( expr->literal.strValue.length ) );
+            Out( expr->literal.strValue.data, expr->literal.strValue.length );
             OUTSTR( "\"" );
             break;
         case Expr::Name:
