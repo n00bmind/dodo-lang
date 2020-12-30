@@ -7,6 +7,7 @@ struct Type;
 
 struct ConstValue
 {
+    // TODO Array of T!?
     union
     {
         String strValue = {};
@@ -75,6 +76,8 @@ struct Type
         Pointer,
         Array,
         String,
+        // TODO 
+        SBuffer,
         Struct,
         Union,
         Enum,
@@ -94,8 +97,8 @@ struct Type
     {
         struct
         {
-            ::Array<Type*> args;
             // TODO Varargs
+            ::Array<Type*> args;
             Type* returnType;
         } func;
         struct
@@ -144,7 +147,6 @@ Type NewBuiltinType( char const* name, Type::Kind kind, sz size, sz alignment )
 // Builtins
 Type globalVoidType = NewBuiltinType( "void", Type::Void, 0, 0 );
 Type globalBoolType = NewBuiltinType( "bool", Type::Bool, 1, 1 );
-Type globalStrType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
 Type globalI8Type = NewBuiltinType( "i8", Type::Int, 1, 1 );
 Type globalI16Type = NewBuiltinType( "i16", Type::Int, 2, 2 );
 Type globalI32Type = NewBuiltinType( "i32", Type::Int, 4, 4 );
@@ -153,10 +155,12 @@ Type globalIntType = NewBuiltinType( "int", Type::Int, 8, 8 );
 Type globalF32Type = NewBuiltinType( "f32", Type::Float, 4, 4 );
 Type globalF64Type = NewBuiltinType( "f64", Type::Float, 8, 8 );
 Type globalFloatType = NewBuiltinType( "float", Type::Float, 8, 8 );
+// TODO This stuff needs to be in sync with the structs in the preamble!
+Type globalStringType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
 
 Type* voidType = &globalVoidType;
 Type* boolType = &globalBoolType;
-Type* strType = &globalStrType;
+Type* stringType = &globalStringType;
 Type* i8Type = &globalI8Type;
 Type* i16Type = &globalI16Type;
 Type* i32Type = &globalI32Type;
@@ -901,7 +905,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             result = NewResolvedConst( floatType, expr->literal.floatValue, expr->pos );
             break;
         case Expr::Str:
-            result = NewResolvedConst( strType, expr->literal.strValue );
+            result = NewResolvedConst( stringType, expr->literal.strValue );
             break;
 
         case Expr::Name:
@@ -1556,7 +1560,7 @@ void InitResolver( int globalSymbolsCount )
     {
         { "void", voidType },
         { "bool", boolType },
-        { "str", strType },
+        { "string", stringType },
         { "i8", i8Type },
         { "i16", i16Type },
         { "i32", i32Type },

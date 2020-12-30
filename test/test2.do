@@ -568,13 +568,12 @@ T9 :: struct
     a: [n9]int;
 }
 
-#foreign puts :: ( s: str ) -> int;
+#foreign puts :: ( str: string ) -> int;
 
 main :: ( argc: int, argv: **int ) -> int
 {
+    /*nums: [10]int;*/
     result := fact_rec9( 10 );
-    /*puts( "Hello world" );*/
-    msg: str = 'Hello world';
-    puts( msg );
+    puts( "Hello world" );
     return 42;
 }

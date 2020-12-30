@@ -3,7 +3,7 @@ R"~~~(#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 
-#define ARRAYCOUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define ARRAYCOUNT(array) Sz( sizeof(array) / sizeof((array)[0]) )
 #if _MSC_VER
 #define INLINE __forceinline
 #else
@@ -23,18 +23,7 @@ R"~~~(#include <stdio.h>
 #define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )
 typedef ASSERT_HANDLER(AssertHandlerFunc);
 
-ASSERT_HANDLER(DefaultAssertHandler)
-{
-    // TODO Stacktrace
-    char buffer[256] = {};
-
-    va_list args;
-    va_start( args, msg );
-    vsnprintf( buffer, ARRAYCOUNT(buffer), msg, args );
-    va_end( args );
-
-    fprintf( stderr, "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
-}
+ASSERT_HANDLER(DefaultAssertHandler);
 AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 
 
@@ -51,7 +40,7 @@ typedef unsigned long long u64;
 typedef float f32;
 typedef double f64;
 
-typedef size_t sz;
+typedef int64_t sz;
 
 #define I8MIN INT8_MIN
 #define I8MAX INT8_MAX
@@ -74,126 +63,159 @@ typedef size_t sz;
 #define F64INF (f64)INFINITY
 
 
-INLINE i8
+INLINE constexpr i8
 I8( i32 value )
 {
     ASSERT( I8MIN <= value && value <= I8MAX );
     return (i8)value;
 }
 
-INLINE i16
-I16( i32 value )
-{
-    ASSERT( I16MIN <= value && value <= I16MAX );
-    return (i16)value;
-}
-
-INLINE i32
-I32( sz value )
-{
-    ASSERT( value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( ptrdiff_t value )
-{
-    ASSERT( I32MIN <= value && value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( f32 value )
-{
-    ASSERT( (f32)I32MIN <= value && value <= (f32)I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( f64 value )
-{
-    ASSERT( I32MIN <= value && value <= I32MAX );
-    return (i32)value;
-}
-
-INLINE i32
-I32( u32 value )
-{
-    ASSERT( value <= (u32)I32MAX );
-    return (i32)value;
-}
-
-INLINE i64
-I64( sz value )
-{
-    ASSERT( value <= (sz)I64MAX );
-    return (i64)value;
-}
-
-INLINE u32
-U32( i32 value )
-{
-    ASSERT( value >= 0 );
-    return (u32)value;
-}
-
-INLINE u32
-U32( u64 value )
-{
-    ASSERT( value <= U32MAX );
-    return (u32)value;
-}
-
-INLINE u32
-U32( f64 value )
-{
-    ASSERT( 0 <= value && value <= U32MAX );
-    return (u32)value;
-}
-
-INLINE u16
-U16( i64 value )
-{
-    ASSERT( 0 <= value && value <= U16MAX );
-    return (u16)value;
-}
-
-INLINE u16
-U16( f64 value )
-{
-    ASSERT( 0 <= value && value <= U16MAX );
-    return (u16)value;
-}
-
-INLINE u8
+INLINE constexpr u8
 U8( u32 value )
 {
     ASSERT( value <= U8MAX );
     return (u8)value;
 }
 
-INLINE u8
+INLINE constexpr u8
 U8( i32 value )
 {
     ASSERT( value >= 0 && value <= U8MAX );
     return (u8)value;
 }
 
-INLINE sz
-Sz( i32 value )
+INLINE constexpr i16
+I16( i32 value )
+{
+    ASSERT( I16MIN <= value && value <= I16MAX );
+    return (i16)value;
+}
+
+INLINE constexpr u16
+U16( i64 value )
+{
+    ASSERT( 0 <= value && value <= U16MAX );
+    return (u16)value;
+}
+
+INLINE constexpr u16
+U16( f64 value )
+{
+    ASSERT( 0 <= value && value <= U16MAX );
+    return (u16)value;
+}
+
+INLINE constexpr i32
+I32( sz value )
+{
+    ASSERT( I32MIN <= value && value <= I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( f32 value )
+{
+    ASSERT( (f32)I32MIN <= value && value <= (f32)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( f64 value )
+{
+    ASSERT( I32MIN <= value && value <= I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( u64 value )
+{
+    ASSERT( value <= (u64)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr i32
+I32( u32 value )
+{
+    ASSERT( value <= (u32)I32MAX );
+    return (i32)value;
+}
+
+INLINE constexpr u32
+U32( i32 value )
 {
     ASSERT( value >= 0 );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( u64 value )
+{
+    ASSERT( value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( i64 value )
+{
+    ASSERT( 0 <= value && value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr u32
+U32( f64 value )
+{
+    ASSERT( 0 <= value && value <= U32MAX );
+    return (u32)value;
+}
+
+INLINE constexpr sz
+Sz( size_t value )
+{
+    ASSERT( value <= (size_t)I64MAX );
     return (sz)value;
 }
 
-INLINE sz
-Sz( i64 value )
+INLINE constexpr size_t
+Size( sz value )
 {
     ASSERT( value >= 0 );
-    return (sz)value;
+    return (size_t)value;
 }
 
-class str
+ASSERT_HANDLER(DefaultAssertHandler)
+{
+    // TODO Stacktrace
+    char buffer[256] = {};
+
+    va_list args;
+    va_start( args, msg );
+    vsnprintf( buffer, Size( ARRAYCOUNT(buffer) ), msg, args );
+    va_end( args );
+
+    fprintf( stderr, "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
+}
+
+
+//_______________________________________________________________________________
+// TODO TODO TODO At some point all these basic types will need to be ported over
+// or implemented internally in dodo and hidden from user code
+
+<template typename T>
+struct array
+{
+    sz count;
+    T[0] data;
+
+public:
+    // TODO Don't rely on emitting an initializer list (even if we accept it), pass the values to the constructor instead
+    array( i32 count_ )
+        : count( count_ )
+    {}
+};
+
+class sbuffer;
+
+struct string
 {
     static constexpr char const* Empty = "";
 
@@ -201,17 +223,17 @@ class str
     i32 length;
 
 public:
-    str()
+    string()
         : data( Empty )
         , length( 0 )
     {}
 
-    str( char const* s )
+    string( char const* s )
         : data( s )
         , length( I32( strlen( s ) ) )
     {}
 
-    str( char const* s, int len )
+    string( char const* s, int len )
         : data( s )
         , length( len )
     {}
