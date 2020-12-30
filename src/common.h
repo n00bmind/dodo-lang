@@ -102,12 +102,6 @@ typedef int64_t sz;
 #define F64MIN DBL_MIN
 #define F64INF (f64)INFINITY
 
-// FIXME Update preamble!
-// FIXME Update preamble!
-// FIXME Update preamble!
-// FIXME Update preamble!
-// FIXME Update preamble!
-
 INLINE constexpr i8
 I8( i32 value )
 {
