@@ -43,6 +43,24 @@ ________________________________________________________________________________
   Think about how different subtypes of arrays could specify sizes for the base pointer as part of the type definition, similar to the "relative pointers" concept from JAI.
   Maybe also the base pointer could instead be a smaller handle, but then handles we'd need a concept of a non-opaque handle where the language knows what's inside and can use it.
 
+- After thinking about it, there seem to be _three_ types of "arrays" actually:
+  · There's the traditional C-like static array, with a fixed count (i.e. [3]int). It's layout is just the inlined elements in memory, and its count is a constant expression and immutable
+    so its known internally by the compiler and there's no need to store it anywhere in memory.
+  · There's 'sbuffers' or dynamic variable arrays, which store a count, a capacity, and a reference to a changeable location in memory where the actual contents are. The layout of a variable
+    of this type is just those 3 elements, so they're relatively cheap to copy and pass around.
+  · Then there's arrays of 'unknown' kind, represented by empty brackets [], used to pass both arrays of any size and dynamic arrays to functions. Empty brackets used when declaring a variable
+    are not quite the same thing, as those just mean the size is specified by the initialization expression instead, but they're just a static array in the end.
+
+    This third kind is more akin to a generic 'buffer view', basically a pointer and a count. If we do it this way, it'd mean that when passing a static array the compile-time size
+    would have to be passed during runtime into the argument. On the other hand, when passing an sbuffer its current count would be passed, meaning only the current contents up to the count
+    would be visible by the function.
+    It's an open question whether we want to permit this array kind to ever be stored in a struct or whatever. It seems in principle a 'buffer view' could be a useful thing to have, although
+    if we do the syntax should be more clear, as right now it's exactly the same as when initializing a static array of unknown size, so maybe something like [?] or [*] makes more sense.
+    I can see a few use cases in favor of storing this as a more general type:
+      - It's the perfect substitute for the pointer + size pair used so much in C when reading input data of an unknown size or when allocating a buffer with a size calculated at runtime.
+      - Sometimes we might want to use an sbuffer during a process but then 'fix' the final result and signal it's not going to change any more. This provides an idiom to do so, although
+        it's clearly a minor thing.
+
 - Precedence table, like in Bitwise's Ion, highest to lowest:
   · postfix: () [] .
   · unary: ! + - ~ &(addr) *(deref)

@@ -347,11 +347,11 @@ void EmitVarDecl( Decl* decl, char const* name, bool nested )
     else
         Out( TypeToCdecl( resolvedType, name ) );
 
+    OUTSTR( " = " );
     if( decl->var.initExpr )
-    {
-        OUTSTR( " = " );
         EmitExpr( decl->var.initExpr );
-    }
+    else
+        OUTSTR( "{}" );
     OUTSTR( ";" );
     OutNL();
 }

@@ -200,19 +200,6 @@ ASSERT_HANDLER(DefaultAssertHandler)
 // TODO TODO TODO At some point all these basic types will need to be ported over
 // or implemented internally in dodo and hidden from user code
 
-<template typename T>
-struct array
-{
-    sz count;
-    T[0] data;
-
-public:
-    // TODO Don't rely on emitting an initializer list (even if we accept it), pass the values to the constructor instead
-    array( i32 count_ )
-        : count( count_ )
-    {}
-};
-
 class sbuffer;
 
 struct string
