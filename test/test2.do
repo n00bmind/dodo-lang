@@ -572,7 +572,6 @@ T9 :: struct
 
 main :: ( argc: int, argv: **int ) -> int
 {
-    nums: [10]int = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
     puts( "Hello world" );
     result := fact_rec9( 10 );
     return 42;
