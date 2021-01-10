@@ -51,7 +51,7 @@ ________________________________________________________________________________
   · Then there's arrays of 'unknown' kind, represented by empty brackets [], used to pass both arrays of any size and dynamic arrays to functions. Empty brackets used when declaring a variable
     are not quite the same thing, as those just mean the size is specified by the initialization expression instead, but they're just a static array in the end.
 
-    This third kind is more akin to a generic 'buffer view', basically a pointer and a count. If we do it this way, it'd mean that when passing a static array the compile-time size
+    This third kind is more akin to a generic 'buffer view' (or just 'buffer'), basically a pointer and a count. If we do it this way, it'd mean that when passing a static array the compile-time size
     would have to be passed during runtime into the argument. On the other hand, when passing an sbuffer its current count would be passed, meaning only the current contents up to the count
     would be visible by the function.
     It's an open question whether we want to permit this array kind to ever be stored in a struct or whatever. It seems in principle a 'buffer view' could be a useful thing to have, although
@@ -135,6 +135,9 @@ ________________________________________________________________________________
   library by name/tag, and then a second form which describes those referenced names/tags, by listing the header
   files to include together with actual library filenames for each of the supported platforms, or even C++ source files
   to compile inline with the native code.
+
+- A compile-time feature that would be extremely useful is constexpr monotonic counters (and being able to define _several_ of them).
+  Think of how to do this in a simple way.
 ________________________________________________________________________________ 
 
 

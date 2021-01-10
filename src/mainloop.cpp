@@ -263,7 +263,7 @@ complex_func :: ()
         // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
         "item := ptr[-1];",
         "bin := 1000 / (2 + 3 * 5) << 10;",
-        "aptr: *int = -s[3] as *int;",
+        "aptr: *int = &s[3]; // as *int;",
         "f :: () { i += 1; }",
         "h :: (hx: int) -> int { if(hx) { return -hx; } else { return 1; } }",
     };
@@ -342,14 +342,14 @@ complex_func :: ()
 
         char* cdecl1 = TypeToCdecl( intType, "x" );
         char* cdecl2 = TypeToCdecl( NewPtrType( intType ), "x" );
-        char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10, false ), "x" );
+        char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10 ), "x" );
         Array<Type*> args( &globalTmpArena, 2 );
         args.Push( NewPtrType( intType ) );
         args.Push( intType );
         char* cdecl4 = TypeToCdecl( NewFuncType( args, intType ), "x" );
-        char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10, false ), "x" );
+        char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10 ), "x" );
         Array<Type*> emptyArgs( &globalTmpArena, 0 );
-        char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10, false ) ), "x" );
+        char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
 
         ResolveAll( globalDecls );
         GenerateAll();

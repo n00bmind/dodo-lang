@@ -1,0 +1,13 @@
+
+:: DECISION LOG ::
+
+(insert date with
+:put =strftime('%F')
+)
+
+
+2021-01-09   Arrays without a size specifier
+
+Decided against allowing declaring arrays without a size ([]), as that'd mean they cannot be bounds-checked, which is
+inconsistent with all other array and buffer view types. This is made worse by the fact we're gonna want to separate
+array and pointer-math semantics, by making the first more 'reassuring' in the sense that it'll always be bounds checked.

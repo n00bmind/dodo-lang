@@ -46,7 +46,7 @@ struct Symbol
     Decl* decl;
     ::Type* type;
     // TODO Store constants separately?
-    ConstValue constValue;
+    ConstValue constValue = {};
     u32 kind : 16;
     u32 state : 15;
     // TODO Namespaces?
@@ -75,13 +75,14 @@ struct Type
         Float,
         Pointer,
         Array,
+        Buffer,     // a.k.a. array view
         String,
-        // TODO 
-        SBuffer,
         Struct,
         Union,
         Enum,
         Func,
+        // TODO 
+        SBuffer,
         // TODO 
         TypeVar,
     };
@@ -108,8 +109,10 @@ struct Type
         struct
         {
             Type* base;
-            sz count;           // 0 = unknown
-            bool isDynamic;
+            // 0 = unknown (needs initializer)
+            // Unused for buffers, as their size is dynamic
+            sz count;
+            //bool isView;
         } array;
         struct
         {
@@ -219,7 +222,7 @@ sz TypeAlignment( Type* type )
     return type->align;
 }
 
-Type* NewArrayType( Type* base, sz count, bool isDynamic )
+Type* NewArrayType( Type* base, sz count )
 {
     auto idx = globalCachedTypes.First(); 
     while( idx )
@@ -233,11 +236,32 @@ Type* NewArrayType( Type* base, sz count, bool isDynamic )
         idx.Next();
     }
 
-    // TODO Dynamic/any size arrays
+    // NOTE We allow no-size arrays to pass through, as they'll be checked and substituted during ResolveSymbol
     Type* result = NewType( "array", Type::Array, count * TypeSize( base ), TypeAlignment( base ) );
     result->array.base = base;
     result->array.count = count;
-    result->array.isDynamic = isDynamic;
+
+    globalCachedTypes.Push( result );
+
+    return result;
+}
+
+Type* NewBufferType( Type* base )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::Buffer )
+        {
+            if( t->array.base == base )
+                return t;
+        }
+        idx.Next();
+    }
+
+    Type* result = NewType( "buffer view", Type::Buffer, globalPlatform.PointerSize + 4, globalPlatform.PointerSize );
+    result->array.base = base;
 
     globalCachedTypes.Push( result );
 
@@ -648,20 +672,36 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
 ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
 {
     ASSERT( expr->kind == Expr::Compound );
-    if( !expectedType )
+
+    if( expectedType )
+        CompleteType( expectedType, expr->pos );
+
+    Type* type = expectedType;
+    if( !type )
     {
-        RSLV_ERROR( expr->pos, "Compound literal requires explicit type" );
-        return resolvedNull;
+        // TODO Try to deduce a type based on the compound fields
+        NOT_IMPLEMENTED;
+
+        ASSERT( type );
     }
 
-    CompleteType( expectedType, expr->pos );
-
     sz slotCount = 0;
-    if( expectedType->kind == Type::Array )
-        slotCount = expectedType->array.count;
-    else if( expectedType->kind == Type::Struct )
-        slotCount = expectedType->aggregate.fields.count;
-    else if( expectedType->kind == Type::Union )
+    if( type->kind == Type::Array )
+    {
+        if( type->array.count )
+            slotCount = type->array.count;
+        else
+        {
+            // Arrays with no size specifier will have as many elements as given
+            slotCount = expr->compoundFields.count;
+            // Substitute type by a new one with correct sizing info (need to fetch any cached types again)
+            // This leaks the old type, but who cares!
+            type = NewArrayType( type->array.base, slotCount );
+        }
+    }
+    else if( type->kind == Type::Struct )
+        slotCount = type->aggregate.fields.count;
+    else if( type->kind == Type::Union )
         // TODO Check that we're using a single designated initializer
         slotCount = 1;
     else
@@ -677,14 +717,14 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     }
 
     Type* expectedFieldType = nullptr;
-    if( expectedType->kind == Type::Array )
-        expectedFieldType = expectedType->array.base;
+    if( type->kind == Type::Array )
+        expectedFieldType = type->array.base;
 
     int i = 0;
     for( CompoundField const& f : expr->compoundFields )
     {
-        if( expectedType->kind == Type::Struct )
-            expectedFieldType = expectedType->aggregate.fields[i++].type;
+        if( type->kind == Type::Struct )
+            expectedFieldType = type->aggregate.fields[i++].type;
 
         ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
         if( field.type != expectedFieldType )
@@ -694,7 +734,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
         }
     }
 
-    return NewResolvedRvalue( expectedType );
+    return NewResolvedRvalue( type );
 }
 
 ResolvedExpr ResolveCallExpr( Expr* expr )
@@ -820,21 +860,22 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         case TypeSpec::Array:
         {
             i64 count = 0;
-            bool dynamic = false;
+            //bool dynamic = false;
 
             Expr* countExpr = spec->array.count;
             if( countExpr )
             {
-                if( countExpr->kind == Expr::Range )
-                {
-                    dynamic = true;
-                    if( countExpr->range.lowerBound || countExpr->range.upperBound )
-                        RSLV_ERROR( pos, "Unexpected expression in array type" );
-                }
-                else
+                //if( countExpr->kind == Expr::Range )
+                //{
+                    //dynamic = true;
+                    //if( countExpr->range.lowerBound || countExpr->range.upperBound )
+                        //RSLV_ERROR( pos, "Unexpected expression in array type" );
+                //}
+                //else
                 {
                     count = ResolveConstExprInt( countExpr );
-                    // TODO Zero-sized arrays?
+                    // NOTE Zero-sized arrays not supported.
+                    // We use count == 0 to indicate an initializer is expected to figure out the actual size
                     if( count <= 0 )
                     {
                         RSLV_ERROR( pos, "Array size must be a positive integer" );
@@ -843,7 +884,10 @@ Type* ResolveTypeSpec( TypeSpec* spec )
                 }
             }
             Type* base = ResolveTypeSpec( spec->array.base );
-            result = NewArrayType( base, count, dynamic );
+            if( spec->array.isView )
+                result = NewBufferType( base );
+            else
+                result = NewArrayType( base, count );
         } break;
         case TypeSpec::Func:
         {
@@ -1010,8 +1054,10 @@ void CompleteType( Type* type, SourcePos const& pos )
         return;
     }
     else if( type->kind != Type::Incomplete )
+    {
         // Nothing to do
         return;
+    }
 
     type->kind = Type::Completing;
     ASSERT( type->symbol && type->symbol->decl );
@@ -1149,7 +1195,11 @@ void ResolveSymbol( Symbol* sym )
             {
                 ResolvedExpr init = ResolveExpr( decl->var.initExpr, type );
                 if( type && init.type != type )
-                    RSLV_ERROR( pos, "Declared type for '%s' does not match type of initializer expression", sym->name );
+                {
+                    // Make an exception for empty-size arrays
+                    if( type->kind != Type::Array || type->array.count != 0 )
+                        RSLV_ERROR( pos, "Declared type for '%s' does not match type of initializer expression", sym->name );
+                }
 
                 type = init.type;
             }

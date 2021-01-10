@@ -1,6 +1,9 @@
 
 /////     DYNAMIC ARRAY    /////
 
+// Actually, a reference to an array of any size and type somewhere in memory, so more like a 'buffer view' as it's called in do-lang
+// (although we have semantics for Push/Pop/Remove etc. so it is not read-only)
+
 template <typename T>
 struct Array
 {
@@ -628,7 +631,7 @@ enum HashTableFlags
     HTF_FixedSize = 0x1,    // For stable pointers to content, must provide expectedSize as appropriate
 };
 
-// NOTE Type K must have a default constructor, and all keys must be different to this default-constructed value
+// NOTE Type K must have a default constructor, and all keys must be different to the default-constructed value
 template <typename K, typename V, typename Allocator>
 struct Hashtable
 {

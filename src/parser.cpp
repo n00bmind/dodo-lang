@@ -34,11 +34,12 @@ TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<TypeSpec*> const& a
     return result;
 }
 
-TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size )
+TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size, bool isView )
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Array );
     result->array.base = ofType;
     result->array.count = size;
+    result->array.isView = isView;
 
     return result;
 }
@@ -116,18 +117,25 @@ TypeSpec* ParseTypeSpec( Lexer* lexer )
     if( MatchToken( TokenKind::OpenBracket, token ) )
     {
         Expr* size = nullptr;
+        bool isView = false;
 
         NextToken( lexer );
         if( !MatchToken( TokenKind::CloseBracket, token ) )
         {
-            size = ParseExpr( lexer );
+            if( MatchToken( TokenKind::Asterisk, token ) )
+            {
+                isView = true;
+                NextToken( lexer );
+            }
+            else
+                size = ParseExpr( lexer );
         }
         RequireTokenAndAdvance( TokenKind::CloseBracket, lexer );
 
         TypeSpec* ofType = ParseTypeSpec( lexer );
 
         if( lexer->IsValid() )
-            type = NewArrayTypeSpec( pos, ofType, size );
+            type = NewArrayTypeSpec( pos, ofType, size, isView );
     }
     else if( MatchToken( TokenKind::Asterisk, token ) )
     {
@@ -406,6 +414,11 @@ Expr* ParseBaseExpr( Lexer* lexer )
         expr = ParseExpr( lexer );
         RequireToken( TokenKind::CloseParen, lexer );
     }
+    else if( MatchToken( TokenKind::Range, token ) )
+    {
+        // This is an 'open' range, just return null which will be used as the lower bound by ParseRangeExpr on the way up
+        advance = false;
+    }
     else
     {
         char const* desc = TokenKind::Values::names[ token.kind ];
@@ -420,6 +433,8 @@ Expr* ParseBaseExpr( Lexer* lexer )
 
     return expr;
 }
+
+Expr* ParseAddExpr( Lexer* lexer );
 
 Expr* ParsePostfixExpr( Lexer* lexer )
 {
@@ -492,6 +507,7 @@ Expr* ParseUnaryExpr( Lexer* lexer )
     return expr;
 }
 
+// FIXME This is gonna be a unary expr now
 Expr* ParseCastExpr( Lexer* lexer )
 {
     Expr* expr = ParseUnaryExpr( lexer );
@@ -510,9 +526,30 @@ Expr* ParseCastExpr( Lexer* lexer )
     return expr;
 }
 
+Expr* ParseRangeExpr( Lexer* lexer )
+{
+    SourcePos pos = lexer->token.pos;
+    Expr* expr = ParseUnaryExpr( lexer );
+
+    Expr* upperBound = nullptr;
+    if( MatchToken( TokenKind::Range, lexer->token ) )
+    {
+        NextToken( lexer );
+        upperBound = ParseUnaryExpr( lexer );
+
+        if( lexer->IsValid() )
+            expr = NewRangeExpr( pos, expr, upperBound );
+    }
+    return expr;
+}
+
 Expr* ParseMulExpr( Lexer* lexer )
 {
-    Expr* expr = ParseCastExpr( lexer );
+    Expr* expr = ParseRangeExpr( lexer );
+
+    // NOTE Range expressions cannot really be combined (for now at least!)
+    if( expr->kind == Expr::Range )
+        return expr;
 
     while( lexer->token.HasFlag( TokenFlags::MulOp ) )
     {
@@ -520,7 +557,7 @@ Expr* ParseMulExpr( Lexer* lexer )
         TokenKind::Enum op = lexer->token.kind;
 
         NextToken( lexer );
-        expr = NewBinaryExpr( pos, op, expr, ParseCastExpr( lexer ) );
+        expr = NewBinaryExpr( pos, op, expr, ParseUnaryExpr( lexer ) );
     }
 
     return expr;
@@ -1301,23 +1338,6 @@ Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer )
     return nullptr;
 }
 
-Expr* ParseRangeExpr( SourcePos const& pos, Lexer* lexer )
-{
-    Expr* result = nullptr;
-
-    Expr* lowerBound = ParseAddExpr( lexer );
-    Expr* upperBound = nullptr;
-    if( MatchToken( TokenKind::Range, lexer->token ) )
-    {
-        NextToken( lexer );
-        upperBound = ParseAddExpr( lexer );
-    }
-
-    if( lexer->IsValid() )
-        result = NewRangeExpr( pos, lowerBound, upperBound );
-    return result;
-}
-
 Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer )
 {
     RequireKeywordAndAdvance( Keyword::For, lexer );
@@ -1327,7 +1347,7 @@ Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer )
     char const* indexName = lexer->token.ident;
     NextToken( lexer );
     RequireKeywordAndAdvance( Keyword::In, lexer );
-    Expr* rangeExpr = ParseRangeExpr( lexer->token.pos, lexer );
+    Expr* rangeExpr = ParseExpr( lexer ); //ParseRangeExpr( lexer->token.pos, lexer );
 
     RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
     StmtList block = ParseStmtOrStmtBlock( lexer );

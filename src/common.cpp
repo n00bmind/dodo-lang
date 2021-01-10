@@ -11,7 +11,7 @@ void Error( Lexer* lexer, char const* fmt, ... )
         lexer->error = true;
     globalErrorCount++;
 
-#if 0 // CONFIG_DEBUG
+#if  CONFIG_DEBUG
     __debugbreak();
 #endif
 }

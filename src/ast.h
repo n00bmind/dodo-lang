@@ -9,7 +9,7 @@ struct TypeSpec
         Func,
         Array,
         Pointer,
-        //String,       // This is basically the same as an array of byte. Could just be an alias?
+        //String,       // This is basically the same as an array view of byte. Could just be an alias?
         //Tuple,      // ?
     };
     
@@ -27,8 +27,9 @@ struct TypeSpec
         } func;
         struct
         {
-            Expr* count;
             TypeSpec* base;
+            Expr* count;        // Can be null
+            bool isView;
         } array;
         struct
         {
