@@ -250,11 +250,11 @@ complex_func :: ()
         "R :: struct { s: *S; };",
         "S :: struct { r: [sx] R; };",
         "U :: struct { a: [3] int; };",
-        "uu: U = { { 0 } };",
+        "uu: U = { .a = { 0 } };",
         "a, b, c :: 0;",
         //"b := 1;",                                  // Redeclared
-        "add :: (v: Vector, w: Vector) -> Vector { return { v.x + w.x, v.y + w.y }; }",
-        "result := add_func( { 1, 2 }, { 3, 4 } );",
+        "add :: (v: Vector, w: Vector) -> Vector { return { .x = v.x + w.x, .y = v.y + w.y }; }",
+        "result := add_func( { .x = 1, .y = 2 }, { .x = 3, .y = 4 } );",
         "add_func := add;",
         "Vector :: struct { x, y: int; }",
         // TODO Check this actually works for all cond types

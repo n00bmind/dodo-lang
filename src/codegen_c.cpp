@@ -1,9 +1,11 @@
+static MemoryArena* outArena = &globalOutArena;
+
 INLINE void Out( char const* str, sz len = 0 )
 {
     // TODO Making symbol names use the full InternString would reduce the need for this a lot
     if( !len )
         len = StringLength( str );
-    char* buf = PUSH_STRING( &globalOutArena, len );
+    char* buf = PUSH_STRING( outArena, len );
     PCOPY( str, buf, len );
 }
 
@@ -136,15 +138,19 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case TypeSpec::Array:
         {
-            // FIXME Do something less hacky!
-            u8* startBase = globalOutArena.base;
-            sz startUsed = globalOutArena.used;
-            EmitExpr( type->array.count );
-            char* countStr = (char*)(startBase + startUsed);
-            // TODO This will obviously not be enough for our arrays
+            char* countStr = "";
+            if( type->array.count )
+            {
+                // FIXME This is still a friggin hack
+                u8* startBase = globalTmpArena.base;
+                countStr = (char*)(startBase + globalTmpArena.used);
+                outArena = &globalTmpArena;
+                EmitExpr( type->array.count );
+
+                ASSERT( globalTmpArena.base == startBase );
+                outArena = &globalOutArena;
+            }
             char* result = TypeSpecToCdecl( type->array.base, OptParen( Strf( "%s[%s]", symbolName, countStr ), !IsNullOrEmpty( symbolName ) ) );
-            ASSERT( globalOutArena.base == startBase );
-            globalOutArena.used = startUsed;
             return result;
         } break;
         case TypeSpec::Func:
@@ -214,16 +220,64 @@ void EmitExpr( Expr* expr )
             break;
         case Expr::Compound:
             OUTSTR( "{ " );
-            for( CompoundField const& f : expr->compoundFields )
+            if( expr->compoundFields[0].kind == CompoundField::Name )
             {
-                if( &f != expr->compoundFields.begin() )
-                    OUTSTR( ", " );
+                // NOTE Assume all of them are named
+                Type* type = expr->resolvedExpr.type;
+                ASSERT( type && (type->kind == Type::Struct || type->kind == Type::Union) );
 
-                if( f.kind != CompoundField::Default )
-                    // TODO How the hell do we do this in C++?
-                    NOT_IMPLEMENTED;
+                for( TypeField const& tf : type->aggregate.fields )
+                {
+                    if( &tf != type->aggregate.fields.begin() )
+                        OUTSTR( ", " );
 
-                EmitExpr( f.initValue );
+                    CompoundField const* field = nullptr;
+                    for( CompoundField const& f : expr->compoundFields )
+                        if( f.name == tf.name )
+                        {
+                            field = &f;
+                            break;
+                        }
+
+                    if( field )
+                        EmitExpr( field->initValue );
+                    else
+                        OUTSTR( "{}" );
+                }
+            }
+            else
+            {
+                int capacity = 16;
+                Expr** fieldExprs = PUSH_ARRAY( &globalTmpArena, Expr*, capacity );
+
+                int index = 0;
+                for( CompoundField const& f : expr->compoundFields )
+                {
+                    if( f.kind == CompoundField::Index )
+                        index = I32( f.index->resolvedExpr.constValue.intValue );
+
+                    if( index >= capacity )
+                    {
+                        Expr** newBuffer = PUSH_ARRAY( &globalTmpArena, Expr*, 2 * capacity );
+                        PCOPY( fieldExprs, newBuffer, Sz( capacity * sizeof(Expr*) ) );
+                        capacity = 2 * capacity;
+
+                        fieldExprs = newBuffer;
+                    }
+
+                    fieldExprs[index++] = f.initValue;
+                }
+                for( int i = 0; i < index; ++i )
+                {
+                    if( i != 0 )
+                        OUTSTR( ", " );
+
+                    Expr* e = fieldExprs[i];
+                    if( e )
+                        EmitExpr( e );
+                    else
+                        OUTSTR( "{}" );
+                }
             }
             OUTSTR( " }" );
             break;
@@ -489,7 +543,7 @@ void EmitStmt( Stmt* stmt )
             OutIndent();
             OUTSTR( "for( " );
             // TODO Array & string iterables
-            Out( TypeToCdecl( stmt->for_.rangeExpr->range.lowerBound->resolvedType, stmt->for_.indexName ) );
+            Out( TypeToCdecl( stmt->for_.rangeExpr->range.lowerBound->resolvedExpr.type, stmt->for_.indexName ) );
             OUTSTR( " = " );
             EmitExpr( stmt->for_.rangeExpr->range.lowerBound );
             OUTSTR( "; " );

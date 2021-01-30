@@ -5,23 +5,6 @@
 
 struct Type;
 
-struct ConstValue
-{
-    // TODO Array of T!?
-    union
-    {
-        String strValue = {};
-        void* ptrValue;
-        f64 floatValue;
-        i64 intValue;
-        u64 bitsValue;
-    };
-    // TODO 
-    u32 sizeBytes;
-
-    bool BoolValue() { return bitsValue != 0ull; }
-};
-
 struct Symbol
 {
     enum Kind
@@ -69,7 +52,7 @@ struct Type
         Incomplete,
         Completing,
         Void,
-        Bool,
+        Bool,       // TODO Is this needed at all?
         Bits,
         Int,
         Float,
@@ -108,11 +91,15 @@ struct Type
         } aggregate;
         struct
         {
+            // TODO 
+            Type* base;
+        } enum_;
+        struct
+        {
             Type* base;
             // 0 = unknown (needs initializer)
             // Unused for buffers, as their size is dynamic
             sz count;
-            //bool isView;
         } array;
         struct
         {
@@ -306,14 +293,6 @@ bool IsTainted( Type* type )
 }
 
 
-struct ResolvedExpr
-{
-    Type* type;
-    ConstValue constValue;
-    bool isLvalue;
-    bool isConst;
-};
-
 ResolvedExpr resolvedNull = {};
 
 ResolvedExpr NewResolvedRvalue( Type* type )
@@ -416,6 +395,149 @@ ResolvedExpr NewResolvedConst( Type* type, String const& strValue )
     return result;
 }
 
+bool IsPointerType( Type* type )
+{
+    return type->kind == Type::Pointer || type->kind == Type::Func;
+}
+
+bool IsIntegralType( Type* type )
+{
+    return type->kind >= Type::Bool && type->kind <= Type::Int;
+}
+
+bool IsArithmeticType( Type* type )
+{
+    return type->kind >= Type::Float && type->kind <= Type::Int;
+}
+
+bool IsNullPtr( ResolvedExpr const& resolved )
+{
+    Type* type = resolved.type;
+    if( resolved.isConst && (type->kind == Type::Pointer || IsIntegralType( type )) )
+        return resolved.constValue.bitsValue == 0;
+    else
+        return false;
+}
+
+bool IsConvertible( ResolvedExpr const& resolved, Type* dest )
+{
+    Type* src = resolved.type;
+
+    if( dest == src )
+        return true;
+    else if( dest == voidType ) // || dest == anyType )
+        return true;
+    else if( IsArithmeticType( dest ) && IsArithmeticType( src ) )
+        return true;
+    //else if( src->kind == Type::Func && src->func.isIntrinsic )
+        //return false;
+    else if( IsPointerType( dest ) && IsNullPtr( resolved ) )
+        return true;
+    else if( dest->kind == Type::Pointer && src->kind == Type::Pointer )
+    {
+        if( dest->ptr.base == src->ptr.base )
+            return true;
+        else if( dest->ptr.base == voidType || src->ptr.base == voidType )
+            return true;
+        else
+            return false;
+    }
+    else if( dest->kind == Type::Pointer && src->kind == Type::Buffer )
+        return true;
+    else if( (dest->kind == Type::Pointer || dest->kind == Type::Buffer) && src->kind == Type::Array )
+        return true;
+    else
+        return false;
+}
+
+bool IsCastable( ResolvedExpr const& resolved, Type* dest )
+{
+    Type* src = resolved.type;
+    if( IsConvertible( resolved, dest ) )
+        return true;
+    else if( IsIntegralType( dest ) )
+        return IsPointerType( src );
+    else if( IsIntegralType( src ) )
+        return IsPointerType( dest );
+    else if( IsPointerType( dest ) && IsPointerType( src ) )
+        return true;
+    else
+        return false;
+}
+
+#define CASE(srcKind, srcSlot) \
+    case srcKind: \
+        switch (dest->kind) { \
+        case Type::Bool: \
+            resolved->constValue.bitsValue = (bool)resolved->constValue.srcSlot; \
+            break; \
+        case Type::Bits: \
+            resolved->constValue.bitsValue = (u64)resolved->constValue.srcSlot; \
+            break; \
+        case Type::Int: \
+            resolved->constValue.intValue = (i64)resolved->constValue.srcSlot; \
+            break; \
+        case Type::Float: \
+            resolved->constValue.floatValue = (f64)resolved->constValue.srcSlot; \
+            break; \
+        case Type::Pointer: \
+            resolved->constValue.ptrValue = (uintptr_t)resolved->constValue.srcSlot; \
+            break; \
+        default: \
+            resolved->isConst = false; \
+            break; \
+        } \
+        break;
+
+bool CastType( ResolvedExpr* resolved, Type* type )
+{
+    Type* dest = type;
+    if( resolved->type != dest )
+    {
+        if( !IsCastable( *resolved, dest ) )
+            return false;
+
+        if( resolved->isConst )
+        {
+            if( dest->kind == Type::Enum )
+                dest = dest->enum_.base;
+
+            Type* srcType = resolved->type;
+            if( srcType->kind == Type::Enum )
+                srcType = srcType->enum_.base;
+
+            // TODO Cast to/from string?
+            switch( srcType->kind )
+            {
+                CASE(Type::Bool, bitsValue)
+                CASE(Type::Bits, bitsValue)
+                CASE(Type::Int, intValue)
+                CASE(Type::Float, floatValue)
+                CASE(Type::Pointer, ptrValue)
+
+                default:
+                    resolved->isConst = false;
+                    break;
+            }
+        }
+    }
+
+    resolved->type = type;
+    return true;
+}
+
+bool ConvertType( ResolvedExpr* resolved, Type* type )
+{
+    if( IsConvertible( *resolved, type ) )
+    {
+        CastType( resolved, type );
+        resolved->isLvalue = false;
+        return true;
+    }
+
+    return false;
+}
+
 
 Symbol* ResolveName( char const* name, SourcePos const& pos );
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType = nullptr );
@@ -428,7 +550,7 @@ ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
         RSLV_ERROR( expr->pos, "Expected constant expression" );
         result = resolvedNull;
     }
-    if( expectedType && result.type != expectedType )
+    if( expectedType && !ConvertType( &result, expectedType ) )
     {
         RSLV_ERROR( expr->pos, "Expected constant expression of type '%s'", expectedType );
         result = resolvedNull;
@@ -479,6 +601,25 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
     CompleteType( type, expr->pos );
 
+    if( MatchKeyword( Keyword::Count, expr->field.name ) )
+    {
+        if( !(type->kind == Type::Array || type->kind == Type::Buffer) )
+        {
+            RSLV_ERROR( expr->pos, "Only arrays or buffer views have a 'count' attribute" );
+            return resolvedNull;
+        }
+
+        ResolvedExpr result = NewResolvedRvalue( intType );
+        if( type->kind == Type::Array )
+        {
+            result.isConst = true;
+            result.constValue.intValue = type->array.count;
+        }
+
+        return result;
+    }
+
+    // 'Normal' field access of aggregates or pointers to such
     if( type->kind == Type::Pointer )
     {
         left = NewResolvedLvalue( type->ptr.base );
@@ -672,66 +813,119 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
 ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
 {
     ASSERT( expr->kind == Expr::Compound );
+    ASSERT( expectedType );
 
     if( expectedType )
         CompleteType( expectedType, expr->pos );
 
     Type* type = expectedType;
-    if( !type )
-    {
-        // TODO Try to deduce a type based on the compound fields
-        NOT_IMPLEMENTED;
 
-        ASSERT( type );
-    }
-
-    sz slotCount = 0;
-    if( type->kind == Type::Array )
+    sz maxSlotCount = 0;
+    if( type->kind == Type::Union )
+        maxSlotCount = 1;
+    else if( type->kind == Type::Struct )
+        maxSlotCount = type->aggregate.fields.count;
+    else if( type->kind == Type::Array )
     {
         if( type->array.count )
-            slotCount = type->array.count;
-        else
-        {
-            // Arrays with no size specifier will have as many elements as given
-            slotCount = expr->compoundFields.count;
-            // Substitute type by a new one with correct sizing info (need to fetch any cached types again)
-            // This leaks the old type, but who cares!
-            type = NewArrayType( type->array.base, slotCount );
-        }
+            maxSlotCount = type->array.count;
     }
-    else if( type->kind == Type::Struct )
-        slotCount = type->aggregate.fields.count;
-    else if( type->kind == Type::Union )
-        // TODO Check that we're using a single designated initializer
-        slotCount = 1;
+    else if( type->kind == Type::Buffer )
+    {
+        // We only know for sure if this is a buffer compound after we have resolved the first field
+    }
     else
     {
-        RSLV_ERROR( expr->pos, "Compound literals can only be used to initialize struct or array types" );
+        RSLV_ERROR( expr->pos, "Compound literals can only be used with struct or array types" );
         return resolvedNull;
     }
 
-    if( expr->compoundFields.count > slotCount )
+    if( maxSlotCount && expr->compoundFields.count > maxSlotCount )
     {
         RSLV_ERROR( expr->pos, "Too many fields in compound literal" );
         return resolvedNull;
     }
 
+    i64 index = 0, maxIndex = 0;
     Type* expectedFieldType = nullptr;
-    if( type->kind == Type::Array )
-        expectedFieldType = type->array.base;
 
-    int i = 0;
     for( CompoundField const& f : expr->compoundFields )
     {
-        if( type->kind == Type::Struct )
-            expectedFieldType = type->aggregate.fields[i++].type;
+        if( type->kind == Type::Struct || type->kind == Type::Union )
+        {
+            if( f.kind != CompoundField::Name )
+                RSLV_ERROR( f.pos, "Only named initializers allowed in compound literals for struct or union types" );
+            else
+            {
+                for( TypeField const& tf : type->aggregate.fields )
+                {
+                    if( tf.name == f.name )
+                    {
+                        expectedFieldType = tf.type; 
+                        break;
+                    }
+                }
+
+                if( !expectedFieldType )
+                    RSLV_ERROR( f.pos, "Unknown field '%s' in named initializer for type '%s'", f.name, type->name );
+            }
+        }
+        else if( type->kind == Type::Array )
+        {
+            expectedFieldType = type->array.base;
+
+            if( f.kind == CompoundField::Name )
+                RSLV_ERROR( f.pos, "Named initializers not allowed in compound literals for array types" );
+            else if( f.kind == CompoundField::Index )
+            {
+                index = ResolveConstExprInt( f.index );
+                if( index < 0 )
+                    RSLV_ERROR( f.pos, "Indexed initializer in compound literal cannot be negative" );
+            }
+
+            if( type->array.count && index >= type->array.count )
+                RSLV_ERROR( f.pos, "Field initializer in compound literal out of range" );
+
+            // TODO Remember which indices have been defined, and show an error in case a slot is specified more than once
+            maxIndex = Max( maxIndex, index );
+        }
+        else if( type->kind == Type::Buffer )
+        {
+            expectedFieldType = index == 0 ? NewPtrType( type->array.base ) : intType;
+        }
 
         ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
-        if( field.type != expectedFieldType )
+
+        if( !ConvertType( &field, expectedFieldType ) )
         {
-            RSLV_ERROR( expr->pos, "Type mismatch in compound literal field (wanted '%s', got '%s')",
-                        expectedFieldType->name, field.type->name );
+            bool error = true;
+            // HACK For buffers, if the first field is not a pointer, try continuing as an array literal instead
+            if( type->kind == Type::Buffer && index == 0 )
+            {
+                expectedFieldType = type->array.base;
+                if( ConvertType( &field, expectedFieldType ) )
+                {
+                    // Continue using an unknown size array
+                    // FIXME We need to do the checks for arrays for this slot too!
+                    type = NewArrayType( type->array.base, 0 );
+                    error = false;
+                }
+            }
+
+            if( error )
+                RSLV_ERROR( f.pos, "Invalid type in compound literal field (expected '%s', got '%s')",
+                            expectedFieldType->name, field.type->name );
         }
+
+        index++;
+    }
+
+    // If we were given an unknown sized array type
+    if( type->kind == Type::Array && type->array.count == 0 )
+    {
+        // Substitute type by a new one with correct sizing info (need to fetch any cached types again)
+        // This leaks the old type, but who cares!
+        type = NewArrayType( type->array.base, maxIndex );
     }
 
     return NewResolvedRvalue( type );
@@ -763,9 +957,9 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
     {
         Type* argType = argTypes[i++];
         ResolvedExpr resolvedArg = ResolveExpr( arg, argType );
-        if( resolvedArg.type != argType )
+        if( !ConvertType( &resolvedArg, argType ) )
         {
-            RSLV_ERROR( arg->pos, "Type mismatch in function call (wanted '%s', got '%s')",
+            RSLV_ERROR( arg->pos, "Invalid type in function call argument (expected '%s', got '%s')",
                         argType->name, resolvedArg.type->name );
             return resolvedNull;
         }
@@ -806,7 +1000,7 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
 
     ResolvedExpr base = ResolveExpr( expr->index.base );
     ResolvedExpr index = ResolveExpr( expr->index.index );
-    if( index.type->kind != Type::Int )
+    if( !ConvertType( &index, intType ) )
         RSLV_ERROR( expr->pos, "Index expression must have integer type" );
 
     if( base.type->kind == Type::Pointer )
@@ -937,6 +1131,33 @@ ResolvedExpr ResolveCastExpr( Expr* expr )
     return NewResolvedRvalue( type );
 }
 
+ResolvedExpr ResolveRangeExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Range );
+
+    if( expr->range.lowerBound )
+    {
+        ResolvedExpr lowerBound = ResolveExpr( expr->range.lowerBound );
+        if( !ConvertType( &lowerBound, intType ) )
+            RSLV_ERROR( expr->pos, "Lower bound in range expression must have integer type" );
+    }
+
+    ResolvedExpr upperBound = ResolveExpr( expr->range.upperBound );
+    if( upperBound.type->kind == Type::Array || upperBound.type->kind == Type::Buffer )
+    {
+        if( expr->range.lowerBound )
+            RSLV_ERROR( expr->pos, "Ranged buffer expression cannot have a lower bound" );
+    }
+    else
+    {
+        if( !ConvertType( &upperBound, intType ) )
+            RSLV_ERROR( expr->pos, "Upper bound in range expression must have integer type" );
+    }
+
+    // TODO What type is this thing? Do we need a Range type?
+    return NewResolvedRvalue( intType );
+}
+
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 {
     ResolvedExpr result = {};
@@ -967,6 +1188,9 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
         case Expr::Call:
             result = ResolveCallExpr( expr );
             break;
+        case Expr::Range:
+            result = ResolveRangeExpr( expr );
+            break;
 
         case Expr::Cast:
             result = ResolveCastExpr( expr );
@@ -994,7 +1218,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
     }
 
     if( result.type )
-        expr->resolvedType = result.type;
+        expr->resolvedExpr = result;
     return result;
 }
 
@@ -1186,7 +1410,10 @@ void ResolveSymbol( Symbol* sym )
             
             Type* type = nullptr;
             if( decl->var.type )
+            {
                 type = ResolveTypeSpec( decl->var.type );
+                CompleteType( type, decl->pos );
+            }
 
             // TODO Multiple names with multiple inits?
             // (Should maybe separate any comma expressions when separating the names, but rn we don't separate names for fields)
@@ -1194,17 +1421,19 @@ void ResolveSymbol( Symbol* sym )
             if( decl->var.initExpr )
             {
                 ResolvedExpr init = ResolveExpr( decl->var.initExpr, type );
-                if( type && init.type != type )
+                if( type && !ConvertType( &init, type ) )
                 {
                     // Make an exception for empty-size arrays
                     if( type->kind != Type::Array || type->array.count != 0 )
-                        RSLV_ERROR( pos, "Declared type for '%s' does not match type of initializer expression", sym->name );
+                    {
+                        RSLV_ERROR( pos, "Invalid type in initializer expression. Expected '%s', got '%s'", type->name, init.type->name );
+                        break;
+                    }
                 }
 
                 type = init.type;
             }
 
-            CompleteType( type, decl->pos );
             decl->resolvedType = sym->type = type;
         } break;
 
@@ -1300,8 +1529,10 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
         } break;
         case Stmt::Assign:
         {
+            // TODO Very imcomplete
             ResolvedExpr left = ResolveExpr( stmt->assign.left );
             ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
+            // FIXME Use ConvertTo
             if( left.type && right.type && left.type != right.type )
             {
                 RSLV_ERROR( stmt->pos, "Type mismatch in assignment (left is '%s', right is '%s')",
@@ -1382,7 +1613,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             bool hasDefault = false;
 
             returns = true;
-            ResolvedExpr result = ResolveExpr( stmt->switch_.expr );
+            ResolvedExpr switchExpr = ResolveExpr( stmt->switch_.expr );
             for( SwitchCase const& c : stmt->switch_.cases )
             {
                 if( c.isDefault )
@@ -1393,10 +1624,10 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 }
                 else
                 {
-                    // TODO Comma expressions
+                    // TODO Ranges
+                    // TODO Comma expressions?
                     ResolvedExpr caseResult = ResolveExpr( c.expr );
-                    // FIXME All these type comparisons should consider compatible types not just equality!
-                    if( caseResult.type != result.type )
+                    if( !ConvertType( &caseResult, switchExpr.type ) )
                         RSLV_ERROR( c.expr->pos, "Type mismatch in case expression" );
                 }
 
@@ -1416,9 +1647,9 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             {
                 // TODO Return multiple values
                 ResolvedExpr result = ResolveExpr( stmt->expr, returnType );
-                if( result.type && result.type != returnType )
+                if( result.type && !ConvertType( &result, returnType ) )
                 {
-                    RSLV_ERROR( stmt->expr->pos, "Type mismatch in return expression (expected '%s', got '%s')",
+                    RSLV_ERROR( stmt->expr->pos, "Invalid type in return expression (expected '%s', got '%s')",
                                 returnType->name, result.type->name );
                 }
             }

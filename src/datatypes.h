@@ -226,6 +226,7 @@ struct BucketArray
         typedef typename Choose<IsConst, T const&, T&>::type ValueRef;
         typedef typename Choose<IsConst, Bucket const*, Bucket*>::type BucketPtr;
 
+        // TODO Should probably just default to const and do a const_cast in the main class methods when needed
         BucketPtr base;
         i32 index;
 
@@ -365,6 +366,8 @@ struct BucketArray
         *slot = item;
         return slot;
     }
+
+    // TODO InsertAt( int )
 
     T Remove( const Idx<false>& index )
     {

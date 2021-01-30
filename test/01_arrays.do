@@ -13,27 +13,42 @@ main :: ( argc: int, argv: **i8 ) -> int
     PrintBuffer( nums1 );
 
     // Can initialize only some elements (the rest will be zero)
-
-    // Can initialize using an 'open' range, which will fill the array with the same value
-
-    nums2: [3]int = { 42, -10, 1328 };
+    nums2: []int = { [9] = 42 };
     PrintBuffer( nums2 );
 
+    // TODO Can initialize using one or more indexed ranges
+    /*nums3: []int = { [0..3] = 42, [10..13] = -1 };*/
+    /*PrintBuffer( nums3 );*/
+
+    // Can initialize using an 'open' range (as init value), which will fill the array with the same value
+    // TODO What about data types other than int?
+    // TODO If using a variable instead of a literal, the syntax becomes ambiguous with the one used to iterate over arrays in a for loop
+    /*nums4: [5]int = { ..100 };*/
+    /*PrintBuffer( nums4 );*/
+
+    // Open ranges do require an explicitly sized array
+    // TODO #expecterror({errors..}) expecting the given compiler error(s) to appear (will be swallowed) or produce a new error otherwise
+    /*nums5: []int = { ..100 };*/
+    /*PrintBuffer( nums5 );*/
+
     // Creating a buffer view from an array
-    nums3: [*]int = nums1;
-    PrintBuffer( nums3 );
-
-    // Can be done straight from a literal too
-    nums4: [*]int = { ..100 };
-    PrintBuffer( nums4 );
-
-    // Passing any array where a pointer to the same type is expected just works
-    nums5: *int = nums2;
-
-    // Creating a buffer view from pointer and count
-    nums6: [*]int = { nums5, nums2.count };
+    nums6: [*]int = nums1;
     PrintBuffer( nums6 );
 
+    // Can be done straight from a literal too, which will point it to a value on the stack
+    nums7: [*]int = { 42, -10, 1328 };
+    PrintBuffer( nums7 );
+
+    // Passing any array where a pointer to the same type is expected just works
+    pointTo2: *int = nums2;
+    // Same with a buffer view
+    pointTo6: *int = nums6;
+
+    // Creating a buffer view from pointer and count
+    nums8: [*]int = { pointTo6, nums6.count };
+    PrintBuffer( nums8 );
+
+    // TODO Array of arrays, buffer of buffers?
 
 /*
 // Still parsed (resolved too?)
@@ -70,4 +85,5 @@ main :: ( argc: int, argv: **i8 ) -> int
     printf( 'Sbuffer count: %d, capacity: %d\n', numsBuffer.count, numsBuffer.capacity );
 }
 */
+    return 0;
 }

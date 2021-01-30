@@ -23,6 +23,10 @@ ________________________________________________________________________________
   Recover that idea in one of the early JAI videos about being able to slowly promote functions from quick anonymous lambdas to full blown
   independent functions while using the same exact syntax all along. Go find that video and write down the details.
 
+- Carefully consider NOT supporting function overloading?
+  Cons:
+    · It makes code harder to follow, since a simple search by function name brings up potentially totally unrelated calls
+
 - Maybe even do something like in Python where there is a kind of "correspondence" between function args and struct fields,
   and you can trivially pack/unpack structs as function args
 
@@ -138,6 +142,9 @@ ________________________________________________________________________________
 
 - A compile-time feature that would be extremely useful is constexpr monotonic counters (and being able to define _several_ of them).
   Think of how to do this in a simple way.
+
+- Inlined enum decls to use in function arguments (where would that symbol live though?)
+
 ________________________________________________________________________________ 
 
 

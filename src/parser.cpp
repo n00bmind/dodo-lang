@@ -321,23 +321,23 @@ CompoundField ParseCompoundFieldExpr( Lexer* lexer )
             result.kind = CompoundField::Index;
         }
     }
+    else if( MatchToken( TokenKind::Dot, lexer->token ) )
+    {
+        NextToken( lexer );
+        RequireToken( TokenKind::Name, lexer );
+        char const* fieldName = lexer->token.ident;
+        NextToken( lexer );
+
+        RequireTokenAndAdvance( TokenKind::Assign, lexer );
+        Expr* valueExpr = ParseExpr( lexer );
+
+        if( lexer->IsValid() )
+            result = { pos, fieldName, valueExpr, CompoundField::Name };
+    }
     else
     {
         Expr* expr = ParseExpr( lexer );
-        if( MatchToken( TokenKind::Assign, lexer->token ) )
-        {
-            if( expr->kind == Expr::Name )
-            {
-                NextToken( lexer );
-                Expr* valueExpr = ParseExpr( lexer );
-
-                if( lexer->IsValid() )
-                    result = { pos, expr->name, valueExpr, CompoundField::Name };
-            }
-            else
-                PARSE_ERROR( lexer->token.pos, "Unrecognized initializer type in compound literal. Must be either a field name or an index" );
-        }
-        else
+        if( lexer->IsValid() )
             result = { pos, nullptr, expr, CompoundField::Default };
     }
 
@@ -475,7 +475,11 @@ Expr* ParsePostfixExpr( Lexer* lexer )
         else if( MatchToken( TokenKind::Dot, lexer->token ) )
         {
             Token field = NextToken( lexer );
-            RequireToken( TokenKind::Name, lexer );
+            if( !(field.kind == TokenKind::Name || field.kind == TokenKind::Keyword) )
+            {
+                char const* desc = TokenKind::Values::names[ field.kind ];
+                PARSE_ERROR( field.pos, "Unexpected token '%s' in expression", desc );
+            }
 
             if( lexer->IsValid() )
                 expr = NewFieldExpr( pos, expr, field.ident );

@@ -623,6 +623,11 @@ bool MatchKeyword( int kw, Token const& token )
     return token.ident == globalKeywords[ kw ];
 }
 
+bool MatchKeyword( int kw, char const* internedString )
+{
+    return internedString == globalKeywords[ kw ];
+}
+
 #if !CONFIG_RELEASE
 void DebugDumpScan( String const& program, char const* filename )
 {

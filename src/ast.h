@@ -40,6 +40,33 @@ struct TypeSpec
 };
 
 
+struct ConstValue
+{
+    // TODO Array of T!?
+    union
+    {
+        String strValue = {};
+        uintptr_t ptrValue;
+        f64 floatValue;
+        i64 intValue;
+        u64 bitsValue;
+    };
+    // TODO 
+    u32 sizeBytes;
+
+    bool BoolValue() { return bitsValue != 0ull; }
+};
+
+struct Type;
+
+struct ResolvedExpr
+{
+    Type* type;
+    ConstValue constValue;
+    bool isLvalue;
+    bool isConst;
+};
+
 struct CompoundField
 {
     enum Kind
@@ -58,8 +85,6 @@ struct CompoundField
     Expr *initValue;
     Kind kind;
 };
-
-struct Type;
 
 struct Expr
 {
@@ -86,7 +111,7 @@ struct Expr
     };
 
     // Annotated type from the result of the resolve
-    Type* resolvedType;
+    ResolvedExpr resolvedExpr;
     SourcePos pos;
     Kind kind;
 
