@@ -3,7 +3,16 @@ R"~~~(#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 
-#define ARRAYCOUNT(array) Sz( sizeof(array) / sizeof((array)[0]) )
+#define ARGS(...) __VA_ARGS__  
+#define ARRAYCOUNT(array) I32( sizeof(array) / sizeof((array)[0]) )
+
+#define BUFFER(x, T)                                  \
+[]()                                                  \
+{                                                     \
+    static T literal[] = x;                           \
+    return buffer<T>( literal, ARRAYCOUNT(literal) ); \
+}()
+
 #if _MSC_VER
 #define INLINE __forceinline
 #else
@@ -200,7 +209,20 @@ ASSERT_HANDLER(DefaultAssertHandler)
 // TODO TODO TODO At some point all these basic types will need to be ported over
 // or implemented internally in dodo and hidden from user code
 
-class sbuffer;
+template <typename T>
+struct buffer
+{
+    T* data;
+    i32 count;
+
+public:
+    buffer( T* data_, i32 count_ )
+        : data( data_ )
+        , count( count_ )
+    {}
+
+    operator T*() { return data; }
+};
 
 struct string
 {

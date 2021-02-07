@@ -367,8 +367,6 @@ struct BucketArray
         return slot;
     }
 
-    // TODO InsertAt( int )
-
     T Remove( const Idx<false>& index )
     {
         ASSERT( count > 0 );
@@ -413,6 +411,59 @@ struct BucketArray
             Pop();
     }
 
+    // TODO Untested
+#if 0
+    // Not particularly fast
+    T const& At( int index ) const
+    {
+        ASSERT( index >= 0 && index < count );
+
+        Bucket const* base = &first;
+        const int bucketSize = first.count;
+
+        while( index >= bucketSize )
+        {
+            index -= bucketSize;
+            base = base->next;
+        }
+
+        return base->data[index];
+    }
+    T& At( int index )
+    {
+        return const_cast<BucketArray const*>(this)->At( index );
+    }
+
+    void Grow( int newCount )
+    {
+        // TODO This can be used to create gaps, which might be a problem in other situations?
+        if( newCount > count )
+        {
+            Bucket const* base = &first;
+            const int bucketSize = first.count;
+
+            int index = newCount;
+            while( index >= bucketSize )
+            {
+                index -= bucketSize;
+                if( base == last )
+                    AddEmptyBucket();
+                base = base->next;
+            }
+        }
+    }
+
+    void Resize( int newCount )
+    {
+        if( newCount > count )
+            Grow( newCount );
+        //else
+            // TODO Add invalidated buckets to freelist?
+
+        count = newCount;
+    }
+#endif
+
     typedef bool (*Comparator)( T const& a, T const& b );
 
     T* Find( T const& it, Comparator cmp )
@@ -434,7 +485,29 @@ struct BucketArray
         return result;
     }
 
-    void CopyTo( T* buffer, int bufferCount ) const
+    void AppendFrom( T const* buffer, int bufferCount )
+    {
+        int totalCopied = 0;
+        Bucket*& bucket = last;
+
+        while( totalCopied < bufferCount )
+        {
+            int remaining = bufferCount - totalCopied;
+            int available = bucket->capacity - bucket->count;
+
+            int copied = Min( remaining, available );
+            PCOPY( buffer + totalCopied, bucket->data + bucket->count, copied * SIZEOF(T) );
+            totalCopied += copied;
+
+            bucket->count += copied;
+            if( bucket->count == bucket->capacity )
+                AddEmptyBucket();
+        }
+
+        count += totalCopied;
+    }
+
+    void CopyTo( T* buffer, sz bufferCount ) const
     {
         ASSERT( count <= bufferCount );
 
@@ -524,22 +597,6 @@ struct BucketArray
     }
 
 private:
-
-    T const& At( int i ) const
-    {
-        ASSERT( i >= 0 && i < count );
-
-        Bucket const* base = &first;
-        int index = i;
-
-        while( index >= base->count )
-        {
-            index -= base->count;
-            base = base->next;
-        }
-
-        return base->data[index];
-    }
 
     void AddEmptyBucket()
     {

@@ -1,4 +1,10 @@
-static MemoryArena* outArena = &globalOutArena;
+internal MemoryArena* outArena = &globalOutArena;
+
+internal sz globalIndent = 0;
+internal SourcePos globalPos = {};
+
+internal BucketArray<Decl*> globalInnerFuncs;
+
 
 INLINE void Out( char const* str, sz len = 0 )
 {
@@ -11,9 +17,6 @@ INLINE void Out( char const* str, sz len = 0 )
 
 #define OUTSTR( s ) Out( "" s "", sizeof(s) - 1 )
 #define INDENT_STR "                                                                            "
-
-internal sz globalIndent = 0;
-internal SourcePos globalPos = {};
 
 internal INLINE void OutIndent()
 {
@@ -107,7 +110,6 @@ char* TypeToCdecl( Type* type, char const* symbolName )
         case Type::Pointer:
             return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Array:
-            // TODO This will obviously not be enough for our arrays
             return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.count ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Func:
         {
@@ -125,7 +127,7 @@ char* TypeToCdecl( Type* type, char const* symbolName )
     return nullptr;
 }
 
-void EmitExpr( Expr* expr );
+void EmitExpr( Expr* expr, Type* expectedType = nullptr, StmtList* parentBlock = nullptr );
 
 char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
 {
@@ -138,6 +140,11 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case TypeSpec::Array:
         {
+            if( type->array.isView )
+            {
+                return Strf( "buffer<%s>%s%s", TypeSpecToCdecl( type->array.base, "" ), *symbolName ? " " : "", symbolName );
+            }
+
             char* countStr = "";
             if( type->array.count )
             {
@@ -170,7 +177,49 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
     return nullptr;
 }
 
-void EmitExpr( Expr* expr )
+char const* BuildQualifiedNameTmp( StmtList* parentBlock, char const* name )
+{
+    StringBuilder sb( &globalTmpArena );
+    sb.Append( "%s_%s", parentBlock->globalPath.data, name );
+    return sb.ToString( &globalTmpArena ).data;
+}
+
+internal char charToEscape[256];
+
+void EmitStringLiteral( String const& str )
+{
+    // TODO Multiline
+    OUTSTR( "\"" );
+    char const* p = str.data;
+    char const* end = str.data + str.length;
+    while( p < end )
+    {
+        char const* start = p;
+        while( p < end && isprint( *p ) && !charToEscape[*p] )
+            p++;
+
+        if( start != p )
+            Out( start, p - start );
+
+        if( p < end )
+        {
+            char c = charToEscape[*p];
+            if( c )
+            {
+                Out( Strf( "\\%c", c ) );
+            }
+            else
+            {
+                ASSERT( !isprint( *p ) );
+                Out( Strf( "\\x%X", (unsigned char)*p ) );
+            }
+            p++;
+        }
+    }
+    OUTSTR( "\"" );
+}
+
+void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlock /*= nullptr*/ )
 {
     switch( expr->kind )
     {
@@ -182,14 +231,32 @@ void EmitExpr( Expr* expr )
             Out( Strf( "%f", expr->literal.floatValue ) );
             break;
         case Expr::Str:
-            // TODO Proper escaping of escaped and non-printable stuff
-            OUTSTR( "\"" );
-            Out( expr->literal.strValue.data, expr->literal.strValue.length );
-            OUTSTR( "\"" );
+            EmitStringLiteral( expr->literal.strValue.data );
             break;
         case Expr::Name:
-            Out( expr->name );
-            break;
+        {
+            Type* nameType = expr->resolvedExpr.type;
+            if( expectedType && expectedType->kind == Type::Buffer && nameType->kind == Type::Array )
+            {
+                OUTSTR( "{ " );
+                Out( expr->name.ident );
+                OUTSTR( ", ARRAYCOUNT(" );
+                Out( expr->name.ident );
+                OUTSTR( ") }" );
+            }
+            else if( nameType->kind == Type::Func )
+            {
+                Symbol* sym = expr->name.symbol;
+                Decl* funcDecl = sym->decl;
+
+                char const* name = expr->name.ident;
+                if( funcDecl->parentBlock && !IsForeign( funcDecl ) )
+                    name = BuildQualifiedNameTmp( funcDecl->parentBlock, expr->name.ident );
+                Out( name );
+            }
+            else
+                Out( expr->name.ident );
+        } break;
         case Expr::Cast:
             OUTSTR( "(" );
             Out( TypeSpecToCdecl( expr->cast.type, "" ) );
@@ -197,16 +264,25 @@ void EmitExpr( Expr* expr )
             EmitExpr( expr->cast.expr );
             break;
         case Expr::Call:
-            EmitExpr( expr->call.func );
+        {
+            EmitExpr( expr->call.func, nullptr, parentBlock );
+            Type* funcType = expr->call.func->resolvedExpr.type;
+            ASSERT( funcType->kind == Type::Func );
+
+            int i = 0;
             OUTSTR( "( " );
             for( Expr* argExpr : expr->call.args )
             {
                 if( argExpr != expr->call.args[0] )
                     OUTSTR( ", " );
-                EmitExpr( argExpr );
+
+                // TODO This won't work with named arguments
+                Type* argType = funcType->func.args[i++];
+                EmitExpr( argExpr, argType );
             }
             OUTSTR( " )" );
-            break;
+        } break;
+
         case Expr::Index:
             EmitExpr( expr->index.base );
             OUTSTR( "[" );
@@ -219,6 +295,14 @@ void EmitExpr( Expr* expr )
             Out( expr->field.name );
             break;
         case Expr::Compound:
+        {
+            // Check if we need an inplace conversion to buffer
+            bool convertToBuffer = false;
+            if( expectedType && expectedType->kind == Type::Buffer && expr->resolvedExpr.type->kind == Type::Array )
+            {
+                OUTSTR( "BUFFER(ARGS(" );
+                convertToBuffer = true;
+            }
             OUTSTR( "{ " );
             if( expr->compoundFields[0].kind == CompoundField::Name )
             {
@@ -280,7 +364,13 @@ void EmitExpr( Expr* expr )
                 }
             }
             OUTSTR( " }" );
-            break;
+            if( convertToBuffer )
+            {
+                OUTSTR( "), " );
+                Out( TypeToCdecl( expectedType->array.base, "" ) );
+                OUTSTR( ")" );
+            }
+        } break;
 
         case Expr::Unary:
             Out( TokenKind::Values::names[expr->unary.op] );
@@ -326,16 +416,29 @@ void EmitExpr( Expr* expr )
     }
 }
 
+// NOTE Only uses first name in decl
+char const* BuildQualifiedNameTmp( Decl* decl )
+{
+    char const* name = decl->names[0];
+    // Do we actually need to qualify the name?
+    if( decl->parentBlock )
+        name = BuildQualifiedNameTmp( decl->parentBlock, name );
+
+    return name;
+}
+
 void EmitFuncDecl( Decl* decl )
 {
     ASSERT( decl->kind == Decl::Func );
 
+    char const* name = BuildQualifiedNameTmp( decl );
+
     if( decl->func.returnType )
-        Out( TypeSpecToCdecl( decl->func.returnType, decl->names[0] ) );
+        Out( TypeSpecToCdecl( decl->func.returnType, name ) );
     else
     {
         OUTSTR( "void " );
-        Out( decl->names[0] );
+        Out( name );
     }
     OUTSTR( "(" );
     if( decl->func.args.count )
@@ -380,7 +483,7 @@ void EmitForwardDecls()
     }
 }
 
-void EmitStmtBlock( StmtList const& block );
+void EmitStmtBlock( StmtList const* block );
 
 void EmitVarDecl( Decl* decl, char const* name, bool nested )
 {
@@ -403,7 +506,7 @@ void EmitVarDecl( Decl* decl, char const* name, bool nested )
 
     OUTSTR( " = " );
     if( decl->var.initExpr )
-        EmitExpr( decl->var.initExpr );
+        EmitExpr( decl->var.initExpr, resolvedType );
     else
         OUTSTR( "{}" );
     OUTSTR( ";" );
@@ -461,6 +564,11 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 
             // Only function prototypes at this stage
             // TODO Most of these are completely unnecessary
+
+            bool localDecl = decl->parentBlock != nullptr;
+            if( localDecl )
+                globalInnerFuncs.Push( decl );
+
             EmitFuncDecl( decl );
             OUTSTR( ";" );
         } break;
@@ -478,7 +586,7 @@ void EmitStmt( Stmt* stmt )
     {
         case Stmt::Expr:
             OutIndent();
-            EmitExpr( stmt->expr );
+            EmitExpr( stmt->expr, nullptr, stmt->parentBlock );
             OUTSTR( ";" );
             break;
         case Stmt::Decl:
@@ -511,7 +619,7 @@ void EmitStmt( Stmt* stmt )
                 EmitStmtBlock( ei.block );
             }
 
-            if( stmt->if_.elseBlock.stmts.count )
+            if( stmt->if_.elseBlock->stmts.count )
             {
                 OutIndent();
                 OUTSTR( "else" );
@@ -616,14 +724,14 @@ void EmitStmt( Stmt* stmt )
     OutNL();
 }
 
-void EmitStmtBlock( StmtList const& block )
+void EmitStmtBlock( StmtList const* block )
 {
     OutIndent();
     OUTSTR( "{" );
     OutNL();
 
     globalIndent++;
-    for( Stmt* stmt : block.stmts )
+    for( Stmt* stmt : block->stmts )
         EmitStmt( stmt );
     globalIndent--;
 
@@ -663,11 +771,42 @@ void EmitOrderedSymbols()
     }
 }
 
+void EmitInnerFunctions()
+{
+    for( auto idx = globalInnerFuncs.First(); idx; ++idx )
+    {
+        Decl* decl = *idx;
+        ASSERT( decl->kind == Decl::Func );
+
+        EmitPos( decl->pos );
+        EmitFuncDecl( decl );
+        OutNL();
+        EmitStmtBlock( decl->func.body );
+        OutNL();
+    }
+}
+
+
 char const* globalPreamble =
 #include "preamble.inl"
 
 void GenerateAll()
 {
+    INIT( globalInnerFuncs ) BucketArray<Decl*>( &globalArena, 16 );
+
+    // Escape sequences
+    charToEscape['\0'] = '0';
+    charToEscape['\''] = '\'';
+    charToEscape['"'] = '"';
+    charToEscape['\\'] = '\\';
+    charToEscape['\n'] = 'n';
+    charToEscape['\r'] = 'r';
+    charToEscape['\t'] = 't';
+    charToEscape['\v'] = 'v';
+    charToEscape['\b'] = 'b';
+    charToEscape['\a'] = 'a';
+
+
     Out( globalPreamble );
     OutNL();
 
@@ -679,4 +818,7 @@ void GenerateAll()
     OutNL();
     EmitOrderedSymbols();
     OutNL();
+    OUTSTR( "///// Inner functions" );
+    OutNL();
+    EmitInnerFunctions();
 }

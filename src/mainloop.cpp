@@ -221,7 +221,7 @@ complex_func :: ()
             char buf[16768] = {};
 
             lexer = Lexer( String( t.expr ), "<tests>" );
-            decl = ParseDecl( &lexer );
+            decl = ParseDecl( &lexer, nullptr );
 
             char* outBuf = buf;
             sz len = ARRAYCOUNT(buf);
@@ -275,7 +275,7 @@ complex_func :: ()
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
-            Decl* decl = ParseDecl( &lexer );
+            Decl* decl = ParseDecl( &lexer, nullptr );
             globalDecls.Push( decl );
         }
 
@@ -333,7 +333,7 @@ complex_func :: ()
         for( int i = 0; i < ARRAYCOUNT(testDeclStrings); ++i )
         {
             Lexer lexer = Lexer( String( testDeclStrings[i] ), "<tests>" );
-            Decl* decl = ParseDecl( &lexer );
+            Decl* decl = ParseDecl( &lexer, nullptr );
             globalDecls.Push( decl );
         }
 
@@ -546,6 +546,7 @@ bool Run( int argCount, char const* args[] )
             "-wd4668",          // Undefined preprocessor macro
             "-wd4710",          // Function not inlined
             "-wd4820",          // Padding added
+            "-wd5045",          // Spectre mitigations
         };
         char const* commonLinkerFlags[] =
         {

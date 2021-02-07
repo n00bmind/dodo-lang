@@ -58,6 +58,7 @@ struct ConstValue
 };
 
 struct Type;
+struct Symbol;
 
 struct ResolvedExpr
 {
@@ -168,7 +169,12 @@ struct Expr
             };
             Token::LiteralMod modifier;
         } literal;
-        char const* name;
+        struct
+        {
+            char const* ident;
+            // Annotated symbol from the resolution phase
+            Symbol* symbol;
+        } name;
 
         Expr* parenExpr;
         Expr* sizeofExpr;
@@ -192,6 +198,10 @@ struct StmtList
     // inline they're reallocated at the very end of the StmtList that contains them (to make them all contiguous), so in this
     // case the optimum solution could well be counter intuitive.
     Array<Stmt*> stmts;
+    String globalPath;
+    char const* name;
+    StmtList* parent;
+    i32 childCount;
 };
 
 
@@ -228,6 +238,7 @@ struct Decl
     Type* resolvedType;
     SourcePos pos;
     Array<char const*> names;
+    StmtList* parentBlock;
     char const* directive;
     Kind kind;
 
@@ -241,7 +252,7 @@ struct Decl
             Array<FuncArg> args;
             // TODO Multiple return types
             TypeSpec* returnType;
-            StmtList body;
+            StmtList* body;
         } func;
 
         struct
@@ -267,13 +278,13 @@ struct Decl
 
 struct ElseIf
 {
-    StmtList block;
+    StmtList* block;
     Expr* cond;
 };
 
 struct SwitchCase
 {
-    StmtList block;
+    StmtList* block;
     // TODO Ranges (create a Range expr)
     Expr* expr;         // Default case has null expr
     bool isDefault;
@@ -298,6 +309,7 @@ struct Stmt
     };
 
     SourcePos pos;
+    StmtList* parentBlock;
     Kind kind;
 
     union
@@ -305,19 +317,19 @@ struct Stmt
         struct
         {
             Array<ElseIf> elseIfs;
-            StmtList thenBlock;
-            StmtList elseBlock;
+            StmtList* thenBlock;
+            StmtList* elseBlock;
             ::Expr* cond;
         } if_;
         struct
         {
-            StmtList block;
+            StmtList* block;
             ::Expr* cond;
             bool isDoWhile;
         } while_;
         struct
         {
-            StmtList block;
+            StmtList* block;
             char const* indexName;
             ::Expr* rangeExpr;
         } for_;
@@ -336,7 +348,7 @@ struct Stmt
 
         ::Decl* decl;
         ::Expr* expr;
-        StmtList block;
+        StmtList* block;
     };
 };
 

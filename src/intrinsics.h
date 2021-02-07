@@ -168,6 +168,12 @@ Min( u64 a, u64 b )
     return a < b ? a : b;
 }
 
+INLINE i64
+Min( i64 a, i64 b )
+{
+    return a < b ? a : b;
+}
+
 INLINE i32
 Max( i32 a, i32 b )
 {

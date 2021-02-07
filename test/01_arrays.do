@@ -1,11 +1,16 @@
+/* TODO Varargs*/
+#foreign printf :: ( fmt: string, i: int, v: int );
+#foreign puts :: ( s: string );
 
 main :: ( argc: int, argv: **i8 ) -> int
 {
     // Passing any array to a function as a view
     PrintBuffer :: ( b: [*]int )
     {
-        for( i in 0..b.count )
+        puts( '-----\n' );
+        for( i in 0 .. b.count )
             printf( 'Item %d is %d\n', i, b[i] );
+        puts( '\n' );
     }
 
     // Static arrays
@@ -48,10 +53,11 @@ main :: ( argc: int, argv: **i8 ) -> int
     nums8: [*]int = { pointTo6, nums6.count };
     PrintBuffer( nums8 );
 
+    // TODO Print addresses of things
     // TODO Array of arrays, buffer of buffers?
 
 /*
-// Still parsed (resolved too?)
+// TODO Should be still parsed (resolved too?)
 #if 0
 {
     // TODO

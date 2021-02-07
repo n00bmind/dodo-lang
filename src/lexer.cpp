@@ -310,7 +310,7 @@ internal void NextTokenRaw( Lexer* lexer )
 #undef IDENT
 
 #undef CASE
-        // TODO Chars
+        // TODO Chars !?
         case '\"':
             stringLiteralQuote = '\"';
         case '\'':
@@ -344,6 +344,8 @@ internal void NextTokenRaw( Lexer* lexer )
                     }
 
                     c = I8( val );
+                    // Skip backslash and escape code
+                    lexer->Advance();
                 }
 
                 strValue.Push( c );
@@ -353,7 +355,7 @@ internal void NextTokenRaw( Lexer* lexer )
             if( stream[0] )
                 lexer->Advance();
 
-            token.strValue.CopyFrom( strValue, &globalArena );
+            token.strValue = String::Clone( strValue, &globalArena );
         } break;
 
         case '/':

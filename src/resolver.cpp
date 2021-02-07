@@ -72,6 +72,7 @@ struct Type
 
     char const* name;
     // NOTE Only user types (aggregates and enums) will have one
+    // (only user created types are biunivocally associated with a symbol)
     Symbol* symbol;
     sz size;
     sz align;
@@ -569,9 +570,11 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Name );
 
-    Symbol* sym = ResolveName( expr->name, expr->pos );
+    Symbol* sym = ResolveName( expr->name.ident, expr->pos );
     if( !sym )
         return resolvedNull;
+
+    expr->name.symbol = sym;
 
     if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
@@ -945,9 +948,17 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
         RSLV_ERROR( expr->pos, "Cannot call non-function value" );
         return resolvedNull;
     }
-    if( expr->call.args.count != result.type->func.args.count )
+    // TODO Optionals, varargs, etc
+    if( expr->call.args.count < result.type->func.args.count )
     {
-        RSLV_ERROR( expr->pos, "Missing arguments in function call" );
+        RSLV_ERROR( expr->pos, "Missing arguments in function call (expected %d, got %d)",
+                    result.type->func.args.count, expr->call.args.count );
+        return resolvedNull;
+    }
+    else if( expr->call.args.count > result.type->func.args.count )
+    {
+        RSLV_ERROR( expr->pos, "Too many arguments in function call (expected %d, got %d)",
+                    result.type->func.args.count, expr->call.args.count );
         return resolvedNull;
     }
 
@@ -1005,7 +1016,7 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
 
     if( base.type->kind == Type::Pointer )
         return NewResolvedLvalue( base.type->ptr.base );
-    else if( base.type->kind == Type::Array )
+    else if( base.type->kind == Type::Array || base.type->kind == Type::Buffer )
         return NewResolvedLvalue( base.type->array.base );
     else
     {
@@ -1150,6 +1161,9 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
     }
     else
     {
+        if( !expr->range.lowerBound )
+            RSLV_ERROR( expr->pos, "Integer range expression must have a lower bound" );
+
         if( !ConvertType( &upperBound, intType ) )
             RSLV_ERROR( expr->pos, "Upper bound in range expression must have integer type" );
     }
@@ -1503,8 +1517,72 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
     return cond;
 }
 
-bool ResolveStmtBlock( StmtList const& block, Type* returnType );
+INLINE bool IsForeign( Decl* decl )
+{
+    return decl->directive == globalDirectives[ Directive::Foreign ];
+}
+
+bool ResolveStmtBlock( StmtList const* block, Type* returnType );
 Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal );
+
+void ResolveFuncBody( Symbol* sym )
+{
+    ASSERT( sym->state == Symbol::Resolved );
+
+    Decl* decl = sym->decl;
+    ASSERT( decl->kind == Decl::Func );
+
+    Type* type = sym->type;
+    ASSERT( type->kind == Type::Func );
+
+    auto scopeIdx = EnterScope();
+
+    int i = 0;
+    for( FuncArg const& a : decl->func.args )
+    {
+        Type* argType = type->func.args[i];
+        CompleteType( argType, a.pos );
+
+        // Create a synthetic Decl
+        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, decl->func.body );
+        CreateDeclSymbols( varDecl, true );
+    }
+
+    if( type->func.returnType )
+        CompleteType( type->func.returnType, decl->func.returnType->pos );
+    else
+        type->func.returnType = voidType;
+
+    if( !IsForeign( decl ) )
+    {
+        bool returns = ResolveStmtBlock( decl->func.body, type->func.returnType );
+        if( !returns && type->func.returnType != voidType )
+            RSLV_ERROR( decl->pos, "Not all control paths return a value" );
+    }
+
+    LeaveScope( scopeIdx );
+}
+
+void CompleteSymbol( Symbol* sym )
+{
+    ResolveSymbol( sym );
+
+    if( sym->kind == Symbol::Type )
+        CompleteType( sym->type, sym->decl->pos );
+    else if( sym->kind == Symbol::Func )
+        ResolveFuncBody( sym );
+}
+
+Symbol* ResolveName( char const* name, SourcePos const& pos )
+{
+    Symbol* sym = GetSymbol( name );
+    if( sym )
+        ResolveSymbol( sym );
+    else
+        RSLV_ERROR( pos, "Undefined symbol '%s'", name );
+
+    return sym;
+}
 
 bool ResolveStmt( Stmt* stmt, Type* returnType )
 {
@@ -1525,7 +1603,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             // user defined types (and maybe constants too), but at the very least for variables this is no good!
             Array<Symbol*> symbols = CreateDeclSymbols( stmt->decl, true );
             for( Symbol* sym : symbols )
-                ResolveSymbol( sym );
+                CompleteSymbol( sym );
         } break;
         case Stmt::Assign:
         {
@@ -1559,7 +1637,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 returns = ResolveStmtBlock( ei.block, returnType ) && returns;
             }
 
-            if( stmt->if_.elseBlock.stmts.count )
+            if( stmt->if_.elseBlock->stmts.count )
                 returns = ResolveStmtBlock( stmt->if_.elseBlock, returnType ) && returns;
             else
                 returns = false;
@@ -1576,34 +1654,15 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
             Expr* rangeExpr = stmt->for_.rangeExpr;
             SourcePos const& pos = rangeExpr->pos;
-            ResolvedExpr lowerBound = ResolveExpr( rangeExpr->range.lowerBound );
-            if( lowerBound.type->kind == Type::Int )
-            {
-                // Need an upper bound for integer ranges
-                if( rangeExpr->range.upperBound )
-                {
-                    ResolvedExpr upperBound = ResolveExpr( rangeExpr->range.upperBound );
-                    if( upperBound.type->kind != Type::Int )
-                        RSLV_ERROR( pos, "Range expression must have integer type" );
-                }
-                else
-                    RSLV_ERROR( pos, "Integer range expression requires an upper bound" );
-            }
-            else
-            {
-                if( rangeExpr->range.upperBound )
-                    RSLV_ERROR( pos, "Range expression must have integer type" );
 
-                if( lowerBound.type->kind != Type::Array && lowerBound.type->kind != Type::String )
-                    RSLV_ERROR( pos, "Iterable expression must be an array or string" );
-
-                CompleteType( lowerBound.type, pos );
-            }
+            ResolveExpr( rangeExpr );
 
             // Create a synthetic Decl
             // TODO Support type specifiers? (make this more Decl-like)
-            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr );
+            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr, stmt->for_.block );
             CreateDeclSymbols( varDecl, true );
+
+            ResolveStmtBlock( stmt->for_.block, returnType );
 
             LeaveScope( forScopeIdx );
         } break;
@@ -1619,7 +1678,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 if( c.isDefault )
                 {
                     if( hasDefault )
-                        RSLV_ERROR( c.block.pos, "Multiple default clauses in switch statement" );
+                        RSLV_ERROR( c.block->pos, "Multiple default clauses in switch statement" );
                     hasDefault = true;
                 }
                 else
@@ -1671,82 +1730,18 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
     return returns;
 }
 
-bool ResolveStmtBlock( StmtList const& block, Type* returnType )
+bool ResolveStmtBlock( StmtList const* block, Type* returnType )
 {
     auto scopeIdx = EnterScope();
 
     bool returns = false;
-    for( Stmt* stmt : block.stmts )
+    for( Stmt* stmt : block->stmts )
     {
         returns = ResolveStmt( stmt, returnType ) || returns;
     }
 
     LeaveScope( scopeIdx );
     return returns;
-}
-
-INLINE bool IsForeign( Decl* decl )
-{
-    return decl->directive == globalDirectives[ Directive::Foreign ];
-}
-
-void ResolveFuncBody( Symbol* sym )
-{
-    ASSERT( sym->state == Symbol::Resolved );
-
-    Decl* decl = sym->decl;
-    ASSERT( decl->kind == Decl::Func );
-
-    Type* type = sym->type;
-    ASSERT( type->kind == Type::Func );
-
-    auto scopeIdx = EnterScope();
-
-    int i = 0;
-    for( FuncArg const& a : decl->func.args )
-    {
-        Type* argType = type->func.args[i];
-        CompleteType( argType, a.pos );
-
-        // Create a synthetic Decl
-        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr );
-        CreateDeclSymbols( varDecl, true );
-    }
-
-    if( type->func.returnType )
-        CompleteType( type->func.returnType, decl->func.returnType->pos );
-    else
-        type->func.returnType = voidType;
-
-    if( !IsForeign( decl ) )
-    {
-        bool returns = ResolveStmtBlock( decl->func.body, type->func.returnType );
-        if( !returns && type->func.returnType != voidType )
-            RSLV_ERROR( decl->pos, "Not all control paths return a value" );
-    }
-
-    LeaveScope( scopeIdx );
-}
-
-void CompleteSymbol( Symbol* sym )
-{
-    ResolveSymbol( sym );
-
-    if( sym->kind == Symbol::Type )
-        CompleteType( sym->type, sym->decl->pos );
-    else if( sym->kind == Symbol::Func )
-        ResolveFuncBody( sym );
-}
-
-Symbol* ResolveName( char const* name, SourcePos const& pos )
-{
-    Symbol* sym = GetSymbol( name );
-    if( sym )
-        ResolveSymbol( sym );
-    else
-        RSLV_ERROR( pos, "Undefined symbol '%s'", name );
-
-    return sym;
 }
 
 Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
