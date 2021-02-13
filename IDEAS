@@ -145,6 +145,7 @@ ________________________________________________________________________________
 
 - Inlined enum decls to use in function arguments (where would that symbol live though?)
 
+- Can we do a reliable almonst-equal operator for floats? (~=)
 ________________________________________________________________________________ 
 
 
