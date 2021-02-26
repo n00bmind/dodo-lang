@@ -260,8 +260,7 @@ complex_func :: ()
         // TODO Check this actually works for all cond types
         "it := 1 ? 2 : 3;",
         "ptr := &s[1 + 1];",
-        // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
-        "item := ptr[-1];",
+        "item := *(ptr + 11);",
         "bin := 1000 / (2 + 3 * 5) << 10;",
         "aptr: *int = &s[3]; // as *int;",
         "f :: () { i += 1; }",
@@ -290,8 +289,8 @@ complex_func :: ()
         ASSERT( intPtrPtr != intPtr );
         //Type* float4Array = NewArrayType( floatType, 4 );
         //ASSERT( NewArrayType( floatType, 4 ) == float4Array );
-        Array<Type*> args( &globalTmpArena, 1 );
-        args.Push( intType );
+        Array<FuncArg> args( &globalTmpArena, 1 );
+        args.Push( { intType, false } );
         Type* intIntFunc = NewFuncType( args, intType );
         ASSERT( NewFuncType( args, intType ) == intIntFunc );
 
@@ -343,12 +342,12 @@ complex_func :: ()
         char* cdecl1 = TypeToCdecl( intType, "x" );
         char* cdecl2 = TypeToCdecl( NewPtrType( intType ), "x" );
         char* cdecl3 = TypeToCdecl( NewArrayType( intType, 10 ), "x" );
-        Array<Type*> args( &globalTmpArena, 2 );
-        args.Push( NewPtrType( intType ) );
-        args.Push( intType );
+        Array<FuncArg> args( &globalTmpArena, 2 );
+        args.Push( { NewPtrType( intType ), false } );
+        args.Push( { intType, false } );
         char* cdecl4 = TypeToCdecl( NewFuncType( args, intType ), "x" );
         char* cdecl5 = TypeToCdecl( NewArrayType( NewFuncType( args, intType ), 10 ), "x" );
-        Array<Type*> emptyArgs( &globalTmpArena, 0 );
+        Array<FuncArg> emptyArgs( &globalTmpArena, 0 );
         char* cdecl6 = TypeToCdecl( NewFuncType( emptyArgs, NewArrayType( NewFuncType( emptyArgs, intType ), 10 ) ), "x" );
 
         ResolveAll( globalDecls );

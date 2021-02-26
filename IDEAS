@@ -142,6 +142,11 @@ ________________________________________________________________________________
 - Can we do a reliable almonst-equal operator for floats? (~=)
 
 - Have a concept of scopes (file, module, global) for global declarations like in Jai, but allow specifying them for aggregate members too. This allows for something like private attributes without the OOP stupidity.
+
+- I think the general idea of having constructor/destructor like we do in Glowmade allows for a lot of agility for everyday code compared to having to constantly be thinking about all the lifetimes and scopes etc.
+  Think how this could be integrated in the language without bringing any of the RAII garbage along with it.
+
+- Learn a bit about UTF8 and find out how many actual bytes a character literal can get to be.. seems its anything from b8 to b32
 ________________________________________________________________________________ 
 
 

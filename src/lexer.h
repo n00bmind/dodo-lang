@@ -1,10 +1,4 @@
 
-struct TokenKindValue
-{
-    char const* shortName;
-    u32 flags;
-};
-
 enum TokenFlags : u32
 {
     Tk_None     = 0,
@@ -16,6 +10,13 @@ enum TokenFlags : u32
     AssignOp    = 0x20,
 };
 
+struct TokenKindValue
+{
+    char const* shortName;
+    u32 flags;
+};
+
+// TODO Review identifier names here. Use 'semantic' names everywhere
 #define TOKENS(x) \
     x(Unknown,          "unknown",      ( "???", 0 )) \
     \
@@ -72,6 +73,7 @@ enum TokenFlags : u32
     x(LShiftAssign,     "<<=",          ( "<<=", AssignOp )) \
     x(RShiftAssign,     ">>=",          ( ">>=", AssignOp )) \
     x(Range,            "..",           ( ".. ", 0 )) \
+    x(Ellipsis,         "...",          ( "...", 0 )) \
     \
     x(Name,             "identifier",   ( "IDN", 0 )) \
     x(Keyword,          "keyword",      ( "KWD", 0 )) \
@@ -104,7 +106,6 @@ STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( Break,   "break" ) \
     x( Continue,"continue" ) \
     x( Return,  "return" ) \
-    x( As,      "as" ) \
     x( In,      "in" ) \
     x( Count,   "count" ) \
 
@@ -113,7 +114,8 @@ STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 
 
 #define DIRECTIVES(x) \
-    x( Foreign, "foreign" ) \
+    x( Foreign,         "foreign" ) \
+    x( ExpectError,     "expecterror" ) \
 
 STRUCT_ENUM_WITH_NAMES(Directive, DIRECTIVES)
 #undef DIRECTIVES

@@ -278,13 +278,13 @@ int main()
 #define _ENUM_ENTRY(x, ...)     x,
 #define _ENUM_NAME(x, ...)      items[EnumName::x].name,
 #define _ENUM_REF(x, ...)       static constexpr EnumName const& x = items[EnumName::x];
-#define _ENUM_ITEM(x)                           { #x, ValueType(), (i32)EnumName::x },
-#define _ENUM_ITEM_WITH_NAMES(x, n)             {  n, ValueType(), (i32)EnumName::x },
-#define _ENUM_ITEM_WITH_VALUES(x, v)            { #x, _ENUM_ARGS v, (i32)EnumName::x },
-#define _ENUM_ITEM_WITH_NAMES_VALUES(x, n, v)   {  n, _ENUM_ARGS v, (i32)EnumName::x },
+#define _ENUM_INIT(x)                           { #x, ValueType(), (i32)EnumName::x },
+#define _ENUM_INIT_WITH_NAMES(x, n)             {  n, ValueType(), (i32)EnumName::x },
+#define _ENUM_INIT_WITH_VALUES(x, v)            { #x, _ENUM_ARGS v, (i32)EnumName::x },
+#define _ENUM_INIT_WITH_NAMES_VALUES(x, n, v)   {  n, _ENUM_ARGS v, (i32)EnumName::x },
 
 
-#define _CREATE_ENUM(enumName, valueType, xValueList, xBuilder)            \
+#define _CREATE_ENUM(enumName, valueType, xValueList, xInitializer)        \
 struct enumName                                                            \
 {                                                                          \
     enum Enum : i32                                                        \
@@ -311,7 +311,7 @@ struct enumName::Values                                                    \
                                                                            \
     static constexpr enumName items[] =                                    \
     {                                                                      \
-        xValueList(xBuilder)                                               \
+        xValueList(xInitializer)                                           \
     };                                                                     \
     static constexpr char const* const names[] =                           \
     {                                                                      \
@@ -322,10 +322,10 @@ struct enumName::Values                                                    \
     xValueList(_ENUM_REF)                                                  \
 };                                                                         \
 
-#define STRUCT_ENUM(enumName, xValueList)                               _CREATE_ENUM(enumName, i32, xValueList, _ENUM_ITEM)
-#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                    _CREATE_ENUM(enumName, i32, xValueList, _ENUM_ITEM_WITH_NAMES)
-#define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)        _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_ITEM_WITH_VALUES)
-#define STRUCT_ENUM_WITH_NAMES_VALUES(enumName, valueType, xValueList)  _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_ITEM_WITH_NAMES_VALUES)
+#define STRUCT_ENUM(enumName, xValueList)                               _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT)
+#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                    _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT_WITH_NAMES)
+#define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)        _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_VALUES)
+#define STRUCT_ENUM_WITH_NAMES_VALUES(enumName, valueType, xValueList)  _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_NAMES_VALUES)
 
 
 

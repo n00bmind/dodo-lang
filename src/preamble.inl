@@ -206,7 +206,7 @@ ASSERT_HANDLER(DefaultAssertHandler)
 
 
 //_______________________________________________________________________________
-// TODO TODO TODO At some point all these basic types will need to be ported over
+// TODO At some point all these basic types will need to be ported over
 // or implemented internally in dodo and hidden from user code
 
 template <typename T>
@@ -228,7 +228,7 @@ struct string
 {
     static constexpr char const* Empty = "";
 
-    char const* data;
+    b8 const* data;
     i32 length;
 
 public:

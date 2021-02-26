@@ -1,4 +1,11 @@
 struct Expr;
+struct TypeSpec;
+
+struct FuncArgSpec
+{
+    TypeSpec* type;
+    bool isVararg;
+};
 
 struct TypeSpec
 {
@@ -20,10 +27,9 @@ struct TypeSpec
     {
         struct
         {
-            ::Array<TypeSpec*> args;
+            ::Array<FuncArgSpec> args;
             TypeSpec* returnType;
-            // TODO 
-            //bool hasVarargs;
+            // TODO Multiple return types
         } func;
         struct
         {
@@ -42,7 +48,7 @@ struct TypeSpec
 
 struct ConstValue
 {
-    // TODO Array of T!?
+    // TODO Array of T?
     union
     {
         String strValue = {};
@@ -54,7 +60,7 @@ struct ConstValue
     // TODO 
     u32 sizeBytes;
 
-    bool BoolValue() { return bitsValue != 0ull; }
+    bool BoolValue() const { return bitsValue != 0ull; }
 };
 
 struct Type;
@@ -205,11 +211,12 @@ struct StmtList
 };
 
 
-struct FuncArg
+struct FuncArgDecl
 {
     SourcePos pos;
     char const* name;
     TypeSpec* type;
+    bool isVararg;
 };
 
 struct EnumItem
@@ -249,7 +256,7 @@ struct Decl
             // TODO Lambdas?
             // TODO Varargs
             // TODO Default values (this probably should just be a list of decls!)
-            Array<FuncArg> args;
+            Array<FuncArgDecl> args;
             // TODO Multiple return types
             TypeSpec* returnType;
             StmtList* body;

@@ -24,10 +24,10 @@ TypeSpec* NewPtrTypeSpec( SourcePos const& pos, TypeSpec* ofType )
     return result;
 }
 
-TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<TypeSpec*> const& args, TypeSpec* returnType )
+TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<FuncArgSpec> const& args, TypeSpec* returnType )
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Func );
-    new( &result->func.args ) Array<TypeSpec*>( &globalArena, args.count );
+    new( &result->func.args ) Array<FuncArgSpec>( &globalArena, args.count );
     args.CopyTo( &result->func.args );
     result->func.returnType = returnType;
 
@@ -78,13 +78,21 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
     else if( MatchToken( TokenKind::OpenParen, token ) )
     {
         // Function type
-        BucketArray<TypeSpec*> args( &globalTmpArena, 8, Temporary() );
+        BucketArray<FuncArgSpec> args( &globalTmpArena, 8, Temporary() );
 
         NextToken( lexer );
         while( !MatchToken( TokenKind::CloseParen, token ) )
         {
-            TypeSpec* arg = ParseTypeSpec( lexer );
-            args.Push( arg );
+            TypeSpec* argType = ParseTypeSpec( lexer );
+
+            bool vararg = false;
+            if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
+            {
+                vararg = true;
+                NextToken( lexer );
+            }
+            args.Push( { argType, vararg } );
+
             if( !MatchToken( TokenKind::Comma, token ) )
                 break;
             NextToken( lexer );
@@ -495,37 +503,27 @@ Expr* ParsePostfixExpr( Lexer* lexer )
 Expr* ParseUnaryExpr( Lexer* lexer )
 {
     Expr* expr = nullptr;
+    SourcePos pos = lexer->token.pos;
 
     if( lexer->token.HasFlag( TokenFlags::UnaryOp ) )
     {
-        SourcePos pos = lexer->token.pos;
         TokenKind::Enum op = lexer->token.kind;
 
         NextToken( lexer );
         expr = NewUnaryExpr( pos, op, ParseUnaryExpr( lexer ) );
     }
+    else if( MatchToken( TokenKind::LessThan, lexer->token ) )
+    {
+        NextToken( lexer );
+        TypeSpec* type = ParseTypeSpec( lexer );
+        RequireTokenAndAdvance( TokenKind::GreaterThan, lexer );
+
+        if( lexer->IsValid() )
+            expr = NewCastExpr( pos, type, ParseUnaryExpr( lexer ) );
+    }
     else
     {
         expr = ParsePostfixExpr( lexer );
-    }
-
-    return expr;
-}
-
-// FIXME This is gonna be a unary expr now
-Expr* ParseCastExpr( Lexer* lexer )
-{
-    Expr* expr = ParseUnaryExpr( lexer );
-
-    if( MatchKeyword( Keyword::As, lexer->token ) )
-    {
-        SourcePos pos = lexer->token.pos;
-
-        NextToken( lexer );
-        TypeSpec* type = ParseTypeSpec( lexer );
-
-        if( lexer->IsValid() )
-            expr = NewCastExpr( pos, type, expr );
     }
 
     return expr;
@@ -823,11 +821,12 @@ Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, Lexer* lexer, 
     return result;
 }
 
-FuncArg ParseFuncArg( Lexer* lexer )
+FuncArgDecl ParseFuncArgDecl( Lexer* lexer )
 {
-    FuncArg result = {};
+    FuncArgDecl result = {};
     SourcePos pos = lexer->pos;
 
+    // TODO Omit arg names for foreign funcs
     RequireToken( TokenKind::Name, lexer );
     char const* name = lexer->token.ident;
 
@@ -836,17 +835,24 @@ FuncArg ParseFuncArg( Lexer* lexer )
 
     TypeSpec* type = ParseTypeSpec( lexer );
 
+    bool vararg = false;
+    if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
+    {
+        vararg = true;
+        NextToken( lexer );
+    }
+
     if( lexer->IsValid() )
-        result = { pos, name, type };
+        result = { pos, name, type, vararg };
 
     return result;
 }
 
-Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArg> const& args, StmtList* body,
+Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArgDecl> const& args, StmtList* body,
                    TypeSpec* returnType, char const* directive, StmtList* parentBlock )
 {
     Decl* result = NewDecl( pos, Decl::Func, name, parentBlock );
-    new( &result->func.args ) Array<FuncArg>( &globalArena, args.count );
+    new( &result->func.args ) Array<FuncArgDecl>( &globalArena, args.count );
     args.CopyTo( &result->func.args );
     result->func.body = body;
     result->func.returnType = returnType;
@@ -1007,17 +1013,16 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, char const* directi
             }
 
             // Func
-            BucketArray<FuncArg> args( &globalTmpArena, 16, Temporary() );
+            BucketArray<FuncArgDecl> args( &globalTmpArena, 16, Temporary() );
 
             NextToken( lexer );
             if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
             {
-                // TODO Omit arg names for foreign funcs
-                args.Push( ParseFuncArg( lexer ) );
+                args.Push( ParseFuncArgDecl( lexer ) );
                 while( MatchToken( TokenKind::Comma, lexer->token ) )
                 {
                     NextToken( lexer );
-                    args.Push( ParseFuncArg( lexer ) );
+                    args.Push( ParseFuncArgDecl( lexer ) );
                 }
                 RequireToken( TokenKind::CloseParen, lexer );
             }
@@ -1469,6 +1474,8 @@ Stmt* ParseSwitchStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock
 
 Stmt* ParseStmt( Lexer* lexer, StmtList* parentBlock )
 {
+    char const* directive = ParseDirective( lexer );
+
     Stmt* stmt = nullptr;
     bool needSemicolon = false;
     SourcePos pos = lexer->token.pos;
@@ -1594,11 +1601,11 @@ void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
         case TypeSpec::Func:
         {
             APPEND( "( " );
-            for( TypeSpec* t : type->func.args )
+            for( FuncArgSpec const& a : type->func.args )
             {
-                if( t != type->func.args[0] )
+                if( &a != type->func.args.begin() )
                     APPEND( ", " );
-                DebugPrintTypeSpec( t, outBuf, maxLen );
+                DebugPrintTypeSpec( a.type, outBuf, maxLen );
             }
             APPEND( " ) -> " );
             DebugPrintTypeSpec( type->func.returnType, outBuf, maxLen );

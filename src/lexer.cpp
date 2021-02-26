@@ -413,6 +413,11 @@ internal void NextTokenRaw( Lexer* lexer )
                 {
                     token.kind = TokenKind::Range;
                     lexer->Advance();
+                    if( stream[0] == '.' )
+                    {
+                        token.kind = TokenKind::Ellipsis;
+                        lexer->Advance();
+                    }
                 }
             }
         } break;

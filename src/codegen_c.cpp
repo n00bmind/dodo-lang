@@ -115,8 +115,8 @@ char* TypeToCdecl( Type* type, char const* symbolName )
         {
             char* result = nullptr;
             result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
-            for( Type*& arg : type->func.args )
-                result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeToCdecl( arg, "" ) );
+            for( FuncArg& arg : type->func.args )
+                result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeToCdecl( arg.type, "" ) );
 
             result = Strf( "%s)", result );
             return TypeToCdecl( type->func.returnType, result );
@@ -165,8 +165,8 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             char* result = nullptr;
             result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
 
-            for( TypeSpec*& arg : type->func.args )
-                result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeSpecToCdecl( arg, "" ) );
+            for( FuncArgSpec const& arg : type->func.args )
+                result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeSpecToCdecl( arg.type, "" ) );
 
             result = Strf( "%s)", result );
             return TypeSpecToCdecl( type->func.returnType, result );
@@ -277,7 +277,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                     OUTSTR( ", " );
 
                 // TODO This won't work with named arguments
-                Type* argType = funcType->func.args[i++];
+                Type* argType = funcType->func.args[i++].type;
                 EmitExpr( argExpr, argType );
             }
             OUTSTR( " )" );
@@ -443,7 +443,7 @@ void EmitFuncDecl( Decl* decl )
     OUTSTR( "(" );
     if( decl->func.args.count )
         OUTSTR( " " );
-    for( FuncArg const& a : decl->func.args )
+    for( FuncArgDecl const& a : decl->func.args )
     {
         if( &a != decl->func.args.begin() )
             OUTSTR( ", " );

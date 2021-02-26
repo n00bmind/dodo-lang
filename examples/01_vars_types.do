@@ -1,5 +1,4 @@
 
-// TODO 
 #foreign printf :: ( fmt: string, args: any... );
 
 main :: ()
@@ -8,17 +7,19 @@ main :: ()
     number :int = 0x42;
     printf( "number = %d\n", number );
 
-    char: int = '\'';
+    char: b8 = '\'';
     printf( "char = '%c' (%d)\n", char, char );
 
-    float :f32 = -2.0;
-    printf( "float = %f\n", float );
+    real :f32 = -2.0;
+    printf( "real = %f\n", real );
 
     // Strings are quite different from C, they're essentially a buffer pointing to an array of bytes
     // (buffers will be explained better in a later example)
     greeting :string = "Hello Sailor!";
     // Oh, and they're also readonly
     #expecterror{ greeting[6] = 'T'; }
+    char = greeting[6];
+    printf( "char = '%c' (%d)\n", char, char );
 
     // They're null terminated so they can be passed to C easily
     printf( "greeting = '%s'\n", greeting );
@@ -42,6 +43,7 @@ main :: ()
     x, y, z :int = 0, 1;
     printf( "x = %d, y = %d, z = %d\n", a, b, c );
 
+    // TODO Add alot more unary and binary expressions with all the various allowed types
 
     ///////////////////////////////////////////
 
