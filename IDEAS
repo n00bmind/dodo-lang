@@ -30,6 +30,17 @@ ________________________________________________________________________________
   In fact lately I've been thinking that on 64 bit machines specially, using 32 bit handles where possible would not only be safer, but also save a lot of memory!
   Think of ways in which the language could promote handles and "discourage" straight pointer use.
 
+  There are interesting ways in which several bits of a 64-bit pointer could be reused:
+  https://en.wikipedia.org/wiki/Tagged_pointer
+  https://stackoverflow.com/questions/16198700/using-the-extra-16-bits-in-64-bit-pointers
+  https://stackoverflow.com/questions/62008371/encode-additional-information-in-pointer
+  https://nikic.github.io/2012/02/02/Pointer-magic-for-efficient-dynamic-value-representations.html
+  (NOTE all this stuff is probably very non-portable)
+
+- This stuff about "Low fat pointers" for bounds checking seems interesting too
+  https://pure.royalholloway.ac.uk/portal/files/27687028/ndss2017.pdf
+  https://github.com/GJDuck/LowFat
+
 - For arrays and strings, there is a question of what do the types actually represent in memory. Is an array a fat pointer to the actual list of items, or is it a normal pointer to the
   items with a preamble in front with the necessary metadata (basically just a count)? 
   Fat pointer:
@@ -41,7 +52,7 @@ ________________________________________________________________________________
     · Slimer, and easier to turn into something even more slim like a small handle, as there's no metadata to drag around.
 
   Think about how different subtypes of arrays could specify sizes for the base pointer as part of the type definition, similar to the "relative pointers" concept from JAI.
-  Maybe also the base pointer could instead be a smaller handle, but then handles we'd need a concept of a non-opaque handle where the language knows what's inside and can use it.
+  Maybe also the base pointer could instead be a smaller handle, but then we'd need a concept of a non-opaque handle where the language knows what's inside and can use it.
 
 - After thinking about it, there seem to be _three_ types of "arrays" actually:
   · There's the traditional C-like static array, with a fixed count (i.e. [3]int). It's layout is just the inlined elements in memory, and its count is a constant expression and immutable
