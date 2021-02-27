@@ -115,7 +115,7 @@ struct Array
     }
 
     // Deep copy
-    Array<T> Copy( MemoryArena* arena ) const
+    Array<T> Clone( MemoryArena* arena ) const
     {
         Array<T> result( arena, count );
         PCOPY( data, result.data, count * SIZEOF(T) );
@@ -137,9 +137,8 @@ struct Array
 
     void CopyFrom( const T* buffer, int count_ )
     {
-        ASSERT( count_ > 0 );
-        count = count_;
-        PCOPY( buffer, data, count * SIZEOF(T) );
+        ASSERT( count_ > 0 && capacity >= count_ );
+        PCOPY( buffer, data, count_ * SIZEOF(T) );
     }
 
     bool Contains( const T& item ) const
@@ -923,6 +922,208 @@ private:
         }
 
         FREE( allocator, oldKeys ); // Handles both
+    }
+};
+
+
+/////     RING BUFFER    /////
+// Circular buffer backed by an array with a stable maximum size (no allocations after init).
+// Default behaviour is similar to a FIFO queue where new items are Push()ed onto a virtual "head" cursor,
+// while Pop() returns the item at the "tail" (oldest). Can also remove newest item with PopHead() for a LIFO stack behaviour.
+// Head and tail will wrap around when needed and can never overlap.
+// Can be iterated both from tail to head (oldest to newest) or the other way around.
+
+template <typename T>
+struct RingBuffer
+{
+    Array<T> buffer;
+    i32 onePastHeadIndex;       // Points to next slot to write
+    i32 tailIndex;
+
+
+    RingBuffer()
+    { }
+
+    RingBuffer( i32 capacity_, MemoryArena* arena, MemoryParams params = DefaultMemoryParams() )
+        : buffer( arena, capacity_, params )
+        , onePastHeadIndex( 0 )
+        , tailIndex( 0 )
+    {
+        buffer.ResizeToCapacity();
+    }
+
+    static RingBuffer FromArray( Array<T> const& a )
+    {
+        int itemCount = a.count;
+
+        RingBuffer result = {};
+        // Make space for one more at the end
+        result.buffer.Resize( itemCount + 1 );
+        result.buffer.CopyFrom( a );
+
+        result.onePastHeadIndex = itemCount;
+        result.tailIndex = 0;
+
+        return result;
+    }
+
+    void Clear()
+    {
+        onePastHeadIndex = 0;
+        tailIndex = 0;
+    }
+
+    void ClearToZero()
+    {
+        Clear();
+        PZERO( buffer.data, buffer.count * sizeof(T) );
+    }
+
+    T* PushEmpty( bool clear = true )
+    {
+        T* result = buffer.data + onePastHeadIndex++;
+
+        if( onePastHeadIndex == buffer.capacity )
+            onePastHeadIndex = 0;
+        if( onePastHeadIndex == tailIndex )
+        {
+            tailIndex++;
+            if( tailIndex == buffer.capacity )
+                tailIndex = 0;
+        }
+
+        if( clear )
+            PZERO( result, sizeof(T) );
+
+        return result;
+    }
+
+    T* Push( const T& item )
+    {
+        T* result = PushEmpty( false );
+        *result = item;
+        return result;
+    }
+
+    T Pop()
+    {
+        ASSERT( Count() > 0 );
+        int prevTailIndex = tailIndex;
+        if( tailIndex != onePastHeadIndex )
+        {
+            tailIndex++;
+            if( tailIndex == buffer.capacity )
+                tailIndex = 0;
+        }
+
+        return buffer.data[tailIndex];
+    }
+
+    T PopHead()
+    {
+        ASSERT( Count() > 0 );
+        int headIndex = onePastHeadIndex;
+        if( tailIndex != onePastHeadIndex )
+        {
+            onePastHeadIndex--;
+            if( onePastHeadIndex < 0 )
+                onePastHeadIndex = buffer.capacity - 1;
+            headIndex = onePastHeadIndex;
+        }
+
+        return buffer.data[headIndex];
+    }
+
+    int Count() const
+    {
+        int count = onePastHeadIndex - tailIndex;
+        if( count < 0 )
+            count += buffer.capacity;
+
+        return count;
+    }
+
+    bool Contains( const T& item ) const
+    {
+        return buffer.Contains( item );
+    }
+
+    T& FromHead( int offset = 0 )
+    {
+        ASSERT( offset >= 0, "Only positive offsets" );
+        ASSERT( Count() > offset, "Not enough items in buffer" );
+        int index = IndexFromHeadOffset( -offset );
+        return buffer.data[index];
+    }
+
+    T const& FromHead( int offset = 0 ) const
+    {
+        T& result = ((RingBuffer*)this)->FromHead( offset );
+        return (T const&)result;
+    }
+
+
+    struct IteratorInfo
+    {
+    protected:
+        RingBuffer<T>& b;
+        T* current;
+        i32 currentIndex;
+        bool forward;
+
+    public:
+        IteratorInfo( RingBuffer& buffer_, bool forward_ = true )
+            : b( buffer_ )
+            , forward( forward_ )
+        {
+            currentIndex = forward ? b.tailIndex : b.IndexFromHeadOffset( 0 );
+            current = b.Count() ? &b.buffer.data[currentIndex] : nullptr;
+        }
+
+        T* operator * () { return current; }
+        T* operator ->() { return current; }
+
+        // Prefix
+        inline IteratorInfo& operator ++()
+        {
+            if( current )
+            {
+                if( forward )
+                {
+                    currentIndex++;
+                    if( currentIndex >= b.buffer.capacity )
+                        currentIndex = 0;
+
+                    current = (currentIndex == b.onePastHeadIndex) ? nullptr : &b.buffer.data[currentIndex];
+                }
+                else
+                {
+                    currentIndex--;
+                    if( currentIndex < 0 )
+                        currentIndex = b.buffer.capacity - 1;
+
+                    current = (currentIndex < b.tailIndex) ? nullptr : &b.buffer.data[currentIndex];
+                }
+            }
+
+            return *this;
+        }
+    };
+    IteratorInfo Iterator( bool forward = true )
+    {
+        return IteratorInfo( *this, forward );
+    }
+
+private:
+    int IndexFromHeadOffset( int offset )
+    {
+        int result = onePastHeadIndex + offset - 1;
+        while( result < 0 )
+            result += buffer.capacity;
+        while( result >= buffer.capacity )
+            result -= buffer.capacity;
+
+        return result;
     }
 };
 

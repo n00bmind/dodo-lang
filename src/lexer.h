@@ -161,7 +161,7 @@ struct Token
 
     bool HasFlag( TokenFlags f )
     {
-        return (TokenKind::Values::items[ kind ].value.flags & (u32)f) != 0;
+        return (TokenKind::Items::entries[ kind ].value.flags & (u32)f) != 0;
     }
 };
 

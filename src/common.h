@@ -261,14 +261,14 @@ int main()
     int index = MemoryTag::Audio;
     
     // But also
-    MemoryTag const& t = MemoryTag::Values::Audio;
+    MemoryTag const& t = MemoryTag::Items::Audio;
     ASSERT( t.index == index );
 
     V const& value = MemoryTag::Landscape.value;
 
-    for( int i = 0; i < MemoryTag::Values::count; ++i )
+    for( int i = 0; i < MemoryTag::Items::count; ++i )
     {
-        MemoryTag const& t = MemoryTag::Values::items[i];
+        MemoryTag const& t = MemoryTag::Items::entries[i];
         std::cout << "sVal: " << t.value.sVal << "\tiVal: " << t.value.iVal << std::endl;
     }
 }
@@ -276,14 +276,18 @@ int main()
 
 #define _ENUM_ARGS(...)         { __VA_ARGS__ }
 #define _ENUM_ENTRY(x, ...)     x,
-#define _ENUM_NAME(x, ...)      items[EnumName::x].name,
-#define _ENUM_REF(x, ...)       static constexpr EnumName const& x = items[EnumName::x];
+#define _ENUM_NAME(x, ...)      entries[EnumName::x].name,
+#define _ENUM_REF(x, ...)       static constexpr EnumName const& x = entries[EnumName::x];
 #define _ENUM_INIT(x)                           { #x, ValueType(), (i32)EnumName::x },
 #define _ENUM_INIT_WITH_NAMES(x, n)             {  n, ValueType(), (i32)EnumName::x },
 #define _ENUM_INIT_WITH_VALUES(x, v)            { #x, _ENUM_ARGS v, (i32)EnumName::x },
 #define _ENUM_INIT_WITH_NAMES_VALUES(x, n, v)   {  n, _ENUM_ARGS v, (i32)EnumName::x },
 
+struct EnumBase
+{ };
 
+// TODO Try defining all attributes inside an Item inner class (so that it's fully defined)
+// then have items, names & count be static member of the parent class
 #define _CREATE_ENUM(enumName, valueType, xValueList, xInitializer)        \
 struct enumName                                                            \
 {                                                                          \
@@ -302,14 +306,14 @@ struct enumName                                                            \
     { return index != other.index; }                                       \
                                                                            \
     /* Need to define this separately so the base type is fully defined */ \
-    struct Values;                                                         \
+    struct Items;                                                          \
 };                                                                         \
-struct enumName::Values                                                    \
+struct enumName::Items                                                     \
 {                                                                          \
     using EnumName = enumName;                                             \
     using ValueType = valueType;                                           \
                                                                            \
-    static constexpr enumName items[] =                                    \
+    static constexpr enumName entries[] =                                  \
     {                                                                      \
         xValueList(xInitializer)                                           \
     };                                                                     \
@@ -317,7 +321,7 @@ struct enumName::Values                                                    \
     {                                                                      \
         xValueList(_ENUM_NAME)                                             \
     };                                                                     \
-    static constexpr sz count = ARRAYCOUNT(items);                         \
+    static constexpr sz count = ARRAYCOUNT(entries);                       \
                                                                            \
     xValueList(_ENUM_REF)                                                  \
 };                                                                         \

@@ -195,6 +195,11 @@ Type* i16Type = NewBuiltinType( "i16", Type::Int, 2, 2 );
 Type* i32Type = NewBuiltinType( "i32", Type::Int, 4, 4 );
 Type* i64Type = NewBuiltinType( "i64", Type::Int, 8, 8 );
 Type* intType = NewBuiltinType( "int", i64Type );
+Type* b8Type = NewBuiltinType( "b8", Type::Bits, 1, 1 );
+Type* b16Type = NewBuiltinType( "b16", Type::Bits, 2, 2 );
+Type* b32Type = NewBuiltinType( "b32", Type::Bits, 4, 4 );
+Type* b64Type = NewBuiltinType( "b64", Type::Bits, 8, 8 );
+Type* bitsType = NewBuiltinType( "bits", b64Type );
 Type* f32Type = NewBuiltinType( "f32", Type::Float, 4, 4 );
 Type* f64Type = NewBuiltinType( "f64", Type::Float, 8, 8 );
 Type* floatType = NewBuiltinType( "float", f32Type );
@@ -880,7 +885,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsArithmeticType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with arithmetic types",
-                            TokenKind::Values::names[ expr->unary.op ] );
+                            TokenKind::Items::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -888,7 +893,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsIntegralType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with integral types",
-                            TokenKind::Values::names[ expr->unary.op ] );
+                            TokenKind::Items::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -896,7 +901,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsScalarType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with scalar types",
-                            TokenKind::Values::names[ expr->unary.op ] );
+                            TokenKind::Items::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -1125,62 +1130,54 @@ ResolvedExpr ResolveBinaryArithmeticExpr( TokenKind::Enum op, ResolvedExpr* left
         return NewResolvedRvalue( left->type );
 }
 
-ResolvedExpr ResolveBinaryExpr( Expr* expr )
+ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, ResolvedExpr* left, ResolvedExpr* right, SourcePos const& pos )
 {
-    ASSERT( expr->kind == Expr::Binary );
-
-    ResolvedExpr left = ResolveExpr( expr->binary.left );
-    ResolvedExpr right = ResolveExpr( expr->binary.right );
-
-    TokenKind::Enum op = expr->binary.op;
-    char const* opName = TokenKind::Values::names[op];
-
     switch( op )
     {
         case TokenKind::Asterisk:
         case TokenKind::Slash:
         {
-            if( !IsArithmeticType( left.type ) || !IsArithmeticType( right.type ) )
+            if( !IsArithmeticType( left->type ) || !IsArithmeticType( right->type ) )
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must have arithmetic type", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must have arithmetic type", opName );
                 return resolvedNull;
             }
 
-            return ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+            return ResolveBinaryArithmeticExpr( op, left, right, pos );
         } break;
         case TokenKind::Percent:
         {
-            if( IsIntegerType( left.type ) && IsIntegerType( right.type ) )
-                return ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+            if( IsIntegerType( left->type ) && IsIntegerType( right->type ) )
+                return ResolveBinaryArithmeticExpr( op, left, right, pos );
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both have integer type", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both have integer type", opName );
                 return resolvedNull;
             }
         } break;
 
         case TokenKind::Plus:
         {
-            if( IsArithmeticType( left.type ) && IsArithmeticType( right.type ) )
-                return ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+            if( IsArithmeticType( left->type ) && IsArithmeticType( right->type ) )
+                return ResolveBinaryArithmeticExpr( op, left, right, pos );
             else
             {
                 ResolvedExpr* ptrOperand = nullptr;
                 ResolvedExpr* intOperand = nullptr;
-                if( IsPointerType( left.type ) && IsIntegerType( right.type ) )
+                if( IsPointerType( left->type ) && IsIntegerType( right->type ) )
                 {
-                    ptrOperand = &left;
-                    intOperand = &right;
+                    ptrOperand = left;
+                    intOperand = right;
                 }
-                else if( IsPointerType( right.type ) && IsIntegerType( left.type ) )
+                else if( IsPointerType( right->type ) && IsIntegerType( left->type ) )
                 {
-                    ptrOperand = &right;
-                    intOperand = &left;
+                    ptrOperand = right;
+                    intOperand = left;
                 }
 
                 if( ptrOperand && intOperand )
                 {
-                    CompleteType( ptrOperand->type, expr->pos );
+                    CompleteType( ptrOperand->type, pos );
                     // TODO Promote void pointers to b8 ??
 #if 0
                     if( ptrOperand->type->base == voidType )
@@ -1188,7 +1185,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
 #endif
                     if( ptrOperand->type->ptr.base->size == 0 )
                     {
-                        RSLV_ERROR( expr->pos, "Cannot do pointer arithmetic with size 0 base type" );
+                        RSLV_ERROR( pos, "Cannot do pointer arithmetic with size 0 base type" );
                         return resolvedNull;
                     }
 
@@ -1196,7 +1193,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
                 }
                 else
                 {
-                    RSLV_ERROR( expr->pos, "Operands of '+' expression must both have arithmetic type, or pointer and integer type" );
+                    RSLV_ERROR( pos, "Operands of '+' expression must both have arithmetic type, or pointer and integer type" );
                     return resolvedNull;
                 }
             }
@@ -1204,23 +1201,23 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
 
         case TokenKind::Minus:
         {
-            if( IsArithmeticType( left.type ) && IsArithmeticType( right.type ) )
-                return ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
-            else if( IsPointerType( left.type ) && IsIntegerType( right.type ) )
+            if( IsArithmeticType( left->type ) && IsArithmeticType( right->type ) )
+                return ResolveBinaryArithmeticExpr( op, left, right, pos );
+            else if( IsPointerType( left->type ) && IsIntegerType( right->type ) )
             {
                 // TODO Promote void pointers to b8 ??
 #if 0
                 if( ptrOperand->type->base == voidType )
                     ptrOperand->type = b8Type;
 #endif
-                return NewResolvedRvalue( left.type );
+                return NewResolvedRvalue( left->type );
             }
-            else if( IsPointerType( left.type ) && IsPointerType( right.type ) )
+            else if( IsPointerType( left->type ) && IsPointerType( right->type ) )
             {
                 // TODO Promote left and right from void* if the other is pointer to size 1? (or both are void)
-                if( left.type != right.type )
+                if( left->type != right->type )
                 {
-                    RSLV_ERROR( expr->pos, "Cannot subtract pointers to different types" );
+                    RSLV_ERROR( pos, "Cannot subtract pointers to different types" );
                     return resolvedNull;
                 }
 
@@ -1228,7 +1225,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '-' expression must both have arithmetic type, pointer and integer type, or compatible pointer types" );
+                RSLV_ERROR( pos, "Operands of '-' expression must both have arithmetic type, pointer and integer type, or compatible pointer types" );
                 return resolvedNull;
             }
         } break;
@@ -1236,15 +1233,15 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         case TokenKind::LeftShift:
         case TokenKind::RightShift:
         {
-            if( IsIntegralType( left.type ) && IsIntegerType( right.type ) )
+            if( IsIntegralType( left->type ) && IsIntegerType( right->type ) )
             {
-                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
-                ASSERT( result.type->kind == left.type->kind );
+                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, left, right, pos );
+                ASSERT( result.type->kind == left->type->kind );
                 return result;
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both have integer type, or bits and integer type", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both have integer type, or bits and integer type", opName );
                 return resolvedNull;
             }
         } break;
@@ -1252,15 +1249,15 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         case TokenKind::Caret:
         case TokenKind::Pipe:
         {
-            if( IsIntegralType( left.type ) && IsIntegralType( right.type ) )
+            if( IsIntegralType( left->type ) && IsIntegralType( right->type ) )
             {
-                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, left, right, pos );
                 ASSERT( result.type->kind == Type::Bits );
                 return result;
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both have integral type", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both have integral type", opName );
                 return resolvedNull;
             }
         } break;
@@ -1268,24 +1265,24 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         case TokenKind::Equal:
         case TokenKind::NotEqual:
         {
-            if( IsArithmeticType( left.type ) && IsArithmeticType( right.type ) )
+            if( IsArithmeticType( left->type ) && IsArithmeticType( right->type ) )
             {
-                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, left, right, pos );
                 ASSERT( result.type->kind == Type::Bool );
                 return result;
             }
-            else if( IsPointerType( left.type ) && IsPointerType( right.type ) )
+            else if( IsPointerType( left->type ) && IsPointerType( right->type ) )
             {
                 // TODO Do we care about comparing pointers to different types?
                 return NewResolvedRvalue( boolType );
             }
-            else if( (IsPointerType( left.type ) && IsNullPtrConst( right )) || (IsNullPtrConst( left ) && IsPointerType( right.type )) )
+            else if( (IsPointerType( left->type ) && IsNullPtrConst( *right )) || (IsNullPtrConst( *left ) && IsPointerType( right->type )) )
             {
                 return NewResolvedRvalue( boolType );
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both be arithmetic types or compatible pointer types", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both be arithmetic types or compatible pointer types", opName );
                 return resolvedNull;
             }
         } break;
@@ -1294,25 +1291,25 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         case TokenKind::GreaterThan:
         case TokenKind::GTEqual:
         {
-            if( IsArithmeticType( left.type ) && IsArithmeticType( right.type ) )
+            if( IsArithmeticType( left->type ) && IsArithmeticType( right->type ) )
             {
-                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, &left, &right, expr->pos );
+                ResolvedExpr result = ResolveBinaryArithmeticExpr( op, left, right, pos );
                 ASSERT( result.type->kind == Type::Bool );
                 return result;
             }
-            else if( IsPointerType( left.type ) && IsPointerType( right.type ) )
+            else if( IsPointerType( left->type ) && IsPointerType( right->type ) )
             {
                 // TODO Do we care about comparing pointers to different types?
                 // NOTE Apparently C follows slightly different rules here compared to the previous case. Check.
                 return NewResolvedRvalue( boolType );
             }
-            else if( (IsPointerType( left.type ) && IsNullPtrConst( right )) || (IsNullPtrConst( left ) && IsPointerType( right.type )) )
+            else if( (IsPointerType( left->type ) && IsNullPtrConst( *right )) || (IsNullPtrConst( *left ) && IsPointerType( right->type )) )
             {
                 return NewResolvedRvalue( boolType );
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both be arithmetic types or compatible pointer types", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both be arithmetic types or compatible pointer types", opName );
                 return resolvedNull;
             }
         } break;
@@ -1321,27 +1318,27 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
         case TokenKind::LogicOr:
         {
             // TODO Shortcircuting !?
-            if( IsScalarType( left.type ) && IsScalarType( right.type ) )
+            if( IsScalarType( left->type ) && IsScalarType( right->type ) )
             {
-                if( left.isConst && right.isConst )
+                if( left->isConst && right->isConst )
                 {
-                    CastType( &left, boolType );
-                    CastType( &right, boolType );
+                    CastType( left, boolType );
+                    CastType( right, boolType );
 
                     bool result;
                     if( op == TokenKind::LogicAnd )
-                        result = left.constValue.BoolValue() && right.constValue.BoolValue();
+                        result = left->constValue.BoolValue() && right->constValue.BoolValue();
                     else 
-                        result = left.constValue.BoolValue() || right.constValue.BoolValue();
+                        result = left->constValue.BoolValue() || right->constValue.BoolValue();
 
-                    return NewResolvedConst( boolType, result, expr->pos );
+                    return NewResolvedConst( boolType, result, pos );
                 }
                 else
                     return NewResolvedRvalue( boolType );
             }
             else
             {
-                RSLV_ERROR( expr->pos, "Operands of '%s' expression must both be scalar types", opName );
+                RSLV_ERROR( pos, "Operands of '%s' expression must both be scalar types", opName );
                 return resolvedNull;
             }
         } break;
@@ -1350,6 +1347,19 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
     }
 
     return resolvedNull;
+}
+
+ResolvedExpr ResolveBinaryExpr( Expr* expr )
+{
+    ASSERT( expr->kind == Expr::Binary );
+
+    ResolvedExpr left = ResolveExpr( expr->binary.left );
+    ResolvedExpr right = ResolveExpr( expr->binary.right );
+
+    TokenKind::Enum op = expr->binary.op;
+    char const* opName = TokenKind::Items::names[op];
+
+    return ResolveBinaryExpr( op, opName, &left, &right, expr->pos );
 }
 
 ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
@@ -1589,7 +1599,7 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     if( base.type->kind == Type::Array || base.type->kind == Type::Buffer )
         return NewResolvedLvalue( base.type->array.base );
     else if( base.type->kind == Type::String )
-        return NewResolvedRvalue( i8Type );
+        return NewResolvedRvalue( b8Type );
     else
     {
         RSLV_ERROR( expr->pos, "Can only index arrays, buffer views or strings" );
@@ -2171,29 +2181,33 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             break;
         case Stmt::Decl:
         {
-            // TODO Right now we treat local decls same as globals, meaning we don't enforce any ordering, which seems fine for
-            // user defined types (and maybe constants too), but at the very least for variables this is no good!
             Array<Symbol*> symbols = CreateDeclSymbols( stmt->decl, true );
             for( Symbol* sym : symbols )
                 CompleteSymbol( sym );
         } break;
         case Stmt::Assign:
         {
-            // TODO Very imcomplete
             ResolvedExpr left = ResolveExpr( stmt->assign.left );
+            ASSERT( left.type );
+            if( !left.isLvalue )
+                RSLV_ERROR( stmt->assign.left->pos, "Expression cannot be assigned to (not an l-value)" );
+            //if( left.isConst )
+                //RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
+
             ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
-            // FIXME Use ConvertTo
-            if( left.type && right.type && left.type != right.type )
+            TokenKind::Enum op = stmt->assign.op;
+            TokenKind::Enum binaryOp = assignOpToBinaryOp[ stmt->assign.op ];
+
+            ResolvedExpr result = {};
+            if( op == TokenKind::Assign )
+                result = right;
+            else
+                result = ResolveBinaryExpr( binaryOp, TokenKind::Items::names[ op ], &left, &right, stmt->pos );
+
+            if( !ConvertType( &result, left.type ) )
             {
-                RSLV_ERROR( stmt->pos, "Invalid types in assignment (left is '%s', right is '%s')",
+                RSLV_ERROR( stmt->pos, "Invalid types in assignment (expected '%s', got '%s')",
                             left.type->name, right.type->name );
-            }
-            if( left.type )
-            {
-                if( !left.isLvalue )
-                    RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to non-lvalue" );
-                if( left.isConst )
-                    RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
             }
 
         } break;
@@ -2402,6 +2416,9 @@ void InitResolver( int globalSymbolsCount )
     INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,
         globalSymbolsCount + I32( ARRAYCOUNT(globalBuiltinTypes) ), HTF_FixedSize );
 
+    InitErrorBuffer();
+
+    // Push symbols for builtin types
     globalCurrentScopeStart = globalScopeStack.First();
     for( BuiltinType& b : globalBuiltinTypes )
     {
@@ -2425,5 +2442,12 @@ void ResolveAll( Array<Decl*> const& globalDecls )
     for( auto it = globalSymbolsList.First(); it; ++it )
     {
         CompleteSymbol( *it );
+    }
+
+    // Print all errors
+    for( auto it = globalErrorBuffer.Iterator(); *it; ++it )
+    {
+        String msg = it->msg;
+        globalPlatform.Error( msg.data );
     }
 }

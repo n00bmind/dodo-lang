@@ -57,6 +57,10 @@ INLINE void StringCopy( char const* src, char* dst, sz dstSize )
 
 
 // Read only string
+// TODO Review everything here to make sure we always append a null terminator
+// TODO Review everything here to make sure we always append a null terminator
+// TODO Review everything here to make sure we always append a null terminator
+// TODO Review everything here to make sure we always append a null terminator
 struct String
 {
     char const* data;
@@ -98,6 +102,31 @@ struct String
         result.length = src.count;
         result.data = PUSH_STRING( arena, result.length );
         src.CopyTo( (char*)result.data, result.length );
+
+        return result;
+    }
+
+    static String FromFormat( MemoryArena* arena, char const* fmt, va_list args )
+    {
+        va_list argsCopy;
+        va_copy( argsCopy, args );
+
+        String result = {};
+        result.length = 1 + vsnprintf( nullptr, 0, fmt, args );
+        result.data = PUSH_STRING( arena, result.length );
+
+        vsnprintf( (char*)result.data, Size( result.length ), fmt, argsCopy );
+        va_end( argsCopy );
+
+        return result;
+    }
+
+    static String FromFormat( MemoryArena* arena, char const* fmt, ... )
+    {
+        va_list args;
+        va_start( args, fmt );
+        String result = FromFormat( arena, fmt, args );
+        va_end( args );
 
         return result;
     }

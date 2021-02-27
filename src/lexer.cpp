@@ -1,9 +1,10 @@
 
-internal char const* globalKeywords[Keyword::Values::count];
-internal char const* globalDirectives[Directive::Values::count];
+internal char const* globalKeywords[Keyword::Items::count];
+internal char const* globalDirectives[Directive::Items::count];
+
 internal int charToDigit[256];
 internal int escapeToChar[256];
-
+TokenKind::Enum assignOpToBinaryOp[TokenKind::Items::count];
 
 
 internal InternString* Intern( String const& string, u32 flags = 0 )
@@ -39,12 +40,12 @@ Lexer::Lexer( String const& input, char const* filename_ )
     token = {};
 
     // Intern keywords & directives
-    for( Keyword const& k : Keyword::Values::items )
+    for( Keyword const& k : Keyword::Items::entries )
     {
         InternString* intern = Intern( String( k.name ), InternString::Keyword );
         globalKeywords[k.index] = intern->data;
     }
-    for( Directive const& k : Directive::Values::items )
+    for( Directive const& k : Directive::Items::entries )
     {
         InternString* intern = Intern( String( k.name ), InternString::Directive );
         globalDirectives[k.index] = intern->data;
@@ -88,6 +89,17 @@ Lexer::Lexer( String const& input, char const* filename_ )
     charToDigit['E'] = 14;
     charToDigit['F'] = 15;
 
+    // Binary ops
+    assignOpToBinaryOp[TokenKind::PlusAssign] = TokenKind::Plus;
+    assignOpToBinaryOp[TokenKind::MinusAssign] = TokenKind::Minus;
+    assignOpToBinaryOp[TokenKind::MulAssign] = TokenKind::Asterisk;
+    assignOpToBinaryOp[TokenKind::DivAssign] = TokenKind::Slash;
+    assignOpToBinaryOp[TokenKind::ModAssign] = TokenKind::Percent;
+    assignOpToBinaryOp[TokenKind::AndAssign] = TokenKind::Ampersand;
+    assignOpToBinaryOp[TokenKind::OrAssign] = TokenKind::Pipe;
+    assignOpToBinaryOp[TokenKind::XorAssign] = TokenKind::Caret;
+    assignOpToBinaryOp[TokenKind::LShiftAssign] = TokenKind::LeftShift;
+    assignOpToBinaryOp[TokenKind::RShiftAssign] = TokenKind::RightShift;
 
     NextToken( this );
 }
@@ -582,7 +594,7 @@ void RequireToken( TokenKind::Enum wantedKind, Lexer* lexer )
     if( token.kind != wantedKind )
     {
         PARSE_ERROR( token.pos, "Expected token '%s' (got '%s')",
-               TokenKind::Values::names[wantedKind], TokenKind::Values::names[token.kind] );
+               TokenKind::Items::names[wantedKind], TokenKind::Items::names[token.kind] );
     }
 }
 
@@ -598,7 +610,7 @@ void RequireKeyword( int kw, Lexer* lexer )
     if( token.kind != TokenKind::Keyword || token.ident != globalKeywords[ kw ] )
     {
         PARSE_ERROR( token.pos, "Expected keyword '%s' (got '%s')",
-               globalKeywords[ kw ], TokenKind::Values::names[token.kind] );
+               globalKeywords[ kw ], TokenKind::Items::names[token.kind] );
     }
 }
 
@@ -614,7 +626,7 @@ char const* RequireDirective( Lexer* lexer )
     if( token.kind != TokenKind::Directive )
     {
         PARSE_ERROR( token.pos, "Expected directive (got '%s')",
-               TokenKind::Values::names[token.kind] );
+               TokenKind::Items::names[token.kind] );
     }
 
     return token.ident;
@@ -648,7 +660,7 @@ void DebugDumpScan( String const& program, char const* filename )
         {
             default:
             {
-                globalPlatform.Print( "%s - %.*s\n", TokenKind::Values::items[token.kind].value.shortName, token.text.length, token.text.data );
+                globalPlatform.Print( "%s - %.*s\n", TokenKind::Items::entries[token.kind].value.shortName, token.text.length, token.text.data );
             } break;
             case TokenKind::EndOfStream:
             {

@@ -430,7 +430,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
     }
     else
     {
-        char const* desc = TokenKind::Values::names[ token.kind ];
+        char const* desc = TokenKind::Items::names[ token.kind ];
         if( token.kind == TokenKind::Name || token.kind == TokenKind::Keyword )
             desc = token.ident;
 
@@ -486,7 +486,7 @@ Expr* ParsePostfixExpr( Lexer* lexer )
             Token field = NextToken( lexer );
             if( !(field.kind == TokenKind::Name || field.kind == TokenKind::Keyword) )
             {
-                char const* desc = TokenKind::Values::names[ field.kind ];
+                char const* desc = TokenKind::Items::names[ field.kind ];
                 PARSE_ERROR( field.pos, "Unexpected token '%s' in expression", desc );
             }
 
@@ -751,7 +751,7 @@ Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, Lexer* le
     {
         result = NewAggregateDecl( pos, kind, name, items, parentBlock );
         if( !result )
-            PARSE_ERROR( token.pos, "Unsupported aggregate type '%s'", Keyword::Values::names[ kind ] );
+            PARSE_ERROR( token.pos, "Unsupported aggregate type '%s'", Keyword::Items::names[ kind ] );
     }
 
     return result;
@@ -1716,13 +1716,13 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
 
         case Expr::Unary:
         {
-            APPEND( "(%s ", TokenKind::Values::names[ expr->unary.op ] );
+            APPEND( "(%s ", TokenKind::Items::names[ expr->unary.op ] );
             DebugPrintSExpr( expr->unary.expr, outBuf, maxLen );
             APPEND( ")" );
         } break;
         case Expr::Binary:
         {
-            APPEND( "(%s ", TokenKind::Values::names[ expr->binary.op ] );
+            APPEND( "(%s ", TokenKind::Items::names[ expr->binary.op ] );
             DebugPrintSExpr( expr->binary.left, outBuf, maxLen );
             APPEND( " " );
             DebugPrintSExpr( expr->binary.right, outBuf, maxLen );
@@ -1806,7 +1806,7 @@ void DebugPrintSExpr( Stmt* stmt, char*& outBuf, sz& maxLen, int& indent )
         } break;
         case Stmt::Assign:
         {
-            APPEND( "(%s ", TokenKind::Values::names[ stmt->assign.op ] );
+            APPEND( "(%s ", TokenKind::Items::names[ stmt->assign.op ] );
             DebugPrintSExpr( stmt->assign.left, outBuf, maxLen );
             APPEND( " " );
             DebugPrintSExpr( stmt->assign.right, outBuf, maxLen );

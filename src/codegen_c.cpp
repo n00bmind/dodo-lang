@@ -33,22 +33,17 @@ internal INLINE void OutNL()
 
 char* Strf( char const* fmt, ... )
 {
-    sz n;
-    {
-        va_list args;
-        va_start( args, fmt );
-        // TODO Use an Append function with support for adding one string/int/etc. at a time to remove the need for sprintf at all
-        n = 1 + vsnprintf( nullptr, 0, fmt, args );
-        va_end( args );
-    }
+    va_list args;
+    va_start( args, fmt );
+    // TODO Use an Append function with support for adding one string/int/etc. at a time to remove the need for sprintf at all
+    sz n = 1 + vsnprintf( nullptr, 0, fmt, args );
+    va_end( args );
 
     char* buf = PUSH_STRING( &globalTmpArena, n );
-    {
-        va_list args;
-        va_start( args, fmt );
-        vsnprintf( buf, Size( n ), fmt, args );
-        va_end( args );
-    }
+    va_start( args, fmt );
+    vsnprintf( buf, Size( n ), fmt, args );
+    va_end( args );
+
     return buf;
 }
 
@@ -373,7 +368,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         } break;
 
         case Expr::Unary:
-            Out( TokenKind::Values::names[expr->unary.op] );
+            Out( TokenKind::Items::names[expr->unary.op] );
             OUTSTR( "(" );
             EmitExpr( expr->unary.expr );
             OUTSTR( ")" );
@@ -382,7 +377,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             OUTSTR( "(" );
             EmitExpr( expr->binary.left );
             OUTSTR( " " );
-            Out( TokenKind::Values::names[expr->binary.op] );
+            Out( TokenKind::Items::names[expr->binary.op] );
             OUTSTR( " " );
             EmitExpr( expr->binary.right );
             OUTSTR( ")" );
@@ -596,7 +591,7 @@ void EmitStmt( Stmt* stmt )
             OutIndent();
             EmitExpr( stmt->assign.left );
             OUTSTR( " " );
-            Out( TokenKind::Values::names[stmt->assign.op] );
+            Out( TokenKind::Items::names[stmt->assign.op] );
             OUTSTR( " " );
             EmitExpr( stmt->assign.right );
             OUTSTR( ";" );
