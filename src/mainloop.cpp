@@ -14,6 +14,7 @@
 #include "string.h"
 #include "lexer.h"
 #include "ast.h"
+#include "resolver.h"
 
 MemoryArena globalArena;
 MemoryArena globalTmpArena;
@@ -28,7 +29,6 @@ int globalErrorCount = 0;
 #include "resolver.cpp"
 #include "codegen_c.cpp"
 
-//#include "../test2.do.cpp"
 
 
 void InitInternStrings()

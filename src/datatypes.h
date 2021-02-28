@@ -1,3 +1,6 @@
+template <typename T>
+struct BucketArray;
+
 
 /////     DYNAMIC ARRAY    /////
 
@@ -37,6 +40,12 @@ struct Array
         capacity = bufferCount;
     }
 
+    Array( BucketArray<T> const& buckets, MemoryArena* arena, MemoryParams params = DefaultMemoryParams() )
+        : Array( arena, buckets.count, params )
+    {
+        buckets.CopyTo( this );
+    }
+
     T*       begin()         { return data; }
     const T* begin() const   { return data; }
     T*       end()           { return data + count; }
@@ -57,6 +66,16 @@ struct Array
     void ResizeToCapacity()
     {
         count = capacity;
+    }
+
+    void Clear()
+    {
+        count = 0;
+    }
+
+    i32 Available() const
+    {
+        return capacity - count;
     }
 
     T& operator[]( int i )
@@ -114,6 +133,44 @@ struct Array
         return data[count];
     }
 
+    void Remove( T* item )
+    {
+        ASSERT( count > 0 );
+
+        sz index = item - data;
+        ASSERT( index >= 0 && index < count );
+
+        *item = Last();
+        --count;
+    }
+
+    T* Find( const T& item )
+    {
+        T* result = nullptr;
+        for( int i = 0; i < count; ++i )
+        {
+            if( data[i] == item )
+            {
+                result = &data[i];
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    T const* Find( const T& item ) const
+    {
+        T* slot = ((Array<T>*)this)->Find( item );
+        return slot;
+    }
+
+    bool Contains( T const& item ) const
+    {
+        T const* slot = Find( item );
+        return slot != nullptr;
+    }
+
     // Deep copy
     Array<T> Clone( MemoryArena* arena ) const
     {
@@ -140,39 +197,24 @@ struct Array
         ASSERT( count_ > 0 && capacity >= count_ );
         PCOPY( buffer, data, count_ * SIZEOF(T) );
     }
-
-    bool Contains( const T& item ) const
-    {
-        bool result = false;
-        for( int i = 0; i < count; ++i )
-        {
-            if( data[i] == item )
-            {
-                result = true;
-                break;
-            }
-        }
-
-        return result;
-    }
-
-    void Clear()
-    {
-        count = 0;
-    }
-
-    i32 Available() const
-    {
-        return capacity - count;
-    }
 };
 
 
 /////     BUCKET ARRAY     /////
 
 template <typename T>
+bool EqualityComparator( T const& a, T const& b )
+{
+    return a == b;
+}
+
+
+template <typename T>
 struct BucketArray
 {
+    using ComparatorFunc = bool (*)( T const& a, T const& b );
+
+    // TODO Rewrite using Arrays with prev/next pointers as buckets
     struct Bucket
     {
         T* data;
@@ -205,6 +247,7 @@ struct BucketArray
     };
 
     // Stupid C++ shit to have both a const and non-const iterator without writing it twice
+    // TODO Get rid of this
     template <bool Flag, typename IsTrue, typename IsFalse>
     struct Choose;
 
@@ -342,6 +385,22 @@ struct BucketArray
         memoryParams = params;
     }
 
+    BucketArray( BucketArray<T> && other )
+        : first( other.first )
+        , last( other.last )
+        , firstFree( other.firstFree )
+        , arena( other.arena )
+        , memoryParams( other.memoryParams )
+        , count( other.count )
+    {
+        other.first = {};
+        other.last = nullptr;
+        other.firstFree = nullptr;
+        other.arena = nullptr;
+        other.memoryParams = {};
+        other.count = 0;
+    }
+
     // Disallow implicit copying
     BucketArray( const BucketArray& ) = delete;
     BucketArray& operator =( const BucketArray& ) = delete;
@@ -463,16 +522,14 @@ struct BucketArray
     }
 #endif
 
-    typedef bool (*Comparator)( T const& a, T const& b );
-
-    T* Find( T const& it, Comparator cmp )
+    T* Find( T const& item, ComparatorFunc cmp = EqualityComparator )
     {
         T* result = nullptr;
 
         auto idx = First();
         while( idx )
         {
-            if( cmp( it, *idx ) )
+            if( cmp( item, *idx ) )
                 break;
 
             idx.Next();
@@ -482,6 +539,18 @@ struct BucketArray
             result = &*idx;
 
         return result;
+    }
+
+    T const* Find( T const& item, ComparatorFunc cmp = EqualityComparator ) const
+    {
+        T* result = ((BucketArray<T>*)this)->Find( item, cmp );
+        return result;
+    }
+
+    bool Contains( T const& item, ComparatorFunc cmp = EqualityComparator ) const
+    {
+        T const* result = Find( item, cmp );
+        return result != nullptr;
     }
 
     void AppendFrom( T const* buffer, int bufferCount )

@@ -243,10 +243,11 @@ struct Decl
 
     // Annotated type from the result of the resolve
     Type* resolvedType;
+
     SourcePos pos;
     Array<char const*> names;
+    Array<char const*> directives;
     StmtList* parentBlock;
-    char const* directive;
     Kind kind;
 
     union
@@ -315,6 +316,7 @@ struct Stmt
         Block,
     };
 
+    Array<char const*> directives;
     SourcePos pos;
     StmtList* parentBlock;
     Kind kind;

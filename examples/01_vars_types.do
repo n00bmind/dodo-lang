@@ -21,6 +21,8 @@ main :: ()
     char = greeting[6];
     printf( "char = '%c' (%d)\n", char, char );
 
+    #expecterror { ; }
+
     // They're null terminated so they can be passed to C easily
     printf( "greeting = '%s'\n", greeting );
     // They _also_ have a length field so we never have to be searching for a terminator

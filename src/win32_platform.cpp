@@ -40,10 +40,6 @@ PLATFORM_PRINT(Win32Error)
     va_start( args, fmt );
     vfprintf( stderr, fmt, args );
     va_end( args );
-
-#if CONFIG_DEBUG
-    __debugbreak();
-#endif
 }
 
 PLATFORM_PRINT_VA(Win32ErrorVA)

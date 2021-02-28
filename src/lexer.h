@@ -116,9 +116,12 @@ STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #define DIRECTIVES(x) \
     x( Foreign,         "foreign" ) \
     x( ExpectError,     "expecterror" ) \
+    x( DebugBreak,      "debugbreak" ) \
 
 STRUCT_ENUM_WITH_NAMES(Directive, DIRECTIVES)
 #undef DIRECTIVES
+
+extern char const* globalDirectives[Directive::Items::count];
 
 
 struct SourcePos

@@ -173,3 +173,9 @@ error messages to more advanced tools, should be designed with care so as to nev
 - One of the reasons profilers are incredibly useful is they allow to easily graph historical data, and debuggers have never tried something like that. There's probably a way to augment the debugged code directly so it can sample all kinds of stuff about the runtime behaviour
   of the code that can then be plotted directly in the debugger (maybe even provide a socket so that interesting data can be piped back to the app or to be viewed remotely).
 
+- Something that could be a great aid while debugging the compiler itself, and which could potentially turn into its own thing,
+  would be having a graphic visualization of the state of the running compiler with all the phases and internal structures visualized
+  in ImGui. This could be a separate graphic app the compiler would connect to and feed it all its internal state at every moment, which
+  would mean when breaking into the debugger during a crash or parse/resolve error or whatever, we'd have the full graphical display of
+  all the internal info available besides the debugger's watch window.
+

@@ -1,6 +1,6 @@
 
 internal char const* globalKeywords[Keyword::Items::count];
-internal char const* globalDirectives[Directive::Items::count];
+char const* globalDirectives[Directive::Items::count];
 
 internal int charToDigit[256];
 internal int escapeToChar[256];

@@ -125,9 +125,11 @@ internal BucketArray<Symbol*> globalSymbolsList;
 // Ordered global symbols for linearized codegen
 internal BucketArray<Symbol*> globalOrderedSymbols;
 
-// Local scopes for functions
+// Local lexical scopes for functions
 internal BucketArray<Symbol> globalScopeStack;
 internal BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
+
+BucketArray<Stmt*> globalNodeStack;
 
 // List of unique interned types (a.k.a hash consing)
 // TODO Hashtable!
@@ -207,6 +209,16 @@ Type* floatType = NewBuiltinType( "float", f32Type );
 Type* stringType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
 // TODO How big is this guy? How does any even work?
 Type* anyType = NewBuiltinType( "any", Type::Any, globalPlatform.PointerSize, globalPlatform.PointerSize );
+
+// Error marker
+Type* nullType = NewBuiltinType( "", Type::None, 0, 0 );
+ResolvedExpr resolvedNull = { nullType, };
+
+bool IsValid( ResolvedExpr const& resolved )
+{
+    return !resolved.type || resolved.type->kind != Type::None;
+}
+
 
 
 Type* NewType( char const* name, Type::Kind kind, sz size, sz alignment )
@@ -340,8 +352,6 @@ bool IsTainted( Type* type )
     return type->symbol && type->symbol->state == Symbol::Tainted;
 }
 
-
-ResolvedExpr resolvedNull = {};
 
 ResolvedExpr NewResolvedRvalue( Type* type )
 {
@@ -1487,7 +1497,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Call );
     ResolvedExpr result = ResolveExpr( expr->call.func );
-    if( !result.type )
+    if( !IsValid( result ) )
         return resolvedNull;
 
     Decl* funcDecl = nullptr;
@@ -1711,7 +1721,7 @@ ResolvedExpr ResolveCastExpr( Expr* expr )
     }
     else if( type->kind == Type::Int )
     {
-        if( operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
+        if( operand.type && operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
         {
             RSLV_ERROR( expr->pos, "Invalid cast to int type" );
         }
@@ -1810,11 +1820,55 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
         } break;
         // TODO Typeof
 
+        case Expr::Comma:
+        {
+            bool isLvalue = true;
+            if( expectedType )
+                result = NewResolvedRvalue( expectedType );
+
+            int i =  0;
+            bool typeMismatch = false;
+            Array<ResolvedExpr> resolvedExprs( &globalTmpArena, expr->commaExprs.count );
+            for( Expr* e : expr->commaExprs )
+            {
+                ResolvedExpr resolved = ResolveExpr( e, expectedType );
+                resolvedExprs.Push( resolved );
+
+                if( !expectedType && !result.type )
+                    result = resolved;
+
+                if( !ConvertType( &resolved, result.type ) )
+                {
+                    if( expectedType )
+                    {
+                        RSLV_ERROR( e->pos, "Invalid type in expression %d of comma expression (expected '%s', got '%s')",
+                                    i + 1, expectedType->name, resolved.type->name );
+                    }
+                    else if( !typeMismatch )
+                    {
+                        RSLV_ERROR( e->pos, "Cannot deduce type of comma expression (current '%s', found '%s')", result.type->name,
+                                    resolved.type->name );
+                        typeMismatch = true;
+                    }
+                }
+                
+                isLvalue = isLvalue && resolved.isLvalue;
+                i++;
+            }
+            result.isLvalue = isLvalue;
+
+            if( typeMismatch )
+            {
+                // TODO Show list of all types that were found
+            }
+        } break;
+
         INVALID_DEFAULT_CASE
     }
 
-    if( result.type )
-        expr->resolvedExpr = result;
+    ASSERT( result.type );
+    expr->resolvedExpr = result;
+
     return result;
 }
 
@@ -2011,19 +2065,16 @@ void ResolveSymbol( Symbol* sym )
                 CompleteType( type, decl->pos );
             }
 
-            // TODO Multiple names with multiple inits?
-            // (Should maybe separate any comma expressions when separating the names, but rn we don't separate names for fields)
             //auto& names = decl->var.names;
             if( decl->var.initExpr )
             {
                 ResolvedExpr init = ResolveExpr( decl->var.initExpr, type );
-                if( type && !ConvertType( &init, type ) )
+                if( type && init.type && !ConvertType( &init, type ) )
                 {
                     // Make an exception for empty-size arrays
                     if( type->kind != Type::Array || type->array.count != 0 )
                     {
                         RSLV_ERROR( pos, "Invalid type in initializer expression. Expected '%s', got '%s'", type->name, init.type->name );
-                        break;
                     }
                 }
 
@@ -2101,7 +2152,7 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
 
 INLINE bool IsForeign( Decl* decl )
 {
-    return decl->directive == globalDirectives[ Directive::Foreign ];
+    return decl->directives.Contains( globalDirectives[ Directive::Foreign ] );
 }
 
 bool ResolveStmtBlock( StmtList const* block, Type* returnType );
@@ -2166,9 +2217,28 @@ Symbol* ResolveName( char const* name, SourcePos const& pos )
     return sym;
 }
 
+void PushNode( Stmt* node )
+{
+    globalNodeStack.Push( node );
+}
+
+void PopNode()
+{
+    auto top = globalNodeStack.Last();
+    ASSERT( top.IsValid() );
+
+    Stmt* node = *top;
+    globalNodeStack.Pop();
+
+    // Check expected errors
+    if( node->directives.Contains( globalDirectives[Directive::ExpectError] ) )
+        RSLV_ERROR( node->pos, "Expected error but none was generated" );
+}
+
 bool ResolveStmt( Stmt* stmt, Type* returnType )
 {
     bool returns = false;
+    PushNode( stmt );
 
     // TODO Check all control paths return a value
     switch( stmt->kind )
@@ -2309,10 +2379,14 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             returns = true;
         } break;
 
+        case Stmt::None:    // Empty
+        break;
+
         default:
         NOT_IMPLEMENTED;
     }
 
+    PopNode();
     return returns;
 }
 
@@ -2410,6 +2484,8 @@ void InitResolver( int globalSymbolsCount )
     INIT( globalScopeStack ) BucketArray<Symbol>( &globalArena, 1024 );
     INIT( globalSymbolsList ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
+    INIT( globalNodeStack ) BucketArray<Stmt*>( &globalArena, 16 );
+
     // TODO Make a generic type comparator so we can turn this into a hashtable
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
@@ -2422,7 +2498,7 @@ void InitResolver( int globalSymbolsCount )
     globalCurrentScopeStart = globalScopeStack.First();
     for( BuiltinType& b : globalBuiltinTypes )
     {
-        if( !b.symbolName )
+        if( IsNullOrEmpty( b.symbolName ) )
             break;
 
         if( b.isAlias )
@@ -2449,5 +2525,13 @@ void ResolveAll( Array<Decl*> const& globalDecls )
     {
         String msg = it->msg;
         globalPlatform.Error( msg.data );
+
+        if( it->infoCount >= 0 )
+            globalErrorCount++;
     }
+
+#if !RELEASE
+    if( globalErrorCount )
+        __debugbreak();
+#endif
 }

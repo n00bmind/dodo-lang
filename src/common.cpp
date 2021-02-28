@@ -19,15 +19,31 @@ void ParseError( Lexer* lexer, char const* fmt, ... )
 struct ErrorInfo
 {
     String msg;     // Points to error arena
-    i32 infoCount;  // How many info notes follow this guy if any
+    i32 infoCount;  // >= 0: How many info notes follow this guy if any. < 0: this is an info note
 };
 
-MemoryArena globalErrorArena;
+internal MemoryArena globalErrorArena;
 RingBuffer<ErrorInfo> globalErrorBuffer;
-ErrorInfo* globalLastError;
+internal ErrorInfo* globalLastError;
+internal bool globalSilenceInfos;
+
+bool globalBreakOnError = false;
+
 
 void Error( char const* fmt, ... )
 {
+    for( auto it = globalNodeStack.Last(); it; --it )
+    {
+        Stmt* node = *it;
+        // TODO Specific error number
+        if( char const** slot = node->directives.Find( globalDirectives[Directive::ExpectError] ) )
+        {
+            node->directives.Remove( slot );
+            globalSilenceInfos = true;
+            return;
+        }
+    }
+
     va_list args;
     va_start( args, fmt );
     String errorString = String::FromFormat( &globalErrorArena, fmt, args );
@@ -37,13 +53,17 @@ void Error( char const* fmt, ... )
     error.msg = errorString;
 
     globalLastError = globalErrorBuffer.Push( error );
-//#if  CONFIG_DEBUG
-    //__debugbreak();
-//#endif
+    globalSilenceInfos = false;
+
+    if( globalBreakOnError )
+        __debugbreak();
 }
 
 void Info( char const* fmt, ... )
 {
+    if( globalSilenceInfos )
+        return;
+
     va_list args;
     va_start( args, fmt );
     String errorString = String::FromFormat( &globalErrorArena, fmt, args );
@@ -51,6 +71,7 @@ void Info( char const* fmt, ... )
 
     ErrorInfo error = {};
     error.msg = errorString;
+    error.infoCount = -1;
 
     globalLastError->infoCount++;
 }
