@@ -21,8 +21,6 @@ main :: ()
     char = greeting[6];
     printf( "char = '%c' (%d)\n", char, char );
 
-    #expecterror { ; }
-
     // They're null terminated so they can be passed to C easily
     printf( "greeting = '%s'\n", greeting );
     // They _also_ have a length field so we never have to be searching for a terminator
@@ -51,11 +49,11 @@ main :: ()
 
     // There's no unsigned arithmetic type, all integer arithmetic is signed
 
-    // There is however a 'bits' type, for storing things like flags, hashes and whatnot
+    // There is however a 'bits' type (unsigned), for storing things like flags, hashes and whatnot
     hash :b32 = 0xabcdef00;
     printf( "hash = %x (%u)\n", hash, hash );
 
-    // Conversion to integer and back is only allowed via casting
+    // Conversion to integer and back is only allowed via casting (although literals of any sign auto convert to both)
     #expecterror { noCanDo :i32 = hash; }
     yesCanDo :i32 = <i32>hash;
 

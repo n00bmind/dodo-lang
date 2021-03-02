@@ -81,9 +81,14 @@ struct String
         , length( len )
     {}
 
-    String( Buffer const& buffer )
+    String( Buffer<char> const& buffer )
+        : data( buffer )
+        , length( buffer.length )
+    {}
+
+    String( buffer const& buffer )
         : data( (char*)buffer.data )
-        , length( I32( buffer.size ) )
+        , length( buffer.length )
     {}
 
     static String Clone( char const* src, MemoryArena* arena )

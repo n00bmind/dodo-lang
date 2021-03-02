@@ -457,7 +457,7 @@ bool Run( int argCount, char const* args[] )
         return false;
 
     // TODO Temp memory scopes
-    Buffer readResult = globalPlatform.ReadEntireFile( absPath, &globalTmpArena );
+    buffer readResult = globalPlatform.ReadEntireFile( absPath, &globalTmpArena );
     if( !readResult.data )
         return false;
 
@@ -491,14 +491,14 @@ bool Run( int argCount, char const* args[] )
     else
     {
         // Collect all output arena pages in order and write them to disk
-        Array<Buffer> pages( &globalArena, globalOutArena.pageCount );
+        Array<buffer> pages( &globalArena, globalOutArena.pageCount );
         pages.ResizeToCapacity();
 
         MemoryArena arena = globalOutArena;
         for( int i = pages.count - 1; i >= 0; --i )
         {
             pages[i].data = arena.base;
-            pages[i].size = arena.used;
+            pages[i].length = I32( arena.used );
 
             if( i != 0 )
             {

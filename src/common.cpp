@@ -27,7 +27,7 @@ RingBuffer<ErrorInfo> globalErrorBuffer;
 internal ErrorInfo* globalLastError;
 internal bool globalSilenceInfos;
 
-bool globalBreakOnError = false;
+bool globalBreakOnError = true;
 
 
 void Error( char const* fmt, ... )

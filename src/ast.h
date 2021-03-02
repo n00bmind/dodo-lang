@@ -57,8 +57,6 @@ struct ConstValue
         i64 intValue;
         u64 bitsValue;
     };
-    // TODO 
-    u32 sizeBytes;
 
     bool BoolValue() const { return bitsValue != 0ull; }
 };

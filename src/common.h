@@ -222,13 +222,41 @@ Size( sz value )
 }
 
 
-/////     BUFFER    /////
+/////     BUFFER VIEW    /////
 
+template <typename T>
 struct Buffer
 {
-    void* data;
-    sz size;
+    T* data;
+    i32 length;
+
+public:
+    Buffer()
+        : data( nullptr )
+        , length( 0 )
+    {}
+
+    Buffer( T* data_, i32 length_ )
+        : data( data_ )
+        , length( length_ )
+    {}
+
+    operator T const*() const { return data; }
+    operator T*() { return data; }
+
+    operator bool() const { return data && length; }
 };
+
+using buffer = Buffer<void>;
+
+// This is the least horrible thing I could come up with ¬¬
+#define BUFFER(T, ...)                                        \
+[]()                                                          \
+{                                                             \
+    static T literal[] = { __VA_ARGS__ };                     \
+    return Buffer<T>( literal, sizeof(literal) / sizeof(T) ); \
+}()
+    
 
 
 /////     STRUCT ENUM    /////

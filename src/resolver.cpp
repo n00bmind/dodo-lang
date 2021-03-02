@@ -539,6 +539,11 @@ bool IsNullPtrConst( ResolvedExpr const& resolved )
         return false;
 }
 
+bool IsIntegerConst( ResolvedExpr const& resolved )
+{
+    return resolved.isConst && IsIntegerType( resolved.type );
+}
+
 bool IsCharacterConst( ResolvedExpr const& resolved )
 {
     Type* type = resolved.type;
@@ -554,7 +559,9 @@ bool IsConvertible( ResolvedExpr const& resolved, Type* dest )
         return true;
     else if( dest == voidType || dest == anyType )
         return true;
-    else if( IsArithmeticType( dest ) && IsArithmeticType( src ) )
+    else if( IsIntegralType( dest ) && IsIntegerConst( resolved ) )          // TODO Have a 'literal' flag and restrict this to literals?
+        return true;
+    else if( dest->kind == Type::Float && IsArithmeticType( src ) )
         return true;
     else if( dest->kind == Type::Bits && IsCharacterConst( resolved ) )
         return true;
@@ -584,11 +591,7 @@ bool IsCastable( ResolvedExpr const& resolved, Type* dest )
     Type* src = resolved.type;
     if( IsConvertible( resolved, dest ) )
         return true;
-    else if( IsIntegralType( dest ) )
-        return IsPointerType( src );
-    else if( IsIntegralType( src ) )
-        return IsPointerType( dest );
-    else if( IsPointerType( dest ) && IsPointerType( src ) )
+    else if( (IsIntegralType( dest ) || IsPointerType( dest )) && (IsIntegralType( src ) || IsPointerType( src )) )
         return true;
     else
         return false;
@@ -732,11 +735,11 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
     CompleteType( type, expr->pos );
 
-    if( MatchKeyword( Keyword::Count, expr->field.name ) )
+    if( MatchKeyword( Keyword::Length, expr->field.name ) )
     {
-        if( !(type->kind == Type::Array || type->kind == Type::Buffer) )
+        if( !(type->kind == Type::Array || type->kind == Type::Buffer || type->kind == Type::String) )
         {
-            RSLV_ERROR( expr->pos, "Only arrays or buffer views have a 'count' attribute" );
+            RSLV_ERROR( expr->pos, "Only arrays, buffer views and strings have a 'length' attribute" );
             return resolvedNull;
         }
 
@@ -1134,10 +1137,16 @@ ResolvedExpr ResolveBinaryArithmeticExpr( TokenKind::Enum op, ResolvedExpr* left
 {
     UnifyArithmeticOperands( left, right );
 
+    ResolvedExpr result = {};
     if( left->isConst && right->isConst )
-        return EvalConstBinaryExpr( op, left, right, pos );
+        result =  EvalConstBinaryExpr( op, left, right, pos );
     else
-        return NewResolvedRvalue( left->type );
+        result =  NewResolvedRvalue( left->type );
+
+    if( TokenKind::Items::entries[ op ].value.flags == TokenFlags::CmpOp )
+        CastType( &result, boolType );
+
+    return result;
 }
 
 ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, ResolvedExpr* left, ResolvedExpr* right, SourcePos const& pos )
@@ -1617,8 +1626,6 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     }
 }
 
-Type* NewFuncType( Array<FuncArg> const& args, Type* returnType );
-
 Type* ResolveTypeSpec( TypeSpec* spec )
 {
     Type* result = nullptr;
@@ -1711,24 +1718,9 @@ ResolvedExpr ResolveCastExpr( Expr* expr )
     Type* type = ResolveTypeSpec( expr->cast.type );
     ResolvedExpr operand = ResolveExpr( expr->cast.expr );
 
-    // TODO Proper cast rules
-    if( type->kind == Type::Pointer )
+    if( !CastType( &operand, type ) )
     {
-        if( operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
-        {
-            RSLV_ERROR( expr->pos, "Invalid cast to pointer type" );
-        }
-    }
-    else if( type->kind == Type::Int )
-    {
-        if( operand.type && operand.type->kind != Type::Pointer && operand.type->kind != Type::Int )
-        {
-            RSLV_ERROR( expr->pos, "Invalid cast to int type" );
-        }
-    }
-    else
-    {
-        RSLV_ERROR( expr->pos, "Unsupported cast!" );
+        RSLV_ERROR( expr->pos, "Invalid type cast (source '%s', target '%s')", operand.type->name, type->name );
     }
 
     return NewResolvedRvalue( type );
@@ -1822,6 +1814,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 
         case Expr::Comma:
         {
+#if 0
             bool isLvalue = true;
             if( expectedType )
                 result = NewResolvedRvalue( expectedType );
@@ -1834,6 +1827,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
                 ResolvedExpr resolved = ResolveExpr( e, expectedType );
                 resolvedExprs.Push( resolved );
 
+                // NOTE We force the same type for all here. This doesn't match what we do for vars initilization
                 if( !expectedType && !result.type )
                     result = resolved;
 
@@ -1851,7 +1845,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
                         typeMismatch = true;
                     }
                 }
-                
+
                 isLvalue = isLvalue && resolved.isLvalue;
                 i++;
             }
@@ -1861,6 +1855,9 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             {
                 // TODO Show list of all types that were found
             }
+#endif
+            // NOTE Special-cased for now wherever relevant
+            NOT_IMPLEMENTED;
         } break;
 
         INVALID_DEFAULT_CASE
@@ -1994,7 +1991,6 @@ Symbol* GetSymbol( char const* name )
     return result;
 }
 
-// TODO Merge into CreateDeclSymbols?
 Symbol* PushSymbol( char const* name, bool isLocal, SourcePos const& pos )
 {
     Symbol* prevSymbol = GetSymbol( name );
@@ -2041,6 +2037,9 @@ void ResolveSymbol( Symbol* sym )
         return;
 
     Decl* decl = sym->decl;
+    if( decl->directives.Contains( globalDirectives[Directive::DebugBreak] ) )
+        __debugbreak();
+
     SourcePos const& pos = decl->pos;
     if( sym->state == Symbol::Resolving )
     {
@@ -2052,36 +2051,70 @@ void ResolveSymbol( Symbol* sym )
     ASSERT( sym->state == Symbol::Unresolved );
     sym->state = Symbol::Resolving;
 
+    Type* result = nullptr;
     switch( sym->kind )
     {
         case Symbol::Var:
         {
             ASSERT( decl->kind == Decl::Var );
             
-            Type* type = nullptr;
             if( decl->var.type )
             {
-                type = ResolveTypeSpec( decl->var.type );
-                CompleteType( type, decl->pos );
+                result = ResolveTypeSpec( decl->var.type );
+                CompleteType( result, decl->pos );
             }
 
-            //auto& names = decl->var.names;
-            if( decl->var.initExpr )
+            // Deal with comma exprs
+            // TODO Should we generalize comma expressions better? (would need some kind of compound ResolvedExpr)
+            // NOTE When we get here we're resolving _one_ of the symbols in the multiple decl, so search for it by name
+            // and compare with the correponding slot in the comma expression initializer (if any)
+            Expr* initExpr = decl->var.initExpr;
+            if( initExpr && decl->names.count > 1 )
             {
-                ResolvedExpr init = ResolveExpr( decl->var.initExpr, type );
-                if( type && init.type && !ConvertType( &init, type ) )
+                int declIndex = 0;
+                for( char const* name : decl->names )
+                {
+                    if( name == sym->name )
+                        break;
+                    declIndex++;
+                }
+                ASSERT( declIndex < decl->names.count );
+
+                if( initExpr->kind == Expr::Comma )
+                {
+                    if( declIndex < initExpr->commaExprs.count )
+                        initExpr = initExpr->commaExprs[declIndex];
+                    else 
+                    {
+                        if( result )
+                        {
+                            // Use given type and zero-initialize
+                            initExpr = nullptr;
+                        }
+                        else
+                        {
+                            RSLV_ERROR( pos, "Missing initializer for implicitly typed symbol declaration '%s'", sym->name );
+                            result = nullType;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if( initExpr )
+            {
+                ResolvedExpr init = ResolveExpr( initExpr, result );
+                if( result && init.type && !ConvertType( &init, result ) )
                 {
                     // Make an exception for empty-size arrays
-                    if( type->kind != Type::Array || type->array.count != 0 )
+                    if( result->kind != Type::Array || result->array.count != 0 )
                     {
-                        RSLV_ERROR( pos, "Invalid type in initializer expression. Expected '%s', got '%s'", type->name, init.type->name );
+                        RSLV_ERROR( pos, "Invalid type in initializer expression. Expected '%s', got '%s'", result->name, init.type->name );
                     }
                 }
 
-                type = init.type;
+                result = init.type;
             }
-
-            decl->resolvedType = sym->type = type;
         } break;
 
         case Symbol::Const:
@@ -2089,13 +2122,14 @@ void ResolveSymbol( Symbol* sym )
             ASSERT( decl->kind == Decl::Var );
             ASSERT( decl->var.isConst );
 
+            // TODO Multiple decl constants
             // NOTE Type is always inferred for constants right now
             ResolvedExpr init = ResolveExpr( decl->var.initExpr );
             if( !init.isConst )
                 RSLV_ERROR( pos, "Initializer for constant '%s' is not a constant expression", sym->name );
 
             sym->constValue = init.constValue;
-            decl->resolvedType = sym->type = init.type;
+            result = init.type;
         } break;
 
         case Symbol::Type:
@@ -2121,7 +2155,7 @@ void ResolveSymbol( Symbol* sym )
                 CompleteType( retType, decl->func.returnType->pos );
             }
 
-            decl->resolvedType = sym->type = NewFuncType( args, retType );
+            result = NewFuncType( args, retType );
         } break;
 
         case Symbol::Module:
@@ -2131,7 +2165,9 @@ void ResolveSymbol( Symbol* sym )
         INVALID_DEFAULT_CASE
     }
 
-    if( sym->type )
+    decl->resolvedType = sym->type = result;
+
+    if( sym->type && sym->type->kind != Type::None )
         sym->state = Symbol::Resolved;
     else
         sym->state = Symbol::Tainted;
@@ -2473,11 +2509,49 @@ Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
     sym.state = Symbol::Resolved;
 
     Symbol* result = globalSymbols.Put( name, sym );
-    globalSymbolsList.Push( result );
+    //globalSymbolsList.Push( result );
 
     return result;
 }
 
+Symbol* PushGlobalConstSymbol( char const* name, Type* type, bool value )
+{
+    InternString* internName = Intern( String( name ) );
+    // Use interned string for both key and value!
+    name = internName->data;
+
+    Symbol sym = {};
+    sym.name = name;
+    sym.type = type;
+    sym.kind = Symbol::Const;
+    sym.state = Symbol::Resolved;
+    sym.constValue.bitsValue = value;
+
+    Symbol* result = globalSymbols.Put( name, sym );
+    //globalSymbolsList.Push( result );
+
+    return result;
+}
+
+Symbol* PushGlobalFuncSymbol( char const* name, Buffer<FuncArg> args, Buffer<Type*> returnTypes )
+{
+    InternString* internName = Intern( String( name ) );
+    // Use interned string for both key and value!
+    name = internName->data;
+
+    Symbol sym = {};
+    sym.name = name;
+    // TODO 
+    Array<FuncArg> argsArray = Array<FuncArg>::Clone( args, &globalArena );
+    sym.type = NewFuncType( argsArray, returnTypes ? returnTypes[0] : voidType );
+    sym.kind = Symbol::Func;
+    sym.state = Symbol::Resolved;
+
+    Symbol* result = globalSymbols.Put( name, sym );
+    //globalSymbolsList.Push( result );
+
+    return result;
+}
 
 void InitResolver( int globalSymbolsCount )
 {
@@ -2506,6 +2580,12 @@ void InitResolver( int globalSymbolsCount )
         else
             PushGlobalTypeSymbol( b.symbolName, &b.type );
     }
+
+    PushGlobalConstSymbol( "true", boolType, true );
+    PushGlobalConstSymbol( "false", boolType, false );
+
+    // TODO Add varargs of type any
+    PushGlobalFuncSymbol( "expect", BUFFER( FuncArg, { boolType } ), {} );
 }
 
 void ResolveAll( Array<Decl*> const& globalDecls )

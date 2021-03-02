@@ -6,24 +6,18 @@ R"~~~(#include <stdio.h>
 #define ARGS(...) __VA_ARGS__  
 #define ARRAYCOUNT(array) I32( sizeof(array) / sizeof((array)[0]) )
 
-#define BUFFER(x, T)                                  \
-[]()                                                  \
-{                                                     \
-    static T literal[] = x;                           \
-    return buffer<T>( literal, ARRAYCOUNT(literal) ); \
-}()
-
 #if _MSC_VER
 #define INLINE __forceinline
 #else
 #define INLINE inline __attribute__((always_inline))
 #endif
 
+// TODO Only debugbreak if there's a debugger present, otherwise exit and print stack trace
 #define HALT() (__debugbreak(), 1)
 #if !CONFIG_RELEASE
-#define ASSERT(expr) \
+#define expect(expr, ...) \
     ((void)( !(expr) \
-             && (globalAssertHandler( __FILE__, __LINE__, #expr ), 1) \
+             && (globalAssertHandler( __FILE__, __LINE__, #expr " " ##__VA_ARGS__ ), 1) \
              && HALT()))
 #else
 #define ASSERT(expr) ((void)0)
@@ -223,6 +217,14 @@ public:
 
     operator T*() { return data; }
 };
+
+#define BUFFER(T, x)                                  \
+[]()                                                  \
+{                                                     \
+    static T literal[] = x;                           \
+    return buffer<T>( literal, ARRAYCOUNT(literal) ); \
+}()
+
 
 struct string
 {

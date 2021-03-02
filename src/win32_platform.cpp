@@ -78,7 +78,8 @@ PLATFORM_GET_ABSOLUTE_PATH(Win32GetAbsolutePath)
 
 PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
 {
-    Buffer result = {};
+    void* resultData = nullptr;
+    int resultLength = 0;
 
     HANDLE fileHandle = CreateFile( filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0 );
     if( fileHandle != INVALID_HANDLE_VALUE )
@@ -87,22 +88,22 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
         if( GetFileSizeEx( fileHandle, &fileSize ) )
         {
             u32 fileSize32 = U32( (u64)fileSize.QuadPart );
-            result.data = PUSH_SIZE( arena, fileSize32 + 1 );
+            resultData = PUSH_SIZE( arena, fileSize32 + 1 );
 
-            if( result.data )
+            if( resultData )
             {
                 DWORD bytesRead;
-                if( ReadFile( fileHandle, result.data, fileSize32, &bytesRead, 0 )
+                if( ReadFile( fileHandle, resultData, fileSize32, &bytesRead, 0 )
                     && (fileSize32 == bytesRead) )
                 {
                     // Null-terminate to help when handling text files
-                    *((u8 *)result.data + fileSize32) = '\0';
-                    result.size = fileSize32 + 1;
+                    *((u8 *)resultData + fileSize32) = '\0';
+                    resultLength = I32( fileSize32 + 1 );
                 }
                 else
                 {
                     globalPlatform.Error( "ReadFile failed for '%s'", filename );
-                    result.data = 0;
+                    resultData = 0;
                 }
             }
             else
@@ -122,7 +123,7 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
         globalPlatform.Error( "Failed opening file '%s' for reading", filename );
     }
 
-    return result;
+    return { resultData, resultLength };
 }
 
 PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
@@ -141,13 +142,13 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
 
     for( int i = 0; i < chunks.count; ++i )
     {
-        Buffer const& chunk = chunks[i];
+        buffer const& chunk = chunks[i];
         SetFilePointer( outFile, 0, NULL, FILE_END );
 
         DWORD bytesWritten;
-        if( !WriteFile( outFile, chunk.data, U32( chunk.size ), &bytesWritten, NULL ) )
+        if( !WriteFile( outFile, chunk.data, U32( chunk.length ), &bytesWritten, NULL ) )
         {
-            globalPlatform.Error( "Failed writing %d bytes to '%s'", chunk.size, filename );
+            globalPlatform.Error( "Failed writing %d bytes to '%s'", chunk.length, filename );
             return false;
         }
     }

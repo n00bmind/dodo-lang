@@ -46,6 +46,12 @@ struct Array
         buckets.CopyTo( this );
     }
 
+    operator Buffer<T>()
+    {
+        return Buffer<T>( data, count );
+    }
+
+
     T*       begin()         { return data; }
     const T* begin() const   { return data; }
     T*       end()           { return data + count; }
@@ -177,6 +183,14 @@ struct Array
         Array<T> result( arena, count );
         PCOPY( data, result.data, count * SIZEOF(T) );
         result.count = count;
+        return result;
+    }
+
+    static Array<T> Clone( Buffer<T> buffer, MemoryArena* arena )
+    {
+        Array<T> result( arena, buffer.length );
+        PCOPY( buffer.data, result.data, buffer.length * SIZEOF(T) );
+        result.count = buffer.length;
         return result;
     }
 

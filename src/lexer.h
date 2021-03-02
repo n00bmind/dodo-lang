@@ -107,7 +107,7 @@ STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( Continue,"continue" ) \
     x( Return,  "return" ) \
     x( In,      "in" ) \
-    x( Count,   "count" ) \
+    x( Length,  "length" ) \
 
 STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
