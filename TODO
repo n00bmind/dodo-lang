@@ -1,0 +1,2 @@
+
+- Detect all identifiers equal to keywords (https://www.tutorialspoint.com/Reserved-keywords-in-Cplusplus) and rename them

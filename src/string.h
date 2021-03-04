@@ -71,22 +71,22 @@ struct String
         , length( 0 )
     {}
 
-    String( char const* cString )
+    explicit String( char const* cString )
         : data( cString )
         , length( I32( strlen( cString ) ) )
     {}
 
-    String( char const* cString, int len )
+    explicit String( char const* cString, int len )
         : data( cString )
         , length( len )
     {}
 
-    String( Buffer<char> const& buffer )
+    explicit String( Buffer<char> const& buffer )
         : data( buffer )
         , length( buffer.length )
     {}
 
-    String( buffer const& buffer )
+    explicit String( buffer const& buffer )
         : data( (char*)buffer.data )
         , length( buffer.length )
     {}
@@ -226,7 +226,7 @@ struct StringBuilder
 
     // TODO Raise bucket size when we know it works
     StringBuilder( MemoryArena* arena, MemoryParams params = Temporary() )
-        : buckets( arena, 8, params )
+        : buckets( arena, 16, params )
         , memoryParams( params )
     {}
 

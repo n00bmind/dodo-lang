@@ -259,7 +259,7 @@ using buffer = Buffer<void>;
     
 
 
-/////     STRUCT ENUM    /////
+/////     ENUM STRUCT    /////
 // TODO Combine with the ideas in https://blog.paranoidcoding.com/2010/11/18/discriminated-unions-in-c.html to create a similar
 // TAGGED_UNION for discriminated unions
 
@@ -280,7 +280,7 @@ struct V
     x(Scripting,    ("f", 600)) \
 
 // Values must go in () even if they're a single primitive type!
-STRUCT_ENUM_WITH_VALUES(MemoryTag, V, VALUES)
+ENUM_STRUCT_WITH_VALUES(MemoryTag, V, VALUES)
 #undef VALUES
 
 int main()
@@ -354,10 +354,10 @@ struct enumName::Items                                                     \
     xValueList(_ENUM_REF)                                                  \
 };                                                                         \
 
-#define STRUCT_ENUM(enumName, xValueList)                               _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT)
-#define STRUCT_ENUM_WITH_NAMES(enumName, xValueList)                    _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT_WITH_NAMES)
-#define STRUCT_ENUM_WITH_VALUES(enumName, valueType, xValueList)        _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_VALUES)
-#define STRUCT_ENUM_WITH_NAMES_VALUES(enumName, valueType, xValueList)  _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_NAMES_VALUES)
+#define ENUM_STRUCT(enumName, xValueList)                               _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT)
+#define ENUM_STRUCT_WITH_NAMES(enumName, xValueList)                    _CREATE_ENUM(enumName, i32, xValueList, _ENUM_INIT_WITH_NAMES)
+#define ENUM_STRUCT_WITH_VALUES(enumName, valueType, xValueList)        _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_VALUES)
+#define ENUM_STRUCT_WITH_NAMES_VALUES(enumName, valueType, xValueList)  _CREATE_ENUM(enumName, valueType, xValueList, _ENUM_INIT_WITH_NAMES_VALUES)
 
 
 

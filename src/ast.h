@@ -209,6 +209,21 @@ struct StmtList
 };
 
 
+struct Node
+{
+    enum Flags
+    {
+        None = 0,
+        SkipCodegen = 0x1,
+    };
+
+    Array<char const*> directives;
+    SourcePos pos;
+    StmtList* parentBlock;
+    u32 flags;
+};
+
+
 struct FuncArgDecl
 {
     SourcePos pos;
@@ -225,7 +240,7 @@ struct EnumItem
     u32 index;
 };
 
-struct Decl
+struct Decl : public Node
 {
     enum Kind
     {
@@ -242,10 +257,7 @@ struct Decl
     // Annotated type from the result of the resolve
     Type* resolvedType;
 
-    SourcePos pos;
     Array<char const*> names;
-    Array<char const*> directives;
-    StmtList* parentBlock;
     Kind kind;
 
     union
@@ -296,7 +308,7 @@ struct SwitchCase
     bool isDefault;
 };
 
-struct Stmt
+struct Stmt : public Node
 {
     enum Kind
     {
@@ -314,9 +326,6 @@ struct Stmt
         Block,
     };
 
-    Array<char const*> directives;
-    SourcePos pos;
-    StmtList* parentBlock;
     Kind kind;
 
     union

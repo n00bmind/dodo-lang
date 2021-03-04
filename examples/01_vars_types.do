@@ -7,8 +7,8 @@ main :: ()
     number :int = 0x42;
     printf( "number = %d\n", number );
 
-    char: b8 = '\'';
-    printf( "char = '%c' (%d)\n", char, char );
+    ch: b8 = '\'';
+    printf( "char = '%c' (%d)\n", ch, ch );
 
     real :f32 = -2.0;
     printf( "real = %f\n", real );
@@ -18,8 +18,8 @@ main :: ()
     greeting :string = "Hello Sailor!";
     // Oh, and they're also readonly
     #expecterror{ greeting[6] = 'T'; }
-    char = greeting[6];
-    printf( "char = '%c' (%d)\n", char, char );
+    ch = greeting[6];
+    printf( "ch = '%c' (%d)\n", ch, ch );
 
     // They're null terminated so they can be passed to C easily
     printf( "greeting = '%s'\n", greeting );
@@ -29,7 +29,7 @@ main :: ()
 
     // Constants use a second : instead of =
     // They're actual compile-time constexprs, so they don't take any space
-    pi :: 3.145926;
+    pi :: 3.1415926;
     // TODO How to show maximum precision here?
     printf( "pi = %f\n", pi );
 
@@ -41,7 +41,7 @@ main :: ()
     // (anything not given an explicit initial value is zero initialized)
     #expecterror { x, y, z := 0, 1; }
     x, y, z :int = 0, 1;
-    printf( "x = %d, y = %d, z = %d\n", a, b, c );
+    printf( "x = %d, y = %d, z = %d\n", x, y, z );
 
     // TODO Add alot more unary and binary expressions with all the various allowed types
 
@@ -58,7 +58,7 @@ main :: ()
     yesCanDo :i32 = <i32>hash;
 
     // Booleans are a special kind of bits type. Its natural size is 8 bits, although only the least significant is used
-    fact := true;
+    fact := false;
 
     // Any other scalar type can convert implicity to boolean, the zero value converts to false, any other value is true
     fact = pi;
@@ -75,10 +75,9 @@ main :: ()
     p :*int = &a;
     pp :**int = &p;
 
-    printf( "&a = %x\n", p );
-    printf( "&p = %x\n", pp );
+    printf( "&a = %p\n", p );
+    printf( "&p = %p\n", pp );
     printf( "*p = %d\n", *p );
-
     expect( *p == a );
 
     *p = 10;

@@ -86,7 +86,7 @@ struct TokenKindValue
     x(Newline,          "newline",      ( "NLN", 0 )) \
     x(EndOfStream,      "EOS",          ( "EOS", 0 )) \
 
-STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
+ENUM_STRUCT_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
 #undef TOKENS
 
 
@@ -109,7 +109,7 @@ STRUCT_ENUM_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( In,      "in" ) \
     x( Length,  "length" ) \
 
-STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
+ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
 
 
@@ -118,7 +118,7 @@ STRUCT_ENUM_WITH_NAMES(Keyword, KEYWORDS)
     x( ExpectError,     "expecterror" ) \
     x( DebugBreak,      "debugbreak" ) \
 
-STRUCT_ENUM_WITH_NAMES(Directive, DIRECTIVES)
+ENUM_STRUCT_WITH_NAMES(Directive, DIRECTIVES)
 #undef DIRECTIVES
 
 extern char const* globalDirectives[Directive::Items::count];

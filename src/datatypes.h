@@ -15,6 +15,8 @@ struct Array
     i32 capacity;
 
 
+    static const Array<T> Empty;
+
     Array()
     {
         data = nullptr;
@@ -213,6 +215,9 @@ struct Array
     }
 };
 
+template <typename T>
+const Array<T> Array<T>::Empty = {};
+
 
 /////     BUCKET ARRAY     /////
 
@@ -385,6 +390,8 @@ struct BucketArray
 
     i32 count;
 
+
+    static const BucketArray<T> Empty;
 
     BucketArray()
     {}
@@ -700,6 +707,9 @@ private:
         last = newBucket;
     }
 };
+
+template <typename T>
+const BucketArray<T> BucketArray<T>::Empty = {};
 
 
 /////     HASHTABLE     /////

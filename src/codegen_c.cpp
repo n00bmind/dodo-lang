@@ -15,6 +15,7 @@ INLINE void Out( char const* str, sz len = 0 )
     PCOPY( str, buf, len );
 }
 
+#undef OUT
 #define OUTSTR( s ) Out( "" s "", sizeof(s) - 1 )
 #define INDENT_STR "                                                                            "
 
@@ -181,16 +182,20 @@ char const* BuildQualifiedNameTmp( StmtList* parentBlock, char const* name )
 
 internal char charToEscape[256];
 
-void EmitStringLiteral( String const& str )
+void EmitStringLiteral( String const& str, bool isChar )
 {
     // TODO Multiline
-    OUTSTR( "\"" );
+    if( isChar )
+        OUTSTR( "'" );
+    else
+        OUTSTR( "\"" );
+
     char const* p = str.data;
     char const* end = str.data + str.length;
     while( p < end )
     {
         char const* start = p;
-        while( p < end && isprint( *p ) && !charToEscape[*p] )
+        while( p < end && isprint( (unsigned char)*p ) && !charToEscape[ (unsigned char)*p ] )
             p++;
 
         if( start != p )
@@ -198,20 +203,24 @@ void EmitStringLiteral( String const& str )
 
         if( p < end )
         {
-            char c = charToEscape[*p];
+            char c = charToEscape[ (unsigned char)*p ];
             if( c )
             {
                 Out( Strf( "\\%c", c ) );
             }
             else
             {
-                ASSERT( !isprint( *p ) );
+                ASSERT( !isprint( (unsigned char)*p ) );
                 Out( Strf( "\\x%X", (unsigned char)*p ) );
             }
             p++;
         }
     }
-    OUTSTR( "\"" );
+
+    if( isChar )
+        OUTSTR( "'" );
+    else
+        OUTSTR( "\"" );
 }
 
 void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlock /*= nullptr*/ )
@@ -224,10 +233,14 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         case Expr::Float:
             // TODO Copy the actual token string instead
             Out( Strf( "%f", expr->literal.floatValue ) );
+            if( expectedType->size == 4 )
+                OUTSTR( "f" );
             break;
         case Expr::Str:
-            EmitStringLiteral( expr->literal.strValue.data );
-            break;
+        {
+            bool isChar = expectedType && expectedType->kind != Type::String && expr->literal.strValue.length == 1;
+            EmitStringLiteral( expr->literal.strValue, isChar );
+        } break;
         case Expr::Name:
         {
             Type* nameType = expr->resolvedExpr.type;
@@ -245,7 +258,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 Decl* funcDecl = sym->decl;
 
                 char const* name = expr->name.ident;
-                if( funcDecl->parentBlock && !IsForeign( funcDecl ) )
+                if( funcDecl && funcDecl->parentBlock && !IsForeign( funcDecl ) )
                     name = BuildQualifiedNameTmp( funcDecl->parentBlock, expr->name.ident );
                 Out( name );
             }
@@ -264,17 +277,51 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             Type* funcType = expr->call.func->resolvedExpr.type;
             ASSERT( funcType->kind == Type::Func );
 
-            int i = 0;
+            // TODO This doesn't work for function "pointers"
+            Symbol* sym = expr->call.func->kind == Expr::Name ? expr->call.func->name.symbol : nullptr;
+            bool isForeign = (sym && sym->decl) ? IsForeign( sym->decl ) : false;
+
             OUTSTR( "( " );
-            for( Expr* argExpr : expr->call.args )
+
+            int givenIndex = 0, wantedIndex = 0;
+            Array<FuncArg> const& wantedArgs = funcType->func.args;
+            Array<Expr*> const& givenArgs = expr->call.args;
+
+            while( givenIndex < givenArgs.count )
             {
-                if( argExpr != expr->call.args[0] )
+                ASSERT( wantedIndex < wantedArgs.count );
+
+                if( givenIndex || wantedIndex )
                     OUTSTR( ", " );
 
-                // TODO This won't work with named arguments
-                Type* argType = funcType->func.args[i++].type;
-                EmitExpr( argExpr, argType );
+                Expr* argExpr = expr->call.args[givenIndex];
+                Type* givenType = argExpr->resolvedExpr.type;
+
+                FuncArg const& wantedArg = wantedArgs[wantedIndex];
+                Type* wantedType = wantedArg.type;
+
+                // Ensure types match
+                if( wantedType != anyType && givenType != wantedType )
+                {
+                    ASSERT( wantedArg.isVararg );
+                    wantedIndex++;
+                    continue;
+                }
+
+                // Convert strings inside foreign function calls
+                if( isForeign )
+                {
+                    if( givenType == stringType && !argExpr->resolvedExpr.isConst )
+                        OUTSTR( "(char const*)" );
+                }
+
+                EmitExpr( argExpr, wantedType );
+
+                givenIndex++;
+                if( !wantedArg.isVararg )
+                    wantedIndex++;
             }
+
             OUTSTR( " )" );
         } break;
 
@@ -370,7 +417,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         case Expr::Unary:
             Out( TokenKind::Items::names[expr->unary.op] );
             OUTSTR( "(" );
-            EmitExpr( expr->unary.expr );
+            EmitExpr( expr->unary.expr, expectedType );
             OUTSTR( ")" );
             break;
         case Expr::Binary:
@@ -480,7 +527,7 @@ void EmitForwardDecls()
 
 void EmitStmtBlock( StmtList const* block );
 
-void EmitVarDecl( Decl* decl, char const* name, bool nested )
+void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested )
 {
     Type* resolvedType = decl->resolvedType; 
 
@@ -500,33 +547,56 @@ void EmitVarDecl( Decl* decl, char const* name, bool nested )
         Out( TypeToCdecl( resolvedType, name ) );
 
     OUTSTR( " = " );
-    if( decl->var.initExpr )
-        EmitExpr( decl->var.initExpr, resolvedType );
+
+    Expr* initExpr = decl->var.initExpr;
+    if( initExpr && initExpr->kind == Expr::Comma )
+        initExpr = exprIndex < initExpr->commaExprs.count ? initExpr->commaExprs[exprIndex] : nullptr;
+
+    if( initExpr )
+    {
+        if( resolvedType == boolType && initExpr->resolvedExpr.type != boolType )
+            OUTSTR( "(bool)" );
+        EmitExpr( initExpr, resolvedType );
+    }
     else
         OUTSTR( "{}" );
+
     OUTSTR( ";" );
     OutNL();
 }
 
+// TODO Remove 'nested' and link nodes to parent nodes so we have that info available here
 void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 {
+    if( decl->flags & Node::SkipCodegen )
+        return;
+
     switch( decl->kind )
     {
         case Decl::Var:
         {
             // NOTE For declarations where multiple names are declared together, right now the situation is different
-            // for top-level variables and fields inside aggregates. Top-level variables need to have a separate symbol created
-            // for each name, so we have to emit them just once using the symbol name. For aggregate fields, we just emit
+            // for top-level variables and fields inside aggregates. Top-level variables will have a separate symbol created
+            // for each name, so we just emit the given symbol name. For aggregate fields, we just emit
             // a field per name on separate lines
+            // TODO Is nested true for _function_ decls too?
             if( nested )
             {
+                int i = 0;
                 for( char const* name : decl->names )
-                    EmitVarDecl( decl, name, nested );
+                {
+                    EmitVarDecl( decl, name, i, nested );
+                    i++;
+                }
             }
             else
             {
                 ASSERT( symbol, "Need a (named) symbol for top-level variable declarations" );
-                EmitVarDecl( decl, symbol->name, nested );
+                char const** name = decl->names.Find( symbol->name ); 
+                ASSERT( name );
+
+                int index = I32( name - decl->names.begin() );
+                EmitVarDecl( decl, symbol->name, index, nested );
             }
         } break;
         case Decl::Struct:
@@ -575,6 +645,9 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
 
 void EmitStmt( Stmt* stmt )
 {
+    if( stmt->flags & Node::SkipCodegen )
+        return;
+
     EmitPos( stmt->pos );
 
     switch( stmt->kind )
@@ -588,14 +661,21 @@ void EmitStmt( Stmt* stmt )
             EmitDecl( stmt->decl, nullptr, true );
             break;
         case Stmt::Assign:
+        {
             OutIndent();
+            Type* leftType = stmt->assign.left->resolvedExpr.type;
             EmitExpr( stmt->assign.left );
+
             OUTSTR( " " );
             Out( TokenKind::Items::names[stmt->assign.op] );
             OUTSTR( " " );
+
+            Type* rightType = stmt->assign.right->resolvedExpr.type;
+            if( leftType == boolType && rightType != boolType )
+                OUTSTR( "(bool)" );
             EmitExpr( stmt->assign.right );
             OUTSTR( ";" );
-            break;
+        } break;
         case Stmt::If:
             OutIndent();
             OUTSTR( "if( " );

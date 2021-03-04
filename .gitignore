@@ -10,3 +10,4 @@ bin/
 *.pdb
 test/*.cpp
 *.diagsession
+examples/*.cpp

@@ -414,7 +414,7 @@ ResolvedExpr NewResolvedConst( Type* type, i64 intValue, SourcePos const& pos )
 
 ResolvedExpr NewResolvedConst( Type* type, u64 bitsValue, SourcePos const& pos )
 {
-    ASSERT( type->kind == Type::Bits );
+    ASSERT( type->kind == Type::Bits || type->kind == Type::Bool );
 
     u64 max = 0;
     switch( type->size )
@@ -565,6 +565,8 @@ bool IsConvertible( ResolvedExpr const& resolved, Type* dest )
         return true;
     else if( dest->kind == Type::Bits && IsCharacterConst( resolved ) )
         return true;
+    else if( dest->kind == Type::Bool && IsScalarType( src ) )
+        return true;
     //else if( src->kind == Type::Func && src->func.isIntrinsic )
         //return false;
     else if( IsPointerType( dest ) && IsNullPtrConst( resolved ) )
@@ -710,7 +712,35 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     if( sym->kind == Symbol::Var )
         return NewResolvedLvalue( sym->type );
     else if( sym->kind == Symbol::Const )
-        return NewResolvedConst( intType, sym->constValue.intValue, expr->pos );
+    {
+        Type::Kind kind = sym->type->kind;
+        if( kind == Type::Enum )
+        {
+            if( sym->type->enum_.base->kind == Type::Int )
+                kind = Type::Int;
+            else if( sym->type->enum_.base->kind == Type::Bits )
+                kind = Type::Bits;
+        }
+
+        switch( kind )
+        {
+            case Type::String:
+                return NewResolvedConst( sym->type, sym->constValue.strValue, expr->pos );
+            case Type::Pointer:
+                return NewResolvedConst( sym->type, sym->constValue.ptrValue, expr->pos );
+            case Type::Float:
+                return NewResolvedConst( sym->type, sym->constValue.floatValue, expr->pos );
+            case Type::Int:
+                return NewResolvedConst( sym->type, sym->constValue.intValue, expr->pos );
+            case Type::Bits:
+            case Type::Bool:
+                return NewResolvedConst( sym->type, sym->constValue.bitsValue, expr->pos );
+
+            default:
+                INVALID_CODE_PATH;
+                return resolvedNull;
+        }
+    }
     else if( sym->kind == Symbol::Func )
         return NewResolvedRvalue( sym->type );
     else
@@ -2213,7 +2243,7 @@ void ResolveFuncBody( Symbol* sym )
         CompleteType( argType, a.pos );
 
         // Create a synthetic Decl
-        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, decl->func.body );
+        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<char const*>::Empty, 0, decl->func.body );
         CreateDeclSymbols( varDecl, true );
     }
 
@@ -2351,7 +2381,8 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
             // Create a synthetic Decl
             // TODO Support type specifiers? (make this more Decl-like)
-            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr, stmt->for_.block );
+            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr, BucketArray<char const*>::Empty, 0,
+                                        stmt->for_.block );
             CreateDeclSymbols( varDecl, true );
 
             ResolveStmtBlock( stmt->for_.block, returnType );
