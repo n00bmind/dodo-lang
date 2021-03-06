@@ -643,6 +643,22 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
         OutNL();
 }
 
+void EmitAssignExpr( Expr* leftExpr, Expr* rightExpr, char const* op )
+{
+    Type* leftType = leftExpr->resolvedExpr.type;
+    EmitExpr( leftExpr );
+
+    OUTSTR( " " );
+    Out( op );
+    OUTSTR( " " );
+
+    Type* rightType = rightExpr->resolvedExpr.type;
+    if( leftType == boolType && rightType != boolType )
+        OUTSTR( "(bool)" );
+    EmitExpr( rightExpr );
+    OUTSTR( ";" );
+}
+
 void EmitStmt( Stmt* stmt )
 {
     if( stmt->flags & Node::SkipCodegen )
@@ -662,19 +678,25 @@ void EmitStmt( Stmt* stmt )
             break;
         case Stmt::Assign:
         {
+            Expr* leftExpr = stmt->assign.left;
+            Expr* rightExpr = stmt->assign.right;
+            char const* opName = TokenKind::Items::names[stmt->assign.op];
+
             OutIndent();
-            Type* leftType = stmt->assign.left->resolvedExpr.type;
-            EmitExpr( stmt->assign.left );
+            if( leftExpr->kind == Expr::Comma )
+            {
+                Array<Expr*> const& leftExprs = leftExpr->commaExprs;
+                Array<Expr*> const& rightExprs = rightExpr->commaExprs;
 
-            OUTSTR( " " );
-            Out( TokenKind::Items::names[stmt->assign.op] );
-            OUTSTR( " " );
-
-            Type* rightType = stmt->assign.right->resolvedExpr.type;
-            if( leftType == boolType && rightType != boolType )
-                OUTSTR( "(bool)" );
-            EmitExpr( stmt->assign.right );
-            OUTSTR( ";" );
+                for( int i = 0; i < leftExprs.count; ++i )
+                {
+                    if( i != 0 )
+                        OUTSTR( " " );
+                    EmitAssignExpr( leftExprs[i], rightExprs[i], opName );
+                }
+            }
+            else
+                EmitAssignExpr( leftExpr, rightExpr, opName );
         } break;
         case Stmt::If:
             OutIndent();

@@ -70,8 +70,9 @@ struct Type
         String,
         Struct,
         Union,
-        // TODO 
-        SBuffer,
+        Multi,      // The type for multiple decls/assignments, and probably for multiple return values too
+
+        //SBuffer,        // TODO ?
         // TODO 
         TypeVar,
         Any,
@@ -113,6 +114,10 @@ struct Type
         {
             Type* base;
         } ptr;
+        struct
+        {
+            ::Array<Type*> types;
+        } multi;
     };
 
     Type()
@@ -335,6 +340,41 @@ Type* NewFuncType( Array<FuncArg> const& args, Type* returnType )
     result->func.returnType = returnType;
 
     globalCachedTypes.Push( result );
+
+    return result;
+}
+
+Type* NewMultiType( Array<Type*> const& types )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::Multi )
+        {
+            if( t->multi.types.count != types.count )
+                continue;
+
+            bool match = true;
+            for( int i = 0; i < types.count; ++i )
+            {
+                if( t->multi.types[i] != types[i] )
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if( match )
+                return t;
+        }
+        idx.Next();
+    }
+
+    // TODO Do we care about the size & alignment of this guy?
+    Type* result = NewType( "multi", Type::Multi, 0, 0 );
+    // NOTE Assume given array is allocated in permanent memory
+    result->multi.types = types;
 
     return result;
 }
@@ -592,6 +632,8 @@ bool IsCastable( ResolvedExpr const& resolved, Type* dest )
 {
     Type* src = resolved.type;
     if( IsConvertible( resolved, dest ) )
+        return true;
+    else if( IsArithmeticType( dest ) && IsArithmeticType( src ) )
         return true;
     else if( (IsIntegralType( dest ) || IsPointerType( dest )) && (IsIntegralType( src ) || IsPointerType( src )) )
         return true;
@@ -1301,7 +1343,7 @@ ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, Resolved
             if( IsIntegralType( left->type ) && IsIntegralType( right->type ) )
             {
                 ResolvedExpr result = ResolveBinaryArithmeticExpr( op, left, right, pos );
-                ASSERT( result.type->kind == Type::Bits );
+                // TODO Do we wanna also enforce the same type on both for ints vs. bits?
                 return result;
             }
             else
@@ -1321,14 +1363,12 @@ ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, Resolved
                 return result;
             }
             else if( IsPointerType( left->type ) && IsPointerType( right->type ) )
-            {
                 // TODO Do we care about comparing pointers to different types?
                 return NewResolvedRvalue( boolType );
-            }
             else if( (IsPointerType( left->type ) && IsNullPtrConst( *right )) || (IsNullPtrConst( *left ) && IsPointerType( right->type )) )
-            {
                 return NewResolvedRvalue( boolType );
-            }
+            else if( left->type == right->type )
+                return NewResolvedRvalue( boolType );
             else
             {
                 RSLV_ERROR( pos, "Operands of '%s' expression must both be arithmetic types or compatible pointer types", opName );
@@ -1514,7 +1554,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
             }
 
             if( error )
-                RSLV_ERROR( f.pos, "Invalid type in compound literal field (expected '%s', got '%s')",
+                RSLV_ERROR( f.pos, "No implicit conversion available in compound literal field (expected '%s', got '%s')",
                             expectedFieldType->name, field.type->name );
         }
 
@@ -1572,7 +1612,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
                 continue;
             }
 
-            RSLV_ERROR( givenArg->pos, "Invalid type in function call argument (expected '%s', got '%s')",
+            RSLV_ERROR( givenArg->pos, "No implicit conversion available in function call argument (expected '%s', got '%s')",
                         wantedArgType->name, resolvedArg.type->name );
             return resolvedNull;
         }
@@ -1844,50 +1884,46 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 
         case Expr::Comma:
         {
-#if 0
-            bool isLvalue = true;
+            ASSERT( expr->kind == Expr::Comma );
+
+            Array<Type*> expectedTypes( &globalArena, expr->commaExprs.count );
+            expectedTypes.ResizeToCapacity();
+
             if( expectedType )
-                result = NewResolvedRvalue( expectedType );
+            {
+                ASSERT( expectedType->kind == Type::Multi );
+                for( int i = 0; i < expectedType->multi.types.count; ++i )
+                    expectedTypes[i] = expectedType->multi.types[i];
+            }
 
             int i =  0;
-            bool typeMismatch = false;
+            bool isLvalue = true, typeMismatch = false;
             Array<ResolvedExpr> resolvedExprs( &globalTmpArena, expr->commaExprs.count );
+
             for( Expr* e : expr->commaExprs )
             {
+                // NOTE Can be null
+                expectedType = expectedTypes[i];
+
                 ResolvedExpr resolved = ResolveExpr( e, expectedType );
                 resolvedExprs.Push( resolved );
 
-                // NOTE We force the same type for all here. This doesn't match what we do for vars initilization
-                if( !expectedType && !result.type )
-                    result = resolved;
-
-                if( !ConvertType( &resolved, result.type ) )
+                if( expectedType && !ConvertType( &resolved, expectedType ) )
                 {
-                    if( expectedType )
-                    {
-                        RSLV_ERROR( e->pos, "Invalid type in expression %d of comma expression (expected '%s', got '%s')",
-                                    i + 1, expectedType->name, resolved.type->name );
-                    }
-                    else if( !typeMismatch )
-                    {
-                        RSLV_ERROR( e->pos, "Cannot deduce type of comma expression (current '%s', found '%s')", result.type->name,
-                                    resolved.type->name );
-                        typeMismatch = true;
-                    }
+                    RSLV_ERROR( e->pos, "No implicit conversion available for expression %d in comma expression (expected '%s', got '%s')",
+                                i + 1, expectedType->name, resolved.type->name );
                 }
+                e->resolvedExpr = resolved;
+                expectedTypes[i] = resolved.type;
 
                 isLvalue = isLvalue && resolved.isLvalue;
                 i++;
             }
-            result.isLvalue = isLvalue;
 
-            if( typeMismatch )
-            {
-                // TODO Show list of all types that were found
-            }
-#endif
-            // NOTE Special-cased for now wherever relevant
-            NOT_IMPLEMENTED;
+            // NOTE Any ConstValues are not correctly reflected here (they're available in the individual resolvedExprs though)
+            result = NewResolvedRvalue( NewMultiType( expectedTypes ) );
+            // It's an l-value if all sub-expressions were too
+            result.isLvalue = isLvalue;
         } break;
 
         INVALID_DEFAULT_CASE
@@ -2095,7 +2131,6 @@ void ResolveSymbol( Symbol* sym )
             }
 
             // Deal with comma exprs
-            // TODO Should we generalize comma expressions better? (would need some kind of compound ResolvedExpr)
             // NOTE When we get here we're resolving _one_ of the symbols in the multiple decl, so search for it by name
             // and compare with the correponding slot in the comma expression initializer (if any)
             Expr* initExpr = decl->var.initExpr;
@@ -2139,7 +2174,7 @@ void ResolveSymbol( Symbol* sym )
                     // Make an exception for empty-size arrays
                     if( result->kind != Type::Array || result->array.count != 0 )
                     {
-                        RSLV_ERROR( pos, "Invalid type in initializer expression. Expected '%s', got '%s'", result->name, init.type->name );
+                        RSLV_ERROR( pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'", result->name, init.type->name );
                     }
                 }
 
@@ -2306,7 +2341,6 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
     bool returns = false;
     PushNode( stmt );
 
-    // TODO Check all control paths return a value
     switch( stmt->kind )
     {
         case Stmt::Block:
@@ -2324,28 +2358,81 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
         case Stmt::Assign:
         {
             ResolvedExpr left = ResolveExpr( stmt->assign.left );
-            ASSERT( left.type );
-            if( !left.isLvalue )
-                RSLV_ERROR( stmt->assign.left->pos, "Expression cannot be assigned to (not an l-value)" );
-            //if( left.isConst )
-                //RSLV_ERROR( stmt->assign.left->pos, "Cannot assign to constant" );
 
-            ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
-            TokenKind::Enum op = stmt->assign.op;
-            TokenKind::Enum binaryOp = assignOpToBinaryOp[ stmt->assign.op ];
-
-            ResolvedExpr result = {};
-            if( op == TokenKind::Assign )
-                result = right;
-            else
-                result = ResolveBinaryExpr( binaryOp, TokenKind::Items::names[ op ], &left, &right, stmt->pos );
-
-            if( !ConvertType( &result, left.type ) )
+            if( stmt->assign.left->kind != Expr::Comma )
             {
-                RSLV_ERROR( stmt->pos, "Invalid types in assignment (expected '%s', got '%s')",
-                            left.type->name, right.type->name );
-            }
+                if( !left.isLvalue )
+                {
+                    RSLV_ERROR( stmt->assign.left->pos, "Expression cannot be assigned to (not an l-value)" );
+                    break;
+                }
 
+                ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
+                TokenKind::Enum op = stmt->assign.op;
+                TokenKind::Enum binaryOp = assignOpToBinaryOp[ stmt->assign.op ];
+
+                ResolvedExpr result = {};
+                if( op == TokenKind::Assign )
+                    result = right;
+                else
+                    result = ResolveBinaryExpr( binaryOp, TokenKind::Items::names[ op ], &left, &right, stmt->pos );
+
+                if( !ConvertType( &result, left.type ) )
+                {
+                    RSLV_ERROR( stmt->pos, "No implicit conversion available in assignment (expected '%s', got '%s')",
+                                left.type->name, right.type->name );
+                }
+            }
+            else
+            {
+                ASSERT( left.type->kind == Type::Multi );
+                Array<Type*> const& leftTypes = left.type->multi.types;
+
+                if( !left.isLvalue )
+                {
+                    int i = 0;
+                    for( Expr* e : stmt->assign.left->commaExprs )
+                    {
+                        if( !e->resolvedExpr.isLvalue )
+                            RSLV_ERROR( e->pos, "Expression %d in comma expression cannot be assigned to (not an l-value)", i + 1 );
+                        i++;
+                    }
+                    break;
+                }
+
+                // NOTE For now we require a comma expr on the right too
+                if( stmt->assign.right->kind != Expr::Comma )
+                {
+                    RSLV_ERROR( stmt->assign.right->pos, "The expression assigned to a comma expression must be a comma expression" );
+                    break;
+                }
+
+                Array<Expr*> const& leftExprs = stmt->assign.left->commaExprs;
+                Array<Expr*> const& rightExprs = stmt->assign.right->commaExprs;
+
+                if( leftExprs.count != rightExprs.count )
+                {
+                    RSLV_ERROR( stmt->pos, "Assignment operation for comma expression must have the same number of terms on both sides (left has %d, right has %d)",
+                                leftExprs.count, rightExprs.count );
+                    break;
+                }
+
+                ResolvedExpr right = ResolveExpr( stmt->assign.right, left.type );
+
+                TokenKind::Enum op = stmt->assign.op;
+                TokenKind::Enum binaryOp = assignOpToBinaryOp[ stmt->assign.op ];
+                char const* opName = TokenKind::Items::names[ op ];
+
+                Array<ResolvedExpr> result = Array<ResolvedExpr>( &globalTmpArena, leftExprs.count );
+                for( int i = 0; i < leftExprs.count; ++i )
+                {
+                    if( op == TokenKind::Assign )
+                        result.Push( right );
+                    else
+                        result.Push( ResolveBinaryExpr( binaryOp, opName, &leftExprs[i]->resolvedExpr, &rightExprs[i]->resolvedExpr,
+                                                        leftExprs[i]->pos ) );
+                }
+            }
         } break;
 
         case Stmt::If:
@@ -2431,7 +2518,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 ResolvedExpr result = ResolveExpr( stmt->expr, returnType );
                 if( result.type && !ConvertType( &result, returnType ) )
                 {
-                    RSLV_ERROR( stmt->expr->pos, "Invalid type in return expression (expected '%s', got '%s')",
+                    RSLV_ERROR( stmt->expr->pos, "No implicit conversion available in return expression (expected '%s', got '%s')",
                                 returnType->name, result.type->name );
                 }
             }
