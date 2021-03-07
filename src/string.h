@@ -83,12 +83,12 @@ struct String
 
     explicit String( Buffer<char> const& buffer )
         : data( buffer )
-        , length( buffer.length )
+        , length( I32( buffer.length ) )
     {}
 
     explicit String( buffer const& buffer )
         : data( (char*)buffer.data )
-        , length( buffer.length )
+        , length( I32( buffer.length ) )
     {}
 
     static String Clone( char const* src, MemoryArena* arena )

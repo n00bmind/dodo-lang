@@ -228,7 +228,7 @@ template <typename T>
 struct Buffer
 {
     T* data;
-    i32 length;
+    i64 length;
 
 public:
     Buffer()
@@ -236,7 +236,7 @@ public:
         , length( 0 )
     {}
 
-    Buffer( T* data_, i32 length_ )
+    Buffer( T* data_, i64 length_ )
         : data( data_ )
         , length( length_ )
     {}

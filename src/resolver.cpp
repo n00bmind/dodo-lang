@@ -108,7 +108,7 @@ struct Type
             Type* base;
             // 0 = unknown (needs initializer)
             // Unused for buffers, as their size is dynamic
-            sz count;
+            sz length;
         } array;
         struct
         {
@@ -274,7 +274,7 @@ sz TypeAlignment( Type* type )
     return type->align;
 }
 
-Type* NewArrayType( Type* base, sz count )
+Type* NewArrayType( Type* base, sz length )
 {
     auto idx = globalCachedTypes.First(); 
     while( idx )
@@ -282,16 +282,16 @@ Type* NewArrayType( Type* base, sz count )
         Type* t = *idx;
         if( t->kind == Type::Array )
         {
-            if( t->array.base == base && t->array.count == count )
+            if( t->array.base == base && t->array.length == length )
                 return t;
         }
         idx.Next();
     }
 
     // NOTE We allow no-size arrays to pass through, as they'll be checked and substituted during ResolveSymbol
-    Type* result = NewType( "array", Type::Array, count * TypeSize( base ), TypeAlignment( base ) );
+    Type* result = NewType( "array", Type::Array, length * TypeSize( base ), TypeAlignment( base ) );
     result->array.base = base;
-    result->array.count = count;
+    result->array.length = length;
 
     globalCachedTypes.Push( result );
 
@@ -375,6 +375,8 @@ Type* NewMultiType( Array<Type*> const& types )
     Type* result = NewType( "multi", Type::Multi, 0, 0 );
     // NOTE Assume given array is allocated in permanent memory
     result->multi.types = types;
+
+    globalCachedTypes.Push( result );
 
     return result;
 }
@@ -737,7 +739,7 @@ ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
 
 i64 ResolveConstExprInt( Expr* expr )
 {
-    ResolvedExpr result = ResolveConstExpr( expr, intType );
+    ResolvedExpr result = ResolveConstExpr( expr, i64Type );
     return result.constValue.intValue;
 }
 
@@ -815,14 +817,20 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
             return resolvedNull;
         }
 
-        ResolvedExpr result = NewResolvedRvalue( intType );
+        ResolvedExpr result = NewResolvedRvalue( i64Type );
         if( type->kind == Type::Array )
         {
             result.isConst = true;
-            result.constValue.intValue = type->array.count;
+            result.constValue.intValue = type->array.length;
         }
 
         return result;
+    }
+
+    if( !(type->kind == Type::Struct || type->kind == Type::Union || type->kind == Type::Pointer) )
+    {
+        RSLV_ERROR( expr->pos, "Unknown attribute '%s' in expression of type '%s'", expr->field.name, type->name );
+        return resolvedNull;
     }
 
     // 'Normal' field access of aggregates or pointers to such
@@ -831,11 +839,6 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
         left = NewResolvedLvalue( type->ptr.base );
         type = left.type;
         CompleteType( type, expr->pos );
-    }
-    if( !(type->kind == Type::Struct || type->kind == Type::Union) )
-    {
-        RSLV_ERROR( expr->pos, "Can only reference fields on aggregates or pointers to aggregates" );
-        return resolvedNull;
     }
 
     for( TypeField const& f : type->aggregate.fields )
@@ -1467,14 +1470,10 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     else if( type->kind == Type::Struct )
         maxSlotCount = type->aggregate.fields.count;
     else if( type->kind == Type::Array )
-    {
-        if( type->array.count )
-            maxSlotCount = type->array.count;
-    }
+        maxSlotCount = type->array.length;
     else if( type->kind == Type::Buffer )
-    {
         // We only know for sure if this is a buffer compound after we have resolved the first field
-    }
+        ;
     else
     {
         RSLV_ERROR( expr->pos, "Compound literals can only be used with struct or array types" );
@@ -1489,6 +1488,9 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
 
     i64 index = 0, maxIndex = 0;
     Type* expectedFieldType = nullptr;
+
+    bool flexibleArray = type->kind == Type::Array && type->array.length == 0;
+    bool parseArrayLiteral = false;
 
     for( CompoundField const& f : expr->compoundFields )
     {
@@ -1511,61 +1513,76 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
                     RSLV_ERROR( f.pos, "Unknown field '%s' in named initializer for type '%s'", f.name, type->name );
             }
         }
-        else if( type->kind == Type::Array )
+        else if( type->kind == Type::Array || type->kind == Type::Buffer )
         {
             expectedFieldType = type->array.base;
+
+            if( type->kind == Type::Buffer && !parseArrayLiteral )
+            {
+                expectedFieldType = index == 0 ? NewPtrType( type->array.base ) : intType;
+                if( index >= 2 )
+                    RSLV_ERROR( f.pos, "Buffer initializer must have only pointer and length fields" );
+            }
 
             if( f.kind == CompoundField::Name )
                 RSLV_ERROR( f.pos, "Named initializers not allowed in compound literals for array types" );
             else if( f.kind == CompoundField::Index )
             {
-                index = ResolveConstExprInt( f.index );
-                if( index < 0 )
-                    RSLV_ERROR( f.pos, "Indexed initializer in compound literal cannot be negative" );
+                ResolvedExpr indexExpr = ResolveExpr( f.index );
+
+                if( indexExpr.type->kind == Type::Int )
+                {
+                    if( !indexExpr.isConst )
+                        RSLV_ERROR( f.pos, "Indexed initializer must be a constant expression" );
+
+                    index = indexExpr.constValue.intValue;
+                    if( index < 0 )
+                        RSLV_ERROR( f.pos, "Indexed initializer in compound literal cannot be negative" );
+                }
+
+                if( f.index->kind == Expr::Range )
+                {
+                    if( !indexExpr.isConst )
+                        RSLV_ERROR( f.pos, "Ranged initializer must be a constant expression" );
+
+                    if( f.index->range.lowerBound == nullptr && f.index->range.upperBound == nullptr )
+                    {
+                        if( flexibleArray )
+                            RSLV_ERROR( f.pos, "Arrays with unknown size cannot be given a full range initializer" );
+                        else if( type->kind == Type::Buffer )
+                            RSLV_ERROR( f.pos, "Buffer views cannot be given a full range initializer" );
+                    }
+                }
             }
 
-            if( type->array.count && index >= type->array.count )
+            if( type->array.length && index >= type->array.length )
                 RSLV_ERROR( f.pos, "Field initializer in compound literal out of range" );
 
             // TODO Remember which indices have been defined, and show an error in case a slot is specified more than once
             maxIndex = Max( maxIndex, index );
-        }
-        else if( type->kind == Type::Buffer )
-        {
-            expectedFieldType = index == 0 ? NewPtrType( type->array.base ) : intType;
         }
 
         ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
 
         if( !ConvertType( &field, expectedFieldType ) )
         {
-            bool error = true;
-            // HACK For buffers, if the first field is not a pointer, try continuing as an array literal instead
-            if( type->kind == Type::Buffer && index == 0 )
+            // For buffers, if the first field is not a pointer, try again as an array literal instead
+            if( type->kind == Type::Buffer && !parseArrayLiteral )
             {
-                expectedFieldType = type->array.base;
-                if( ConvertType( &field, expectedFieldType ) )
-                {
-                    // Continue using an unknown size array
-                    // FIXME We need to do the checks for arrays for this slot too!
-                    type = NewArrayType( type->array.base, 0 );
-                    error = false;
-                }
+                parseArrayLiteral = true;
+                continue;
             }
 
-            if( error )
-                RSLV_ERROR( f.pos, "No implicit conversion available in compound literal field (expected '%s', got '%s')",
-                            expectedFieldType->name, field.type->name );
+            RSLV_ERROR( f.pos, "No implicit conversion available in compound literal field (expected '%s', got '%s')",
+                        expectedFieldType->name, field.type->name );
         }
 
         index++;
     }
 
-    // If we were given an unknown sized array type
-    if( type->kind == Type::Array && type->array.count == 0 )
+    if( flexibleArray || parseArrayLiteral )
     {
         // Substitute type by a new one with correct sizing info (need to fetch any cached types again)
-        // This leaks the old type, but who cares!
         type = NewArrayType( type->array.base, maxIndex );
     }
 
@@ -1733,35 +1750,26 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         } break;
         case TypeSpec::Array:
         {
-            i64 count = 0;
-            //bool dynamic = false;
+            i64 length = 0;
 
-            Expr* countExpr = spec->array.count;
-            if( countExpr )
+            Expr* lengthExpr = spec->array.length;
+            if( lengthExpr )
             {
-                //if( countExpr->kind == Expr::Range )
-                //{
-                    //dynamic = true;
-                    //if( countExpr->range.lowerBound || countExpr->range.upperBound )
-                        //RSLV_ERROR( pos, "Unexpected expression in array type" );
-                //}
-                //else
+                length = ResolveConstExprInt( lengthExpr );
+                // NOTE Zero-sized arrays not supported.
+                // We use length == 0 to indicate an initializer is expected to figure out the actual size
+                // TODO Add support for unknown size arrays without an initializer at the end of structs
+                if( length <= 0 )
                 {
-                    count = ResolveConstExprInt( countExpr );
-                    // NOTE Zero-sized arrays not supported.
-                    // We use count == 0 to indicate an initializer is expected to figure out the actual size
-                    if( count <= 0 )
-                    {
-                        RSLV_ERROR( pos, "Array size must be a positive integer" );
-                        //return nullptr;
-                    }
+                    RSLV_ERROR( pos, "Array size must be a positive integer" );
+                    //return nullptr;
                 }
             }
             Type* base = ResolveTypeSpec( spec->array.base );
             if( spec->array.isView )
                 result = NewBufferType( base );
             else
-                result = NewArrayType( base, count );
+                result = NewArrayType( base, length );
         } break;
         case TypeSpec::Func:
         {
@@ -1800,30 +1808,41 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Range );
 
-    if( expr->range.lowerBound )
+    Expr* lowerBoundExpr = expr->range.lowerBound;
+    Expr* upperBoundExpr = expr->range.upperBound;
+    ResolvedExpr lowerBound = {}, upperBound = {};
+
+    if( lowerBoundExpr )
     {
-        ResolvedExpr lowerBound = ResolveExpr( expr->range.lowerBound );
-        if( !ConvertType( &lowerBound, intType ) )
-            RSLV_ERROR( expr->pos, "Lower bound in range expression must have integer type" );
+        lowerBound = ResolveExpr( lowerBoundExpr );
+        // TODO Shouldn't allow bits here?
+        if( !IsScalarType( lowerBound.type ) )
+            RSLV_ERROR( expr->pos, "Lower bound in range expression must be a scalar type" );
     }
 
-    ResolvedExpr upperBound = ResolveExpr( expr->range.upperBound );
-    if( upperBound.type->kind == Type::Array || upperBound.type->kind == Type::Buffer )
+    if( upperBoundExpr )
     {
-        if( expr->range.lowerBound )
-            RSLV_ERROR( expr->pos, "Ranged buffer expression cannot have a lower bound" );
-    }
-    else
-    {
-        if( !expr->range.lowerBound )
-            RSLV_ERROR( expr->pos, "Integer range expression must have a lower bound" );
+        upperBound = ResolveExpr( upperBoundExpr );
+        if( upperBound.type->kind == Type::Array || upperBound.type->kind == Type::Buffer )
+        {
+            if( lowerBoundExpr )
+                RSLV_ERROR( expr->pos, "Ranged buffer expression cannot have a lower bound" );
+        }
+        else
+        {
+            if( !lowerBoundExpr )
+                RSLV_ERROR( expr->pos, "Scalar range expression must have a lower bound" );
 
-        if( !ConvertType( &upperBound, intType ) )
-            RSLV_ERROR( expr->pos, "Upper bound in range expression must have integer type" );
+            if( !ConvertType( &upperBound, lowerBound.type ) )
+                RSLV_ERROR( expr->pos, "Upper bound and lower bound in scalar range expression must have the same type" );
+        }
     }
 
     // TODO What type is this thing? Do we need a Range type?
-    return NewResolvedRvalue( intType );
+    ResolvedExpr result = NewResolvedRvalue( intType );
+    result.isConst = (lowerBoundExpr == nullptr && upperBoundExpr == nullptr) || (lowerBound.isConst && upperBound.isConst);
+
+    return result;
 }
 
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
@@ -2172,7 +2191,7 @@ void ResolveSymbol( Symbol* sym )
                 if( result && init.type && !ConvertType( &init, result ) )
                 {
                     // Make an exception for empty-size arrays
-                    if( result->kind != Type::Array || result->array.count != 0 )
+                    if( result->kind != Type::Array || result->array.length != 0 )
                     {
                         RSLV_ERROR( pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'", result->name, init.type->name );
                     }

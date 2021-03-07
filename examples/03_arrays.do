@@ -1,16 +1,14 @@
-/* TODO Varargs*/
-#foreign printf :: ( fmt: string, i: int, v: int );
-#foreign puts :: ( s: string );
+#foreign printf :: ( fmt: string, args: any... );
 
 main :: ( argc: int, argv: **i8 ) -> int
 {
     // Passing any array to a function as a view
     PrintBuffer :: ( b: [*]int )
     {
-        puts( '-----\n' );
-        for( i in 0 .. b.count )
+        printf( '-----\n' );
+        for( i in 0 .. b.length )
             printf( 'Item %d is %d\n', i, b[i] );
-        puts( '\n' );
+        printf( '\n' );
     }
 
     // Static arrays
@@ -22,25 +20,26 @@ main :: ( argc: int, argv: **i8 ) -> int
     PrintBuffer( nums2 );
 
     // TODO Can initialize using one or more indexed ranges
-    /*nums3: []int = { [0..3] = 42, [10..13] = -1 };*/
-    /*PrintBuffer( nums3 );*/
+    //nums3: []int = { [0..3] = 42, [10..13] = -1 };
+    //PrintBuffer( nums3 );
 
-    // Can initialize using an 'open' range (as init value), which will fill the array with the same value
-    // TODO What about data types other than int?
-    // TODO If using a variable instead of a literal, the syntax becomes ambiguous with the one used to iterate over arrays in a for loop
-    /*nums4: [5]int = { ..100 };*/
-    /*PrintBuffer( nums4 );*/
+    // TODO Error out on overlapping ranges
+
+    // Can initialize using an 'open' range, which will fill the array with the same value
+    nums4: [5]int = { [..] = 100 };
+    PrintBuffer( nums4 );
 
     // Open ranges do require an explicitly sized array
-    // TODO #expecterror({errors..}) expecting the given compiler error(s) to appear (will be swallowed) or produce a new error otherwise
-    /*nums5: []int = { ..100 };*/
-    /*PrintBuffer( nums5 );*/
+    #expecterror
+    { nums5: []int = { [..] = 100 }; }
+    #expecterror
+    { nums5: [*]int = { [..] = 100 }; }
 
     // Creating a buffer view from an array
     nums6: [*]int = nums1;
     PrintBuffer( nums6 );
 
-    // Can be done straight from a literal too, which will point it to a value on the stack
+    // Can be done straight from a literal too, which will point it to a value on the data segment
     nums7: [*]int = { 42, -10, 1328 };
     PrintBuffer( nums7 );
 
@@ -49,15 +48,15 @@ main :: ( argc: int, argv: **i8 ) -> int
     // Same with a buffer view
     pointTo6: *int = nums6;
 
-    // Creating a buffer view from pointer and count
-    nums8: [*]int = { pointTo6, nums6.count };
+    // Creating a buffer view from pointer and length
+    nums8: [*]int = { pointTo6, nums6.length };
     PrintBuffer( nums8 );
 
     // TODO Print addresses of things
     // TODO Array of arrays, buffer of buffers?
 
 /*
-// TODO Should be still parsed (resolved too?)
+// TODO Should be still parsed & resolved
 #if 0
 {
     // TODO
@@ -65,7 +64,7 @@ main :: ( argc: int, argv: **i8 ) -> int
     sbuffer<T> :: struct
     {
         data: [*]T;
-        capacity: i32;
+        count: i32;
         alloc: &Allocator;
     }
 

@@ -38,7 +38,7 @@ TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size, 
 {
     TypeSpec* result = NewTypeSpec( pos, TypeSpec::Array );
     result->array.base = ofType;
-    result->array.count = size;
+    result->array.length = size;
     result->array.isView = isView;
 
     return result;
@@ -538,7 +538,9 @@ Expr* ParseRangeExpr( Lexer* lexer )
     if( MatchToken( TokenKind::Range, lexer->token ) )
     {
         NextToken( lexer );
-        upperBound = ParseUnaryExpr( lexer );
+        // Ranges inside indexed initializer are allowed to have no bounds at all
+        if( !MatchToken( TokenKind::CloseBracket, lexer->token ) )
+            upperBound = ParseUnaryExpr( lexer );
 
         if( lexer->IsValid() )
             expr = NewRangeExpr( pos, expr, upperBound );
@@ -1650,8 +1652,8 @@ void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
         case TypeSpec::Array:
         {
             APPEND( "[" );
-            if( type->array.count )
-                DebugPrintSExpr( type->array.count, outBuf, maxLen );
+            if( type->array.length )
+                DebugPrintSExpr( type->array.length, outBuf, maxLen );
             APPEND( "] " );
             DebugPrintTypeSpec( type->array.base, outBuf, maxLen );
         } break;

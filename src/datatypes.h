@@ -190,9 +190,9 @@ struct Array
 
     static Array<T> Clone( Buffer<T> buffer, MemoryArena* arena )
     {
-        Array<T> result( arena, buffer.length );
+        Array<T> result( arena, I32( buffer.length ) );
+        result.ResizeToCapacity();
         PCOPY( buffer.data, result.data, buffer.length * SIZEOF(T) );
-        result.count = buffer.length;
         return result;
     }
 

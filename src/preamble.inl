@@ -207,22 +207,22 @@ template <typename T>
 struct buffer
 {
     T* data;
-    i32 count;
+    i64 length;
 
 public:
-    buffer( T* data_, i32 count_ )
+    buffer( T* data_, i64 length_ )
         : data( data_ )
-        , count( count_ )
+        , length( length_ )
     {}
 
     operator T*() { return data; }
 };
 
-#define BUFFER(T, x)                                  \
-[]()                                                  \
-{                                                     \
-    static T literal[] = x;                           \
-    return buffer<T>( literal, ARRAYCOUNT(literal) ); \
+#define BUFFER(T, ...)                                        \
+[]()                                                          \
+{                                                             \
+    static T literal[] = { __VA_ARGS__ };                     \
+    return buffer<T>( literal, sizeof(literal) / sizeof(T) ); \
 }()
 
 

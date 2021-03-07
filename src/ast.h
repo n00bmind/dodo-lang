@@ -34,7 +34,7 @@ struct TypeSpec
         struct
         {
             TypeSpec* base;
-            Expr* count;        // Can be null
+            Expr* length;        // Can be null
             bool isView;
         } array;
         struct

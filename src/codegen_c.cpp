@@ -106,7 +106,7 @@ char* TypeToCdecl( Type* type, char const* symbolName )
         case Type::Pointer:
             return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Array:
-            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.count ), !IsNullOrEmpty( symbolName ) ) );
+            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.length ), !IsNullOrEmpty( symbolName ) ) );
         case Type::Func:
         {
             char* result = nullptr;
@@ -142,13 +142,13 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
             }
 
             char* countStr = "";
-            if( type->array.count )
+            if( type->array.length )
             {
                 // FIXME This is still a friggin hack
                 u8* startBase = globalTmpArena.base;
                 countStr = (char*)(startBase + globalTmpArena.used);
                 outArena = &globalTmpArena;
-                EmitExpr( type->array.count );
+                EmitExpr( type->array.length );
 
                 ASSERT( globalTmpArena.base == startBase );
                 outArena = &globalOutArena;
@@ -287,21 +287,19 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             Array<FuncArg> const& wantedArgs = funcType->func.args;
             Array<Expr*> const& givenArgs = expr->call.args;
 
-            while( givenIndex < givenArgs.count )
+            while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
             {
-                ASSERT( wantedIndex < wantedArgs.count );
-
                 if( givenIndex || wantedIndex )
                     OUTSTR( ", " );
-
-                Expr* argExpr = expr->call.args[givenIndex];
-                Type* givenType = argExpr->resolvedExpr.type;
 
                 FuncArg const& wantedArg = wantedArgs[wantedIndex];
                 Type* wantedType = wantedArg.type;
 
-                // Ensure types match
-                if( wantedType != anyType && givenType != wantedType )
+                Expr* argExpr = expr->call.args[givenIndex];
+                // Make a copy so we don't modify the resolved type while converting
+                ResolvedExpr givenExpr = argExpr->resolvedExpr;
+
+                if( !ConvertType( &givenExpr, wantedType ) )
                 {
                     ASSERT( wantedArg.isVararg );
                     wantedIndex++;
@@ -311,7 +309,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 // Convert strings inside foreign function calls
                 if( isForeign )
                 {
-                    if( givenType == stringType && !argExpr->resolvedExpr.isConst )
+                    if( argExpr->resolvedExpr.type == stringType && !argExpr->resolvedExpr.isConst )
                         OUTSTR( "(char const*)" );
                 }
 
@@ -342,10 +340,15 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             bool convertToBuffer = false;
             if( expectedType && expectedType->kind == Type::Buffer && expr->resolvedExpr.type->kind == Type::Array )
             {
-                OUTSTR( "BUFFER(ARGS(" );
+                OUTSTR( "BUFFER( " );
+                Out( TypeToCdecl( expectedType->array.base, "" ) );
+                OUTSTR( ", " );
                 convertToBuffer = true;
             }
-            OUTSTR( "{ " );
+
+            if( !convertToBuffer )
+                OUTSTR( "{ " );
+
             if( expr->compoundFields[0].kind == CompoundField::Name )
             {
                 // NOTE Assume all of them are named
@@ -376,11 +379,28 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 int capacity = 16;
                 Expr** fieldExprs = PUSH_ARRAY( &globalTmpArena, Expr*, capacity );
 
-                int index = 0;
+                sz index = 0;
+                bool fillRange = false;
                 for( CompoundField const& f : expr->compoundFields )
                 {
                     if( f.kind == CompoundField::Index )
-                        index = I32( f.index->resolvedExpr.constValue.intValue );
+                    {
+                        if( f.index->kind == Expr::Int )
+                            index = I32( f.index->resolvedExpr.constValue.intValue );
+                        else if( f.index->kind == Expr::Range )
+                        {
+                            if( f.index->range.lowerBound == nullptr && f.index->range.upperBound == nullptr )
+                            {
+                                ASSERT( expr->compoundFields.count == 1 );
+                                
+                                fieldExprs[0] = f.initValue;
+                                index = expectedType->array.length;
+                                fillRange = true;
+
+                                break;
+                            }
+                        }
+                    }
 
                     if( index >= capacity )
                     {
@@ -393,25 +413,27 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
 
                     fieldExprs[index++] = f.initValue;
                 }
+
+                Expr* fieldExpr = fillRange ? fieldExprs[0] : nullptr;
                 for( int i = 0; i < index; ++i )
                 {
                     if( i != 0 )
                         OUTSTR( ", " );
 
-                    Expr* e = fieldExprs[i];
-                    if( e )
-                        EmitExpr( e );
+                    if( !fillRange )
+                        fieldExpr = fieldExprs[i];
+
+                    if( fieldExpr )
+                        EmitExpr( fieldExpr );
                     else
                         OUTSTR( "{}" );
                 }
             }
-            OUTSTR( " }" );
+
             if( convertToBuffer )
-            {
-                OUTSTR( "), " );
-                Out( TypeToCdecl( expectedType->array.base, "" ) );
-                OUTSTR( ")" );
-            }
+                OUTSTR( " )" );
+            else
+                OUTSTR( " }" );
         } break;
 
         case Expr::Unary:
