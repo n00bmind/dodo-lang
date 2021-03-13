@@ -158,6 +158,8 @@ ________________________________________________________________________________
   Think how this could be integrated in the language without bringing any of the RAII garbage along with it.
 
 - Learn a bit about UTF8 and find out how many actual bytes a character literal can get to be.. seems its anything from b8 to b32
+
+- Think of a sane way of implementing functors
 ________________________________________________________________________________ 
 
 
@@ -178,4 +180,11 @@ error messages to more advanced tools, should be designed with care so as to nev
   in ImGui. This could be a separate graphic app the compiler would connect to and feed it all its internal state at every moment, which
   would mean when breaking into the debugger during a crash or parse/resolve error or whatever, we'd have the full graphical display of
   all the internal info available besides the debugger's watch window.
+
+
+________________________________________________________________________________
+
+Interesting reads:
+ - The death of optimizing compilers :: https://cr.yp.to/talks/2015.04.16/slides-djb-20150416-a4.pdf
+ - Branch Prediction and the Performance of Interpreters -Don't Trust Folklore :: https://hal.inria.fr/hal-01100647/document
 

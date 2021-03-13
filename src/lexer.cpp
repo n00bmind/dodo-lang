@@ -1,10 +1,10 @@
 
-internal char const* globalKeywords[Keyword::Items::count];
-char const* globalDirectives[Directive::Items::count];
+internal char const* globalKeywords[Keyword::itemCount];
+char const* globalDirectives[Directive::itemCount];
 
 internal int charToDigit[256];
 internal int escapeToChar[256];
-TokenKind::Enum assignOpToBinaryOp[TokenKind::Items::count];
+TokenKind::Enum assignOpToBinaryOp[TokenKind::itemCount];
 
 
 internal InternString* Intern( String const& string, u32 flags = 0 )
@@ -40,12 +40,12 @@ Lexer::Lexer( String const& input, char const* filename_ )
     token = {};
 
     // Intern keywords & directives
-    for( Keyword const& k : Keyword::Items::entries )
+    for( Keyword::Item const& k : Keyword::items )
     {
         InternString* intern = Intern( String( k.name ), InternString::Keyword );
         globalKeywords[k.index] = intern->data;
     }
-    for( Directive const& k : Directive::Items::entries )
+    for( Directive::Item const& k : Directive::items )
     {
         InternString* intern = Intern( String( k.name ), InternString::Directive );
         globalDirectives[k.index] = intern->data;
@@ -594,7 +594,7 @@ void RequireToken( TokenKind::Enum wantedKind, Lexer* lexer )
     if( token.kind != wantedKind )
     {
         PARSE_ERROR( token.pos, "Expected token '%s' (got '%s')",
-               TokenKind::Items::names[wantedKind], TokenKind::Items::names[token.kind] );
+               TokenKind::names[wantedKind], TokenKind::names[token.kind] );
     }
 }
 
@@ -610,7 +610,7 @@ void RequireKeyword( int kw, Lexer* lexer )
     if( token.kind != TokenKind::Keyword || token.ident != globalKeywords[ kw ] )
     {
         PARSE_ERROR( token.pos, "Expected keyword '%s' (got '%s')",
-               globalKeywords[ kw ], TokenKind::Items::names[token.kind] );
+               globalKeywords[ kw ], TokenKind::names[token.kind] );
     }
 }
 
@@ -626,7 +626,7 @@ char const* RequireDirective( Lexer* lexer )
     if( token.kind != TokenKind::Directive )
     {
         PARSE_ERROR( token.pos, "Expected directive (got '%s')",
-               TokenKind::Items::names[token.kind] );
+               TokenKind::names[token.kind] );
     }
 
     return token.ident;
@@ -660,7 +660,7 @@ void DebugDumpScan( String const& program, char const* filename )
         {
             default:
             {
-                globalPlatform.Print( "%s - %.*s\n", TokenKind::Items::entries[token.kind].value.shortName, token.text.length, token.text.data );
+                globalPlatform.Print( "%s - %.*s\n", TokenKind::items[token.kind].value.shortName, token.text.length, token.text.data );
             } break;
             case TokenKind::EndOfStream:
             {

@@ -243,11 +243,12 @@ Expr* NewIndexExpr( SourcePos const& pos, Expr* base, Expr* index )
     return result;
 }
 
-Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name )
+Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name, bool meta )
 {
     Expr* result = NewExpr( pos, Expr::Field );
     result->field.base = base;
     result->field.name = name;
+    result->field.meta = meta;
 
     return result;
 }
@@ -430,7 +431,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
     }
     else
     {
-        char const* desc = TokenKind::Items::names[ token.kind ];
+        char const* desc = TokenKind::names[ token.kind ];
         if( token.kind == TokenKind::Name || token.kind == TokenKind::Keyword )
             desc = token.ident;
 
@@ -486,12 +487,26 @@ Expr* ParsePostfixExpr( Lexer* lexer )
             Token field = NextToken( lexer );
             if( !(field.kind == TokenKind::Name || field.kind == TokenKind::Keyword) )
             {
-                char const* desc = TokenKind::Items::names[ field.kind ];
+                char const* desc = TokenKind::names[ field.kind ];
                 PARSE_ERROR( field.pos, "Unexpected token '%s' in expression", desc );
             }
 
             if( lexer->IsValid() )
-                expr = NewFieldExpr( pos, expr, field.ident );
+                expr = NewFieldExpr( pos, expr, field.ident, false );
+        }
+        else if( MatchToken( TokenKind::Pound, lexer->token ) )
+        {
+            Token field = NextToken( lexer );
+            if( field.kind == TokenKind::Name )
+                PARSE_ERROR( field.pos, "Unknown meta attribute '%s' in expression", field.ident );
+            else if( field.kind != TokenKind::Keyword )
+            {
+                char const* desc = TokenKind::names[ field.kind ];
+                PARSE_ERROR( field.pos, "Unexpected token '%s' in expression", desc );
+            }
+
+            if( lexer->IsValid() )
+                expr = NewFieldExpr( pos, expr, field.ident, true );
         }
 
         NextToken( lexer );
@@ -686,7 +701,7 @@ Expr* ParseExpr( Lexer* lexer )
 }
 
 
-Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name, BucketArray<char const*> const& directives, u32 flags,
+Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name, BucketArray<NodeDirective> const& directives, u32 flags,
                StmtList* parentBlock )
 {
     Decl* result = PUSH_STRUCT( &globalArena, Decl );
@@ -695,13 +710,13 @@ Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name, BucketAr
     result->names.Push( name );
     result->parentBlock = parentBlock;
     result->kind = kind;
-    INIT( result->directives ) Array<char const*>( directives, &globalArena );
+    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
     result->flags = flags;
 
     return result;
 }
 
-Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> const& names, BucketArray<char const*> const& directives,
+Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> const& names, BucketArray<NodeDirective> const& directives,
                u32 flags, StmtList* parentBlock )
 {
     Decl* result = PUSH_STRUCT( &globalArena, Decl );
@@ -711,14 +726,14 @@ Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> c
     names.CopyTo( &result->names );
     result->parentBlock = parentBlock;
     result->kind = kind;
-    INIT( result->directives ) Array<char const*>( directives, &globalArena );
+    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
     result->flags = flags;
 
     return result;
 }
 
 Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, BucketArray<Decl*> const& items,
-                        BucketArray<char const*> const& directives, u32 flags, StmtList* parentBlock  )
+                        BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock  )
 {
     Decl::Kind declKind = Decl::None;
     switch( kind )
@@ -740,7 +755,7 @@ Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, Bucket
 
 Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock );
 
-Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, int kind, BucketArray<char const*> const& directives,
+Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, int kind, BucketArray<NodeDirective> const& directives,
                                u32 flags, StmtList* parentBlock, Lexer* lexer )
 {
     Token token = lexer->token;
@@ -761,7 +776,7 @@ Decl* ParseAggregateBlockDecl( SourcePos const& pos, char const* name, int kind,
     {
         result = NewAggregateDecl( pos, kind, name, items, directives, flags, parentBlock );
         if( !result )
-            PARSE_ERROR( token.pos, "Unsupported aggregate type '%s'", Keyword::Items::names[ kind ] );
+            PARSE_ERROR( token.pos, "Unsupported aggregate type '%s'", Keyword::names[ kind ] );
     }
 
     return result;
@@ -791,7 +806,7 @@ EnumItem ParseEnumItemDecl( Lexer* lexer )
 }
 
 Decl* NewEnumDecl( SourcePos const& pos, char const* name, TypeSpec* type, BucketArray<EnumItem> const& items,
-                   BucketArray<char const*> const& directives, u32 flags, StmtList* parentBlock )
+                   BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
 {
     Decl* result = NewDecl( pos, Decl::Enum, name, directives, flags, parentBlock );
     new( &result->enum_.items ) Array<EnumItem>( &globalArena, items.count );
@@ -801,15 +816,16 @@ Decl* NewEnumDecl( SourcePos const& pos, char const* name, TypeSpec* type, Bucke
     return result;
 }
 
-Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, BucketArray<char const*> const& directives, u32 flags,
+Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, BucketArray<NodeDirective> const& directives, u32 flags,
                           StmtList* parentBlock, Lexer* lexer )
 {
     TypeSpec* type = nullptr;
 
-    if( MatchToken( TokenKind::Colon, lexer->token ) )
+    if( MatchToken( TokenKind::LessThan, lexer->token ) )
     {
         NextToken( lexer );
         type = ParseTypeSpec( lexer );
+        RequireTokenAndAdvance( TokenKind::GreaterThan, lexer );
     }
 
     RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
@@ -861,7 +877,7 @@ FuncArgDecl ParseFuncArgDecl( Lexer* lexer )
 }
 
 Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArgDecl> const& args, StmtList* body,
-                   TypeSpec* returnType, BucketArray<char const*> const& directives, u32 flags, StmtList* parentBlock )
+                   TypeSpec* returnType, BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
 {
     Decl* result = NewDecl( pos, Decl::Func, name, directives, flags, parentBlock );
     new( &result->func.args ) Array<FuncArgDecl>( &globalArena, args.count );
@@ -873,7 +889,7 @@ Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArgDe
 }
 
 Decl* NewVarDecl( SourcePos const& pos, BucketArray<char const*> const& names, TypeSpec* type, Expr* initExpr, bool isConst,
-                  BucketArray<char const*> const& directives, u32 flags, StmtList* parentBlock )
+                  BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
 {
     Decl* result = NewDecl( pos, Decl::Var, names, directives, flags, parentBlock );
     result->var.type = type;
@@ -884,7 +900,7 @@ Decl* NewVarDecl( SourcePos const& pos, BucketArray<char const*> const& names, T
 }
 
 // For synthetic Decls
-Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr, BucketArray<char const*> const& directives,
+Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr, BucketArray<NodeDirective> const& directives,
                   u32 flags, StmtList* parentBlock )
 {
     BucketArray<char const*> names( &globalTmpArena, 1, Temporary() );
@@ -969,7 +985,7 @@ StmtList* ParseStmtBlock( Lexer* lexer, StmtList* parent, char const* name )
 }
 
 
-Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<char const*> const& directives, u32 flags, StmtList* parentBlock,
+Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock,
                       Lexer* lexer )
 {
     bool isConst = false;
@@ -1050,7 +1066,7 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<char co
             }
 
             StmtList* body = nullptr;
-            bool isForeign = directives.Contains( globalDirectives[ Directive::Foreign ] );
+            bool isForeign = ContainsDirective( directives, Directive::Foreign );
 
             if( isForeign )
                 RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
@@ -1116,16 +1132,64 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<char co
     return nullptr;
 }
 
-BucketArray<char const*> ParseDirectives( Lexer* lexer )
+DirectiveArg ParseDirectiveArg( Lexer* lexer )
+{
+    char const* name = nullptr;
+    SourcePos pos = lexer->pos;
+    Expr* expr = ParseExpr( lexer );
+
+    if( MatchToken( TokenKind::Equal, lexer->token ) )
+    {
+        if( expr->kind != Expr::Name )
+            RSLV_ERROR( pos, "Left side of assignment must be an argument name" );
+        else
+            name = expr->name.ident;
+
+        expr = ParseExpr( lexer );
+    }
+
+    DirectiveArg arg = {};
+    arg.pos = pos;
+    arg.name = name;
+    arg.expr = expr;
+
+    return arg;
+}
+
+BucketArray<NodeDirective> ParseDirectives( Lexer* lexer )
 {
     // Directives are always optional
-    BucketArray<char const*> result( &globalTmpArena, 1, Temporary() );
+    BucketArray<NodeDirective> result( &globalTmpArena, 1, Temporary() );
     while( MatchToken( TokenKind::Pound, lexer->token ) )
     {
+        SourcePos pos = lexer->pos;
+
         NextToken( lexer );
         char const* dirName = RequireDirective( lexer );
-        result.Push( dirName );
 
+        BucketArray<DirectiveArg> args( &globalTmpArena, 4, Temporary() );
+        if( MatchToken( TokenKind::OpenParen, lexer->token ) )
+        {
+            NextToken( lexer );
+            if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
+            {
+                args.Push( ParseDirectiveArg( lexer ) );
+                while( MatchToken( TokenKind::Comma, lexer->token ) )
+                {
+                    NextToken( lexer );
+                    args.Push( ParseDirectiveArg( lexer ) );
+                }
+                RequireTokenAndAdvance( TokenKind::CloseParen, lexer );
+            }
+        }
+
+        NodeDirective dir = {};
+        dir.pos = pos;
+        dir.name = dirName;
+        new( &dir.args ) Array<DirectiveArg>( &globalArena, args.count );
+        args.CopyTo( &dir.args );
+
+        result.Push( dir );
         NextToken( lexer );
     }
 
@@ -1136,10 +1200,10 @@ Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock )
 {
     u32 flags = 0;
 
-    BucketArray<char const*> directives = ParseDirectives( lexer );
-    if( directives.Contains( globalDirectives[Directive::DebugBreak] ) )
+    BucketArray<NodeDirective> directives = ParseDirectives( lexer );
+    if( ContainsDirective( directives, Directive::DebugBreak ) )
         __debugbreak();
-    else if( directives.Contains( globalDirectives[Directive::ExpectError] ) )
+    else if( ContainsDirective( directives, Directive::ExpectError ) )
         flags |= Node::SkipCodegen;
 
     SourcePos pos = lexer->token.pos;
@@ -1181,19 +1245,19 @@ Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock )
     return ParseNamedDecl( pos, expr, directives, flags, parentBlock, lexer );
 }
 
-Stmt* NewStmt( SourcePos const& pos, Stmt::Kind kind, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewStmt( SourcePos const& pos, Stmt::Kind kind, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = PUSH_STRUCT( &globalArena, Stmt );
     result->pos = pos;
     result->kind = kind;
     result->parentBlock = parentBlock;
-    INIT( result->directives ) Array<char const*>( directives, &globalArena );
+    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
     result->flags = flags;
 
     return result;
 }
 
-Stmt* NewDeclStmt( SourcePos const& pos, Decl* decl, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewDeclStmt( SourcePos const& pos, Decl* decl, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Decl, parentBlock, directives, flags );
     result->decl = decl;
@@ -1202,7 +1266,7 @@ Stmt* NewDeclStmt( SourcePos const& pos, Decl* decl, StmtList* parentBlock, Buck
 }
 
 Stmt* NewAssignStmt( SourcePos const& pos, Expr* leftExpr, TokenKind::Enum op, Expr* rightExpr, StmtList* parentBlock,
-                     BucketArray<char const*> const& directives, u32 flags )
+                     BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Assign, parentBlock, directives, flags );
     result->assign.left = leftExpr;
@@ -1212,7 +1276,7 @@ Stmt* NewAssignStmt( SourcePos const& pos, Expr* leftExpr, TokenKind::Enum op, E
     return result;
 }
 
-Stmt* NewExprStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewExprStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Expr, parentBlock, directives, flags );
     result->expr = expr;
@@ -1226,7 +1290,7 @@ Stmt* NewExprStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, Buck
 //a, b, c += d, e, f; //?
 
 // Assignment / decl / expr
-Stmt* ParseSimpleStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseSimpleStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = nullptr;
     bool consumeSemicolon = true;
@@ -1295,7 +1359,7 @@ StmtList* ParseStmtOrStmtBlock( Lexer* lexer, StmtList* parent )
 }
 
 Stmt* NewIfStmt( SourcePos const& pos, Expr* cond, StmtList* thenBlock, BucketArray<ElseIf> const& elseIfs, StmtList* elseBlock,
-                 StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+                 StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::If, parentBlock, directives, flags );
     result->if_.cond = cond;
@@ -1307,7 +1371,7 @@ Stmt* NewIfStmt( SourcePos const& pos, Expr* cond, StmtList* thenBlock, BucketAr
 }
 
 Stmt* NewWhileStmt( SourcePos const& pos, Expr* cond, StmtList* block, bool isDoWhile, StmtList* parentBlock,
-                    BucketArray<char const*> const& directives, u32 flags )
+                    BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::While, parentBlock, directives, flags );
     result->while_.cond = cond;
@@ -1317,8 +1381,8 @@ Stmt* NewWhileStmt( SourcePos const& pos, Expr* cond, StmtList* block, bool isDo
     return result;
 }
 
-Stmt* NewForStmt( SourcePos const& pos, char const* indexName, Expr* rangeExpr, StmtList* block, StmtList* parentBlock
-                  , BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewForStmt( SourcePos const& pos, char const* indexName, Expr* rangeExpr, StmtList* block, StmtList* parentBlock,
+                  BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::For, parentBlock, directives, flags );
     result->for_.indexName = indexName;
@@ -1329,7 +1393,7 @@ Stmt* NewForStmt( SourcePos const& pos, char const* indexName, Expr* rangeExpr, 
 }
         
 Stmt* NewSwitchStmt( SourcePos const& pos, Expr* expr, BucketArray<SwitchCase> const& cases, StmtList* parentBlock,
-                     BucketArray<char const*> const& directives, u32 flags )
+                     BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Switch, parentBlock, directives, flags );
     result->switch_.expr = expr;
@@ -1338,7 +1402,7 @@ Stmt* NewSwitchStmt( SourcePos const& pos, Expr* expr, BucketArray<SwitchCase> c
     return result;
 }
 
-Stmt* NewReturnStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewReturnStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Return, parentBlock, directives, flags );
     result->expr = expr;
@@ -1346,7 +1410,7 @@ Stmt* NewReturnStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, Bu
     return result;
 }
 
-Stmt* NewBlockStmt( SourcePos const& pos, StmtList* block, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* NewBlockStmt( SourcePos const& pos, StmtList* block, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     Stmt* result = NewStmt( pos, Stmt::Block, parentBlock, directives, flags );
     result->block = block;
@@ -1354,7 +1418,7 @@ Stmt* NewBlockStmt( SourcePos const& pos, StmtList* block, StmtList* parentBlock
     return result;
 }
 
-Stmt* ParseIfStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseIfStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     RequireKeywordAndAdvance( Keyword::If, lexer );
 
@@ -1390,7 +1454,7 @@ Stmt* ParseIfStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, Bu
     return nullptr;
 }
 
-Stmt* ParseWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     RequireKeywordAndAdvance( Keyword::While, lexer );
 
@@ -1403,7 +1467,7 @@ Stmt* ParseWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock,
     return nullptr;
 }
 
-Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     RequireKeywordAndAdvance( Keyword::Do, lexer );
     StmtList* block = ParseStmtOrStmtBlock( lexer, parentBlock );
@@ -1419,7 +1483,7 @@ Stmt* ParseDoWhileStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBloc
     return nullptr;
 }
 
-Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseForStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     RequireKeywordAndAdvance( Keyword::For, lexer );
     RequireTokenAndAdvance( TokenKind::OpenParen, lexer );
@@ -1462,7 +1526,7 @@ SwitchCase ParseSwitchCase( Lexer* lexer, StmtList* parentBlock )
     return { block, expr, isDefault };
 }
 
-Stmt* ParseSwitchStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<char const*> const& directives, u32 flags )
+Stmt* ParseSwitchStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
 {
     RequireKeywordAndAdvance( Keyword::Switch, lexer );
     Expr* expr = ParseParenExpr( lexer );
@@ -1502,10 +1566,10 @@ Stmt* ParseStmt( Lexer* lexer, StmtList* parentBlock )
 {
     u32 flags = 0;
 
-    BucketArray<char const*> directives = ParseDirectives( lexer );
-    if( directives.Contains( globalDirectives[Directive::DebugBreak] ) )
+    BucketArray<NodeDirective> directives = ParseDirectives( lexer );
+    if( ContainsDirective( directives, Directive::DebugBreak ) )
         __debugbreak();
-    else if( directives.Contains( globalDirectives[Directive::ExpectError] ) )
+    else if( ContainsDirective( directives, Directive::ExpectError ) )
         flags |= Node::SkipCodegen;
 
     Stmt* stmt = nullptr;
@@ -1755,13 +1819,13 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
 
         case Expr::Unary:
         {
-            APPEND( "(%s ", TokenKind::Items::names[ expr->unary.op ] );
+            APPEND( "(%s ", TokenKind::names[ expr->unary.op ] );
             DebugPrintSExpr( expr->unary.expr, outBuf, maxLen );
             APPEND( ")" );
         } break;
         case Expr::Binary:
         {
-            APPEND( "(%s ", TokenKind::Items::names[ expr->binary.op ] );
+            APPEND( "(%s ", TokenKind::names[ expr->binary.op ] );
             DebugPrintSExpr( expr->binary.left, outBuf, maxLen );
             APPEND( " " );
             DebugPrintSExpr( expr->binary.right, outBuf, maxLen );
@@ -1845,7 +1909,7 @@ void DebugPrintSExpr( Stmt* stmt, char*& outBuf, sz& maxLen, int& indent )
         } break;
         case Stmt::Assign:
         {
-            APPEND( "(%s ", TokenKind::Items::names[ stmt->assign.op ] );
+            APPEND( "(%s ", TokenKind::names[ stmt->assign.op ] );
             DebugPrintSExpr( stmt->assign.left, outBuf, maxLen );
             APPEND( " " );
             DebugPrintSExpr( stmt->assign.right, outBuf, maxLen );

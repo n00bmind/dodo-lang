@@ -21,7 +21,7 @@ struct TokenKindValue
     x(Unknown,          "unknown",      ( "???", 0 )) \
     \
     x(Exclamation,      "!",            ( " ! ", UnaryOp )) \
-    x(Pound,            "#",            ( " # ", 0 )) \
+    x(Pound,            "#",            ( " # ", PostfixOp )) \
     x(Dollar,           "$",            ( " $ ", 0 )) \
     x(Percent,          "%",            ( " % ", MulOp )) \
     x(Ampersand,        "&",            ( " & ", UnaryOp | MulOp )) \
@@ -91,37 +91,45 @@ ENUM_STRUCT_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
 
 
 #define KEYWORDS(x) \
-    x( Struct,  "struct" ) \
-    x( Union,   "union" ) \
-    x( Enum,    "enum" ) \
-    x( Sizeof,  "sizeof" ) \
-    x( If,      "if" ) \
-    x( Else,    "else" ) \
-    x( While,   "while" ) \
-    x( Do,      "do" ) \
-    x( For,     "for" ) \
-    x( Switch,  "switch" ) \
-    x( Case,    "case" ) \
-    x( Default, "default" ) \
-    x( Break,   "break" ) \
-    x( Continue,"continue" ) \
-    x( Return,  "return" ) \
-    x( In,      "in" ) \
-    x( Length,  "length" ) \
+    x( Struct,      "struct" ) \
+    x( Union,       "union" ) \
+    x( Enum,        "enum" ) \
+    x( Sizeof,      "sizeof" ) \
+    x( If,          "if" ) \
+    x( Else,        "else" ) \
+    x( While,       "while" ) \
+    x( Do,          "do" ) \
+    x( For,         "for" ) \
+    x( Switch,      "switch" ) \
+    x( Case,        "case" ) \
+    x( Default,     "default" ) \
+    x( Break,       "break" ) \
+    x( Continue,    "continue" ) \
+    x( Return,      "return" ) \
+    x( In,          "in" ) \
+    x( Length,      "length" ) \
+    x( Size,        "size" ) \
+    x( EnumName,    "enum_name" ) \
 
 ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS
 
 
-#define DIRECTIVES(x) \
-    x( Foreign,         "foreign" ) \
-    x( ExpectError,     "expecterror" ) \
-    x( DebugBreak,      "debugbreak" ) \
+struct DirectiveInfo
+{
+    char const* argNames[16] = {};
+};
 
-ENUM_STRUCT_WITH_NAMES(Directive, DIRECTIVES)
+#define DIRECTIVES(x) \
+    x( Foreign,         "foreign",          () ) \
+    x( Expect,          "expect",           ("condition", "errormsg")) \
+    x( ExpectError,     "expect_error",     ()) \
+    x( DebugBreak,      "debug_break",      ()) \
+
+ENUM_STRUCT_WITH_NAMES_VALUES(Directive, DirectiveInfo, DIRECTIVES)
 #undef DIRECTIVES
 
-extern char const* globalDirectives[Directive::Items::count];
+extern char const* globalDirectives[Directive::itemCount];
 
 
 struct SourcePos
@@ -164,7 +172,7 @@ struct Token
 
     bool HasFlag( TokenFlags f )
     {
-        return (TokenKind::Items::entries[ kind ].value.flags & (u32)f) != 0;
+        return (TokenKind::items[ kind ].value.flags & (u32)f) != 0;
     }
 };
 

@@ -1,4 +1,38 @@
 
+struct DirectiveWithIndex
+{
+    Directive::Enum d;
+    bool operator()( NodeDirective const& item )
+    {
+        return item.name == globalDirectives[d];
+    }
+};
+
+NodeDirective* FindDirective( Node* node, Directive::Enum d )
+{
+    NodeDirective* result = node->directives.Find( DirectiveWithIndex{ d } );
+    return result;
+}
+
+bool ContainsDirective( Node* node, Directive::Enum d )
+{
+    NodeDirective* result = FindDirective( node, d );
+    return result != nullptr;
+}
+
+NodeDirective const* FindDirective( BucketArray<NodeDirective> const& directives, Directive::Enum d )
+{
+    NodeDirective const* result = directives.Find( DirectiveWithIndex{ d } );
+    return result;
+}
+
+bool ContainsDirective( BucketArray<NodeDirective> const& directives, Directive::Enum d )
+{
+    NodeDirective const* result = FindDirective( directives, d );
+    return result != nullptr;
+}
+
+
 void ParseError( Lexer* lexer, char const* fmt, ... )
 {
     va_list arg_list;
@@ -36,7 +70,7 @@ void Error( char const* fmt, ... )
     {
         Stmt* node = *it;
         // TODO Specific error number
-        if( char const** slot = node->directives.Find( globalDirectives[Directive::ExpectError] ) )
+        if( NodeDirective* slot = FindDirective( node, Directive::ExpectError ) )
         {
             node->directives.Remove( slot );
             globalSilenceInfos = true;

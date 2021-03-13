@@ -437,7 +437,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         } break;
 
         case Expr::Unary:
-            Out( TokenKind::Items::names[expr->unary.op] );
+            Out( TokenKind::names[expr->unary.op] );
             OUTSTR( "(" );
             EmitExpr( expr->unary.expr, expectedType );
             OUTSTR( ")" );
@@ -446,7 +446,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             OUTSTR( "(" );
             EmitExpr( expr->binary.left );
             OUTSTR( " " );
-            Out( TokenKind::Items::names[expr->binary.op] );
+            Out( TokenKind::names[expr->binary.op] );
             OUTSTR( " " );
             EmitExpr( expr->binary.right );
             OUTSTR( ")" );
@@ -702,7 +702,7 @@ void EmitStmt( Stmt* stmt )
         {
             Expr* leftExpr = stmt->assign.left;
             Expr* rightExpr = stmt->assign.right;
-            char const* opName = TokenKind::Items::names[stmt->assign.op];
+            char const* opName = TokenKind::names[stmt->assign.op];
 
             OutIndent();
             if( leftExpr->kind == Expr::Comma )

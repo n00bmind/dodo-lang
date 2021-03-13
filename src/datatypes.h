@@ -179,6 +179,36 @@ struct Array
         return slot != nullptr;
     }
 
+    template <class Predicate>
+    T* Find( Predicate p )
+    {
+        T* result = nullptr;
+        for( int i = 0; i < count; ++i )
+        {
+            if( p( data[i] ) )
+            {
+                result = &data[i];
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    template <class Predicate>
+    T const* Find( Predicate p ) const
+    {
+        T* slot = ((Array<T>*)this)->Find( p );
+        return slot;
+    }
+
+    template <class Predicate>
+    bool Contains( Predicate p ) const
+    {
+        T const* slot = Find( p );
+        return slot != nullptr;
+    }
+
     // Deep copy
     Array<T> Clone( MemoryArena* arena ) const
     {
@@ -231,8 +261,6 @@ bool EqualityComparator( T const& a, T const& b )
 template <typename T>
 struct BucketArray
 {
-    using ComparatorFunc = bool (*)( T const& a, T const& b );
-
     // TODO Rewrite using Arrays with prev/next pointers as buckets
     struct Bucket
     {
@@ -543,7 +571,7 @@ struct BucketArray
     }
 #endif
 
-    T* Find( T const& item, ComparatorFunc cmp = EqualityComparator )
+    T* Find( T const& item )
     {
         T* result = nullptr;
 
@@ -562,17 +590,52 @@ struct BucketArray
         return result;
     }
 
-    T const* Find( T const& item, ComparatorFunc cmp = EqualityComparator ) const
+    T const* Find( T const& item ) const
     {
         T* result = ((BucketArray<T>*)this)->Find( item, cmp );
         return result;
     }
 
-    bool Contains( T const& item, ComparatorFunc cmp = EqualityComparator ) const
+    bool Contains( T const& item ) const
     {
         T const* result = Find( item, cmp );
         return result != nullptr;
     }
+
+    template <class Predicate>
+    T* Find( Predicate p )
+    {
+        T* result = nullptr;
+
+        auto idx = First();
+        while( idx )
+        {
+            if( p( *idx ) )
+                break;
+
+            idx.Next();
+        }
+
+        if( idx )
+            result = &*idx;
+
+        return result;
+    }
+
+    template <class Predicate>
+    T const* Find( Predicate p ) const
+    {
+        T* slot = ((BucketArray<T>*)this)->Find( p );
+        return slot;
+    }
+
+    template <class Predicate>
+    bool Contains( Predicate p ) const
+    {
+        T const* slot = Find( p );
+        return slot != nullptr;
+    }
+
 
     void AppendFrom( T const* buffer, int bufferCount )
     {

@@ -794,6 +794,61 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     }
 }
 
+ResolvedExpr ResolveMetaFieldExpr( Expr* expr, Type* baseType )
+{
+    char const* name = expr->field.name;
+
+    // TODO We could associate the keyword/directive index with each entry while interning them too
+    int index = -1, i = 0;
+    for( char const* k : globalKeywords )
+    {
+        if( k == name )
+        {
+            index = i;
+            break;
+        }
+        i++;
+    }
+    ASSERT( index >= 0 );
+
+    ResolvedExpr result = resolvedNull;
+    switch( index )
+    {
+        case Keyword::Size:
+            result = NewResolvedConst( i64Type, baseType->size, expr->pos );
+            break;
+
+        case Keyword::Length:
+        {
+            if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
+            {
+                RSLV_ERROR( expr->pos, "Only arrays, buffer views and strings have a 'length' attribute" );
+                return resolvedNull;
+            }
+
+            result = NewResolvedRvalue( i64Type );
+            if( baseType->kind == Type::Array )
+            {
+                result.isConst = true;
+                result.constValue.intValue = baseType->array.length;
+            }
+        } break;
+
+        case Keyword::EnumName:
+        {
+            if( baseType->kind != Type::Enum )
+            {
+                RSLV_ERROR( expr->pos, "Only enum values have an 'enum_name' attribute" );
+                return resolvedNull;
+            }
+
+            result = NewResolvedRvalue( stringType );
+        } break;
+    }
+
+    return result;
+}
+
 void CompleteType( Type* type, SourcePos const& pos );
 
 ResolvedExpr ResolveFieldExpr( Expr* expr )
@@ -802,46 +857,50 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
     // TODO Modules
     ResolvedExpr left = ResolveExpr( expr->field.base );
-    Type* type = left.type;
+    Type* baseType = left.type;
     
-    if( !type || IsTainted( type ) )
+    if( !baseType || IsTainted( baseType ) )
         return resolvedNull;
 
-    CompleteType( type, expr->pos );
+    CompleteType( baseType, expr->pos );
 
+    if( expr->field.meta )
+        return ResolveMetaFieldExpr( expr, baseType );
+
+    // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
     if( MatchKeyword( Keyword::Length, expr->field.name ) )
     {
-        if( !(type->kind == Type::Array || type->kind == Type::Buffer || type->kind == Type::String) )
+        if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
         {
             RSLV_ERROR( expr->pos, "Only arrays, buffer views and strings have a 'length' attribute" );
             return resolvedNull;
         }
 
         ResolvedExpr result = NewResolvedRvalue( i64Type );
-        if( type->kind == Type::Array )
+        if( baseType->kind == Type::Array )
         {
             result.isConst = true;
-            result.constValue.intValue = type->array.length;
+            result.constValue.intValue = baseType->array.length;
         }
 
         return result;
     }
 
-    if( !(type->kind == Type::Struct || type->kind == Type::Union || type->kind == Type::Pointer) )
+    if( !(baseType->kind == Type::Struct || baseType->kind == Type::Union || baseType->kind == Type::Pointer) )
     {
-        RSLV_ERROR( expr->pos, "Unknown attribute '%s' in expression of type '%s'", expr->field.name, type->name );
+        RSLV_ERROR( expr->pos, "Unknown attribute '%s' in expression of type '%s'", expr->field.name, baseType->name );
         return resolvedNull;
     }
 
     // 'Normal' field access of aggregates or pointers to such
-    if( type->kind == Type::Pointer )
+    if( baseType->kind == Type::Pointer )
     {
-        left = NewResolvedLvalue( type->ptr.base );
-        type = left.type;
-        CompleteType( type, expr->pos );
+        left = NewResolvedLvalue( baseType->ptr.base );
+        baseType = left.type;
+        CompleteType( baseType, expr->pos );
     }
 
-    for( TypeField const& f : type->aggregate.fields )
+    for( TypeField const& f : baseType->aggregate.fields )
     {
         if( f.name == expr->field.name )
         {
@@ -852,11 +911,9 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
         }
     }
 
-    RSLV_ERROR( expr->pos, "No field named '%s' in type '%s'", expr->field.name, type->name );
+    RSLV_ERROR( expr->pos, "No field named '%s' in type '%s'", expr->field.name, baseType->name );
     return resolvedNull;
 }
-
-Type* NewPtrType( Type* base );
 
 ResolvedExpr EvalConstUnaryExpr( TokenKind::Enum op, ResolvedExpr const& operand, SourcePos const& pos )
 {
@@ -973,7 +1030,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsArithmeticType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with arithmetic types",
-                            TokenKind::Items::names[ expr->unary.op ] );
+                            TokenKind::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -981,7 +1038,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsIntegralType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with integral types",
-                            TokenKind::Items::names[ expr->unary.op ] );
+                            TokenKind::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -989,7 +1046,7 @@ ResolvedExpr ResolveUnaryExpr( Expr* expr )
             if( !IsScalarType( type ) )
             {
                 RSLV_ERROR( expr->pos, "Can only use unary '%s' with scalar types",
-                            TokenKind::Items::names[ expr->unary.op ] );
+                            TokenKind::names[ expr->unary.op ] );
                 return resolvedNull;
             }
             break;
@@ -1218,7 +1275,7 @@ ResolvedExpr ResolveBinaryArithmeticExpr( TokenKind::Enum op, ResolvedExpr* left
     else
         result =  NewResolvedRvalue( left->type );
 
-    if( TokenKind::Items::entries[ op ].value.flags == TokenFlags::CmpOp )
+    if( TokenKind::items[ op ].value.flags == TokenFlags::CmpOp )
         CastType( &result, boolType );
 
     return result;
@@ -1449,7 +1506,7 @@ ResolvedExpr ResolveBinaryExpr( Expr* expr )
     ResolvedExpr right = ResolveExpr( expr->binary.right );
 
     TokenKind::Enum op = expr->binary.op;
-    char const* opName = TokenKind::Items::names[op];
+    char const* opName = TokenKind::names[op];
 
     return ResolveBinaryExpr( op, opName, &left, &right, expr->pos );
 }
@@ -2122,7 +2179,7 @@ void ResolveSymbol( Symbol* sym )
         return;
 
     Decl* decl = sym->decl;
-    if( decl->directives.Contains( globalDirectives[Directive::DebugBreak] ) )
+    if( ContainsDirective( decl, Directive::DebugBreak ) )
         __debugbreak();
 
     SourcePos const& pos = decl->pos;
@@ -2272,7 +2329,7 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
 
 INLINE bool IsForeign( Decl* decl )
 {
-    return decl->directives.Contains( globalDirectives[ Directive::Foreign ] );
+    return ContainsDirective( decl, Directive::Foreign );
 }
 
 bool ResolveStmtBlock( StmtList const* block, Type* returnType );
@@ -2297,7 +2354,7 @@ void ResolveFuncBody( Symbol* sym )
         CompleteType( argType, a.pos );
 
         // Create a synthetic Decl
-        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<char const*>::Empty, 0, decl->func.body );
+        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
         CreateDeclSymbols( varDecl, true );
     }
 
@@ -2351,7 +2408,7 @@ void PopNode()
     globalNodeStack.Pop();
 
     // Check expected errors
-    if( node->directives.Contains( globalDirectives[Directive::ExpectError] ) )
+    if( ContainsDirective( node, Directive::ExpectError ) )
         RSLV_ERROR( node->pos, "Expected error but none was generated" );
 }
 
@@ -2394,7 +2451,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 if( op == TokenKind::Assign )
                     result = right;
                 else
-                    result = ResolveBinaryExpr( binaryOp, TokenKind::Items::names[ op ], &left, &right, stmt->pos );
+                    result = ResolveBinaryExpr( binaryOp, TokenKind::names[ op ], &left, &right, stmt->pos );
 
                 if( !ConvertType( &result, left.type ) )
                 {
@@ -2440,7 +2497,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
                 TokenKind::Enum op = stmt->assign.op;
                 TokenKind::Enum binaryOp = assignOpToBinaryOp[ stmt->assign.op ];
-                char const* opName = TokenKind::Items::names[ op ];
+                char const* opName = TokenKind::names[ op ];
 
                 Array<ResolvedExpr> result = Array<ResolvedExpr>( &globalTmpArena, leftExprs.count );
                 for( int i = 0; i < leftExprs.count; ++i )
@@ -2487,7 +2544,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
             // Create a synthetic Decl
             // TODO Support type specifiers? (make this more Decl-like)
-            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr, BucketArray<char const*>::Empty, 0,
+            Decl* varDecl = NewVarDecl( stmt->pos, stmt->for_.indexName, nullptr, rangeExpr, BucketArray<NodeDirective>::Empty, 0,
                                         stmt->for_.block );
             CreateDeclSymbols( varDecl, true );
 

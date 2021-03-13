@@ -155,6 +155,7 @@ struct Expr
         {
             Expr* base;
             char const* name;
+            bool meta;
         } field;
         Array<CompoundField> compoundFields;
         struct
@@ -209,6 +210,20 @@ struct StmtList
 };
 
 
+struct DirectiveArg
+{
+    SourcePos pos;
+    char const* name;
+    Expr* expr;
+};
+
+struct NodeDirective
+{
+    SourcePos pos;
+    char const* name;
+    Array<DirectiveArg> args;
+};
+
 struct Node
 {
     enum Flags
@@ -217,7 +232,7 @@ struct Node
         SkipCodegen = 0x1,
     };
 
-    Array<char const*> directives;
+    Array<NodeDirective> directives;
     SourcePos pos;
     StmtList* parentBlock;
     u32 flags;
