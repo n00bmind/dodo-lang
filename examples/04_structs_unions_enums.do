@@ -2,6 +2,7 @@
 #foreign printf :: ( fmt: string, args: any... );
 
 main :: ()
+{
     // TODO Bitfield members
 
     // Structs can be nested
@@ -14,6 +15,8 @@ main :: ()
 
         r :[3]Vector;
     }
+    
+    #expect( Matrix.r#offset == Matrix.Vector.a#offset );
 
     // TODO Make a rule whereby you can omit the field names when providing values for all fields?
     // (and if a new field gets added to the struct you get an error in the existing initializers)

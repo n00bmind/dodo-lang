@@ -1756,8 +1756,8 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
 
     if( base.type->kind == Type::Array && index.isConst )
     {
-        i64 index = index.constValue.intValue;
-        if( index < 0 || index >= base.type->array.length )
+        i64 idxValue = index.constValue.intValue;
+        if( idxValue < 0 || idxValue >= base.type->array.length )
             RSLV_ERROR( expr->pos, "Array index out of bounds" );
     }
 
