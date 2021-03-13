@@ -35,6 +35,11 @@ main :: ( argc: int, argv: **i8 ) -> int
     #expecterror
     { nums5: [*]int = { [..] = 100 }; }
 
+    #expecterror
+    {
+        int bla = nums2[10];
+    }
+
     // Creating a buffer view from an array
     nums6: [*]int = nums1;
     PrintBuffer( nums6 );

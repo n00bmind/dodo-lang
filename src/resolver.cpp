@@ -1754,6 +1754,13 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     if( !ConvertType( &index, intType ) )
         RSLV_ERROR( expr->pos, "Index expression must have integer type" );
 
+    if( base.type->kind == Type::Array && index.isConst )
+    {
+        i64 index = index.constValue.intValue;
+        if( index < 0 || index >= base.type->array.length )
+            RSLV_ERROR( expr->pos, "Array index out of bounds" );
+    }
+
     // Disallow pointers for now
 #if 0
     if( base.type->kind == Type::Pointer )
