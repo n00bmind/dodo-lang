@@ -59,6 +59,11 @@ struct Array
     T*       end()           { return data + count; }
     const T* end() const     { return data + count; }
 
+    T&       First()         { ASSERT( count > 0 ); return data[0]; }
+    T const& First() const   { ASSERT( count > 0 ); return data[0]; }
+    T&       Last()          { ASSERT( count > 0 ); return data[count - 1]; }
+    T const& Last() const    { ASSERT( count > 0 ); return data[count - 1]; }
+
     bool operator ==( Array<T> const& other ) const
     {
         return count == other.count && PEQUAL( data, other.data, count * SIZEOF(T) );
@@ -96,18 +101,6 @@ struct Array
     {
         ASSERT( i >= 0 && i < count );
         return data[i];
-    }
-
-    T& Last()
-    {
-        ASSERT( count > 0 );
-        return data[count - 1];
-    }
-
-    const T& Last() const
-    {
-        ASSERT( count > 0 );
-        return data[count - 1];
     }
 
     // TODO Not too sure about this!
@@ -637,7 +630,7 @@ struct BucketArray
     }
 
 
-    void AppendFrom( T const* buffer, int bufferCount )
+    void Append( T const* buffer, int bufferCount )
     {
         int totalCopied = 0;
         Bucket*& bucket = last;
@@ -657,6 +650,11 @@ struct BucketArray
         }
 
         count += totalCopied;
+    }
+
+    void Append( Array<T> const& array )
+    {
+        Append( array.data, array.count );
     }
 
     void CopyTo( T* buffer, sz bufferCount ) const

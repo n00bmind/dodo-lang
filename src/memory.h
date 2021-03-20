@@ -233,7 +233,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
         align = minAlignment;
     if( align )
     {
-        result = Align( block, align );
+        result = AlignUp( block, align );
         waste = (u8*)result - (u8*)block;
     }
 
@@ -262,7 +262,7 @@ _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = D
 
         // Assume it's already aligned
         if( params.alignment )
-            ASSERT( Align( arena->base, params.alignment ) == arena->base );
+            ASSERT( AlignUp( arena->base, params.alignment ) == arena->base );
 
         result = arena->base;
         alignedSize = size;

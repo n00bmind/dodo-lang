@@ -109,6 +109,7 @@ ENUM_STRUCT_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( In,          "in" ) \
     x( Length,      "length" ) \
     x( Size,        "size" ) \
+    x( Offset,      "offset" ) \
     x( EnumName,    "enum_name" ) \
 
 ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
@@ -122,7 +123,7 @@ struct DirectiveInfo
 
 #define DIRECTIVES(x) \
     x( Foreign,         "foreign",          () ) \
-    x( Expect,          "expect",           ("condition", "errormsg")) \
+    x( Expect,          "expect",           ("condition", "errormsg"))  /* TODO Varargs */\
     x( ExpectError,     "expect_error",     ()) \
     x( DebugBreak,      "debug_break",      ()) \
 

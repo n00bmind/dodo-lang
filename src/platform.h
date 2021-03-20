@@ -28,8 +28,6 @@ typedef PLATFORM_PRINT_VA(PlatformPrintVAFunc);
 
 struct PlatformAPI
 {
-    static const sz PointerSize;
-
     PlatformAllocFunc* Alloc;
     PlatformFreeFunc* Free;
     PlatformGetAbsolutePathFunc* GetAbsolutePath;
@@ -65,4 +63,11 @@ struct PlatformAPI
 #endif
 };
 extern PlatformAPI globalPlatform;
+
+struct TgtPlatformSpec
+{
+    sz PointerSize;
+
+};
+extern TgtPlatformSpec globalTgtPlatform;
 

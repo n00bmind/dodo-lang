@@ -44,6 +44,18 @@ INLINE bool StringsEqual( char const* a, char const* b )
     return strcmp( a, b ) == 0;
 }
 
+INLINE bool StringsEqualNoCase( char const* a, char const* b )
+{
+    size_t len = strlen( a );
+    if( len != strlen( b ) )
+        return false;
+
+    for( size_t i = 0; i < len; ++i )
+        if( tolower( a[i] ) != tolower( b[i] ) )
+            return false;
+    return true;
+}
+
 INLINE int StringLength( char const* s )
 {
     return I32( strlen( s ) );
@@ -57,10 +69,10 @@ INLINE void StringCopy( char const* src, char* dst, sz dstSize )
 
 
 // Read only string
-// TODO Review everything here to make sure we always append a null terminator
-// TODO Review everything here to make sure we always append a null terminator
-// TODO Review everything here to make sure we always append a null terminator
-// TODO Review everything here to make sure we always append a null terminator
+// FIXME Review everything here to make sure we always append a null terminator
+// FIXME Review everything here to make sure we always append a null terminator
+// FIXME Review everything here to make sure we always append a null terminator
+// FIXME Review everything here to make sure we always append a null terminator
 struct String
 {
     char const* data;
@@ -237,7 +249,8 @@ struct StringBuilder
         if( !length )
             length = StringLength( str );
 
-        buckets.AppendFrom( str, length );
+        // Not including null terminator
+        buckets.Append( str, length );
     }
 
     void Append( char const* fmt, ... )
@@ -254,11 +267,12 @@ struct StringBuilder
 
         // TODO We probably want this struct to be made out of irregular buckets that are allocated exactly of the
         // length needed for each append (n above) so we don't need this extra copy
-        buckets.AppendFrom( buf, n );
+        buckets.Append( buf, n - 1 );
     }
 
-    String ToString( MemoryArena* arena ) const
+    String ToString( MemoryArena* arena )
     {
+        buckets.Append( "\0", 1 );
         return String::Clone( buckets, arena );
     }
 };

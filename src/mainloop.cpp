@@ -20,6 +20,9 @@ MemoryArena globalArena;
 MemoryArena globalTmpArena;
 MemoryArena globalOutArena;
 InternStringBuffer globalInternStrings;
+
+TgtPlatformSpec globalTgtPlatform;
+
 int globalErrorCount = 0;
 
 
@@ -425,6 +428,10 @@ bool Run( int argCount, char const* args[] )
     InitArena( &globalArena, MEGABYTES(16) );
     InitArena( &globalTmpArena, MEGABYTES(16) );
     InitArena( &globalOutArena, MEGABYTES(16) );
+
+    // Init target platform
+    globalTgtPlatform = {};
+    globalTgtPlatform.PointerSize = 8;
 
 #if !CONFIG_RELEASE
     RunTests();

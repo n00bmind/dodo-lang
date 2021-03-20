@@ -27,8 +27,9 @@ struct Symbol
 
     char const* name;
     Decl* decl;
+    Symbol* parent;
     ::Type* type;
-    // TODO Store constants separately?
+    // TODO Don't store this here
     ConstValue constValue = {};
     u32 kind : 16;
     u32 state : 15;
@@ -47,6 +48,7 @@ struct TypeField
 {
     char const* name;
     Type* type;
+    ResolvedExpr init;
     sz offset;
 };
 
@@ -58,10 +60,10 @@ struct Type
         Incomplete,
         Completing,
         Void,
-        Bool,       // TODO Is this needed at all?
+        Bool,
         Bits,
         Int,
-        Enum,       // NOTE This is just the scalar enum (non-struct). Can be int or bits!
+        Enum,       // TODO This is NOT just the scalar enum (non-struct). Expression resolution rn assumes this can only be int or bits!
         Float,
         Pointer,
         Func,
@@ -71,10 +73,10 @@ struct Type
         Struct,
         Union,
         Multi,      // The type for multiple decls/assignments, and probably for multiple return values too
+        TypeVal,    // TODO This should probably link to the type id somehow
 
         //SBuffer,        // TODO ?
         // TODO 
-        TypeVar,
         Any,
     };
 
@@ -100,7 +102,9 @@ struct Type
         } aggregate;
         struct
         {
-            // TODO 
+            // List of the (resolved) items, including None
+            // TODO This should probably just be an array of ConstValue, when that supports complex types
+            ::Array<EnumItem> items;
             Type* base;
         } enum_;
         struct
@@ -118,6 +122,10 @@ struct Type
         {
             ::Array<Type*> types;
         } multi;
+        struct
+        {
+            Type* type;
+        } value;
     };
 
     Type()
@@ -210,18 +218,23 @@ Type* bitsType = NewBuiltinType( "bits", b64Type );
 Type* f32Type = NewBuiltinType( "f32", Type::Float, 4, 4 );
 Type* f64Type = NewBuiltinType( "f64", Type::Float, 8, 8 );
 Type* floatType = NewBuiltinType( "float", f32Type );
-// TODO This stuff needs to be in sync with the structs in the preamble!
-Type* stringType = NewBuiltinType( "string", Type::String, globalPlatform.PointerSize, globalPlatform.PointerSize );
+// NOTE This stuff needs to be in sync with the structs in the preamble!
+Type* stringType = NewBuiltinType( "string", Type::String, globalTgtPlatform.PointerSize, globalTgtPlatform.PointerSize );
 // TODO How big is this guy? How does any even work?
-Type* anyType = NewBuiltinType( "any", Type::Any, globalPlatform.PointerSize, globalPlatform.PointerSize );
+Type* anyType = NewBuiltinType( "any", Type::Any, globalTgtPlatform.PointerSize, globalTgtPlatform.PointerSize );
 
 // Error marker
 Type* nullType = NewBuiltinType( "", Type::None, 0, 0 );
 ResolvedExpr resolvedNull = { nullType, };
 
+bool IsValid( Type* type )
+{
+    return type && type->kind != Type::None;
+}
+
 bool IsValid( ResolvedExpr const& resolved )
 {
-    return !resolved.type || resolved.type->kind != Type::None;
+    return IsValid( resolved.type );
 }
 
 
@@ -233,7 +246,9 @@ Type* NewType( char const* name, Type::Kind kind, sz size, sz alignment )
     result->kind = kind;
     result->size = size;
     result->align = alignment;
-    
+
+    globalCachedTypes.Push( result );
+
     return result;
 }
 
@@ -251,10 +266,8 @@ Type* NewPtrType( Type* base )
         idx.Next();
     }
 
-    Type* result = NewType( "pointer", Type::Pointer, globalPlatform.PointerSize, globalPlatform.PointerSize );
+    Type* result = NewType( "pointer", Type::Pointer, globalTgtPlatform.PointerSize, globalTgtPlatform.PointerSize );
     result->ptr.base = base;
-
-    globalCachedTypes.Push( result );
 
     return result;
 }
@@ -262,15 +275,12 @@ Type* NewPtrType( Type* base )
 sz TypeSize( Type* type )
 {
     ASSERT( type->kind > Type::Completing );
-    ASSERT( type->size );
     return type->size;
 }
 
 sz TypeAlignment( Type* type )
 {
     ASSERT( type->kind > Type::Completing );
-    // FIXME 
-    //ASSERT( type->align );
     return type->align;
 }
 
@@ -293,8 +303,6 @@ Type* NewArrayType( Type* base, sz length )
     result->array.base = base;
     result->array.length = length;
 
-    globalCachedTypes.Push( result );
-
     return result;
 }
 
@@ -312,10 +320,8 @@ Type* NewBufferType( Type* base )
         idx.Next();
     }
 
-    Type* result = NewType( "buffer view", Type::Buffer, globalPlatform.PointerSize + 4, globalPlatform.PointerSize );
+    Type* result = NewType( "buffer view", Type::Buffer, globalTgtPlatform.PointerSize + 4, globalTgtPlatform.PointerSize );
     result->array.base = base;
-
-    globalCachedTypes.Push( result );
 
     return result;
 }
@@ -334,12 +340,10 @@ Type* NewFuncType( Array<FuncArg> const& args, Type* returnType )
         idx.Next();
     }
 
-    Type* result = NewType( "function", Type::Func, globalPlatform.PointerSize, globalPlatform.PointerSize );
+    Type* result = NewType( "function", Type::Func, globalTgtPlatform.PointerSize, globalTgtPlatform.PointerSize );
     // NOTE Assume passed args are allocated in permanent memory
     result->func.args = args;
     result->func.returnType = returnType;
-
-    globalCachedTypes.Push( result );
 
     return result;
 }
@@ -376,7 +380,27 @@ Type* NewMultiType( Array<Type*> const& types )
     // NOTE Assume given array is allocated in permanent memory
     result->multi.types = types;
 
-    globalCachedTypes.Push( result );
+    return result;
+}
+
+Type* NewTypeValType( Type* value, Symbol* symbol = nullptr )
+{
+    auto idx = globalCachedTypes.First(); 
+    while( idx )
+    {
+        Type* t = *idx;
+        if( t->kind == Type::TypeVal )
+        {
+            if( t->value.type == value )
+                return t;
+        }
+        idx.Next();
+    }
+
+    // TODO Assume this will just store a type id or similar
+    Type* result = NewType( "type", Type::TypeVal, 4, 4 );
+    result->value.type = value;
+    result->symbol = symbol;
 
     return result;
 }
@@ -489,7 +513,7 @@ ResolvedExpr NewResolvedConst( Type* type, u64 bitsValue, SourcePos const& pos )
     return result;
 }
 
-ResolvedExpr NewResolvedConst( Type* type, bool boolValue, SourcePos const& pos )
+ResolvedExpr NewResolvedConst( Type* type, bool boolValue )
 {
     ASSERT( type->kind == Type::Bool );
 
@@ -533,6 +557,17 @@ ResolvedExpr NewResolvedConst( Type* type, f64 floatValue, SourcePos const& pos 
     result.type = type;
     result.isConst = true;
     result.constValue.floatValue = floatValue;
+    return result;
+}
+
+ResolvedExpr NewResolvedConst( Type* type, uintptr_t ptrValue )
+{
+    ASSERT( type->kind == Type::Pointer );
+
+    ResolvedExpr result = {};
+    result.type = type;
+    result.isConst = true;
+    result.constValue.ptrValue = ptrValue;
     return result;
 }
 
@@ -717,7 +752,7 @@ bool ConvertType( ResolvedExpr* resolved, Type* type )
 }
 
 
-Symbol* ResolveName( char const* name, SourcePos const& pos );
+Symbol* ResolveName( char const* name, SourcePos const& pos, Symbol* parentSymbol = nullptr );
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType = nullptr );
 
 ResolvedExpr ResolveConstExpr( Expr* expr, Type* expectedType = nullptr )
@@ -771,14 +806,15 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
             case Type::String:
                 return NewResolvedConst( sym->type, sym->constValue.strValue, expr->pos );
             case Type::Pointer:
-                return NewResolvedConst( sym->type, sym->constValue.ptrValue, expr->pos );
+                return NewResolvedConst( sym->type, sym->constValue.ptrValue );
             case Type::Float:
                 return NewResolvedConst( sym->type, sym->constValue.floatValue, expr->pos );
             case Type::Int:
                 return NewResolvedConst( sym->type, sym->constValue.intValue, expr->pos );
             case Type::Bits:
-            case Type::Bool:
                 return NewResolvedConst( sym->type, sym->constValue.bitsValue, expr->pos );
+            case Type::Bool:
+                return NewResolvedConst( sym->type, sym->constValue.BoolValue() );
 
             default:
                 INVALID_CODE_PATH;
@@ -787,16 +823,37 @@ ResolvedExpr ResolveNameExpr( Expr* expr )
     }
     else if( sym->kind == Symbol::Func )
         return NewResolvedRvalue( sym->type );
+    else if( sym->kind == Symbol::Type )
+        //return NewResolvedRvalue( typeType );
+        return NewResolvedRvalue( NewTypeValType( sym->type, sym ) );
     else
     {
-        RSLV_ERROR( expr->pos, "Named expression can only refer to variable or constant" );
+        ASSERT( sym->kind == Symbol::Module );
+        NOT_IMPLEMENTED;
         return resolvedNull;
     }
 }
 
-ResolvedExpr ResolveMetaFieldExpr( Expr* expr, Type* baseType )
+TypeField const* FindTypeField( Type* baseType, char const* name )
 {
-    char const* name = expr->field.name;
+    ASSERT( baseType->kind == Type::Struct || baseType->kind == Type::Union );
+
+    TypeField const* result = nullptr;
+    for( TypeField const& f : baseType->aggregate.fields )
+    {
+        if( f.name == name )
+        {
+            result = &f;
+            break;
+        }
+    }
+
+    return result;
+}
+
+ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const& pos )
+{
+    Type* baseType = base->resolvedExpr.type;
 
     // TODO We could associate the keyword/directive index with each entry while interning them too
     int index = -1, i = 0;
@@ -815,14 +872,35 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* expr, Type* baseType )
     switch( index )
     {
         case Keyword::Size:
-            result = NewResolvedConst( i64Type, baseType->size, expr->pos );
+            result = NewResolvedConst( i64Type, baseType->size, pos );
             break;
 
+        case Keyword::Offset:
+        {
+            Expr* fieldBase = (base->kind == Expr::Field && !base->field.meta) ? base->field.base : nullptr;
+            Type* fieldBaseType = fieldBase ? fieldBase->resolvedExpr.type : nullptr;
+
+            if( fieldBaseType && fieldBaseType->kind == Type::TypeVal )
+                fieldBaseType = fieldBaseType->value.type;
+
+            if( !fieldBase || !(fieldBaseType->kind == Type::Struct || fieldBaseType->kind == Type::Union) )
+            {
+                RSLV_ERROR( pos, "'%s' attribute is only valid for aggregate fields", name );
+                return resolvedNull;
+            }
+
+            TypeField const* field = FindTypeField( fieldBaseType, base->field.name );
+            // If the field doesn't exist, it should already have failed resolving above
+            ASSERT( field );
+            result = NewResolvedConst( i64Type, field->offset, pos );
+        } break;
+
+    // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
         case Keyword::Length:
         {
             if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
             {
-                RSLV_ERROR( expr->pos, "Only arrays, buffer views and strings have a 'length' attribute" );
+                RSLV_ERROR( pos, "'%' attribute is only valid for arrays, buffer views and strings", name );
                 return resolvedNull;
             }
 
@@ -838,7 +916,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* expr, Type* baseType )
         {
             if( baseType->kind != Type::Enum )
             {
-                RSLV_ERROR( expr->pos, "Only enum values have an 'enum_name' attribute" );
+                RSLV_ERROR( pos, "'%' attribute is only valid for enum values", name );
                 return resolvedNull;
             }
 
@@ -849,7 +927,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* expr, Type* baseType )
     return result;
 }
 
-void CompleteType( Type* type, SourcePos const& pos );
+bool CompleteType( Type* type, SourcePos const& pos );
 
 ResolvedExpr ResolveFieldExpr( Expr* expr )
 {
@@ -857,17 +935,18 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
     // TODO Modules
     ResolvedExpr left = ResolveExpr( expr->field.base );
-    Type* baseType = left.type;
+    Type* srcBaseType = left.type;
+    Type* baseType = srcBaseType;
     
     if( !baseType || IsTainted( baseType ) )
         return resolvedNull;
-
     CompleteType( baseType, expr->pos );
 
     if( expr->field.meta )
-        return ResolveMetaFieldExpr( expr, baseType );
+        return ResolveMetaFieldExpr( expr->field.base, expr->field.name, expr->pos );
 
     // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
+    // (is that true though? shouldn't buffers be readonly?)
     if( MatchKeyword( Keyword::Length, expr->field.name ) )
     {
         if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
@@ -886,18 +965,38 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
         return result;
     }
 
-    if( !(baseType->kind == Type::Struct || baseType->kind == Type::Union || baseType->kind == Type::Pointer) )
-    {
-        RSLV_ERROR( expr->pos, "Unknown attribute '%s' in expression of type '%s'", expr->field.name, baseType->name );
-        return resolvedNull;
-    }
-
     // 'Normal' field access of aggregates or pointers to such
     if( baseType->kind == Type::Pointer )
     {
         left = NewResolvedLvalue( baseType->ptr.base );
         baseType = left.type;
         CompleteType( baseType, expr->pos );
+    }
+    else if( baseType->kind == Type::TypeVal )
+    {
+        left = NewResolvedRvalue( baseType->value.type );
+        baseType = left.type;
+        CompleteType( baseType, expr->pos );
+    }
+
+    if( baseType->kind == Type::Enum )
+    {
+        for( EnumItem const& it : baseType->enum_.items )
+        {
+            if( it.name == expr->field.name )
+            {
+                ResolvedExpr resolvedField = it.initExpr->resolvedExpr;
+                return resolvedField;
+            }
+        }
+        RSLV_ERROR( expr->pos, "No item named '%s' in enum type '%s'", expr->field.name, baseType->name );
+        return resolvedNull;
+    }
+
+    if( !(baseType->kind == Type::Struct || baseType->kind == Type::Union) )
+    {
+        RSLV_ERROR( expr->pos, "Unknown attribute '%s' in expression of type '%s'", expr->field.name, srcBaseType->name );
+        return resolvedNull;
     }
 
     for( TypeField const& f : baseType->aggregate.fields )
@@ -909,6 +1008,13 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
                 : NewResolvedRvalue( f.type );
             return resolvedField;
         }
+    }
+
+    if( srcBaseType->kind == Type::TypeVal && srcBaseType->symbol )
+    {
+        // If this is a user type we may be trying to access a subtype
+        Symbol* sym = ResolveName( expr->field.name, expr->pos, srcBaseType->symbol );
+        return NewResolvedRvalue( sym->type );
     }
 
     RSLV_ERROR( expr->pos, "No field named '%s' in type '%s'", expr->field.name, baseType->name );
@@ -986,7 +1092,7 @@ ResolvedExpr EvalConstUnaryExpr( TokenKind::Enum op, ResolvedExpr const& operand
 
             INVALID_DEFAULT_CASE
         }
-        return NewResolvedConst( type, value, pos );
+        return NewResolvedConst( type, value );
     }
     else
     {
@@ -1328,7 +1434,9 @@ ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, Resolved
 
                 if( ptrOperand && intOperand )
                 {
-                    CompleteType( ptrOperand->type, pos );
+                    if( !CompleteType( ptrOperand->type, pos ) )
+                        break;
+
                     // TODO Promote void pointers to b8 ??
 #if 0
                     if( ptrOperand->type->base == voidType )
@@ -1480,7 +1588,7 @@ ResolvedExpr ResolveBinaryExpr( TokenKind::Enum op, char const* opName, Resolved
                     else 
                         result = left->constValue.BoolValue() || right->constValue.BoolValue();
 
-                    return NewResolvedConst( boolType, result, pos );
+                    return NewResolvedConst( boolType, result );
                 }
                 else
                     return NewResolvedRvalue( boolType );
@@ -1516,8 +1624,8 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     ASSERT( expr->kind == Expr::Compound );
     ASSERT( expectedType );
 
-    if( expectedType )
-        CompleteType( expectedType, expr->pos );
+    if( expectedType && !CompleteType( expectedType, expr->pos ) )
+        return resolvedNull;
 
     Type* type = expectedType;
 
@@ -1777,7 +1885,22 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
     }
 }
 
-Type* ResolveTypeSpec( TypeSpec* spec )
+char const* BuildAndInternQualifiedName( Array<char const*> const& names )
+{
+    StringBuilder sb( &globalTmpArena );
+    for( char const* n : names )
+    {
+        if( n != names[0] )
+            sb.AppendString( "." );
+
+        sb.AppendString( n );
+    }
+
+    InternString* internName = Intern( sb.ToString( &globalTmpArena ) );
+    return internName->data;
+}
+
+Type* ResolveTypeSpec( TypeSpec* spec, Symbol* parentSymbol = nullptr )
 {
     Type* result = nullptr;
     SourcePos const& pos = spec->pos;
@@ -1788,15 +1911,12 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         {
             ASSERT( spec->names.count );
 
-            // TODO Resolve namespaces
+            char const* name = spec->names.First();
+            // TODO This should probably just come like this from the parser
             if( spec->names.count > 1 )
-            {
-                RSLV_ERROR( pos, "Namespaces not yet supported" );
-                break;
-            }
+                name = BuildAndInternQualifiedName( spec->names );
 
-            char const* name = spec->names.Last();
-            Symbol* sym = ResolveName( name, pos );
+            Symbol* sym = ResolveName( name, pos, parentSymbol );
             if( !sym )
                 break;
             if( sym->kind != Symbol::Type )
@@ -1809,7 +1929,7 @@ Type* ResolveTypeSpec( TypeSpec* spec )
         } break;
         case TypeSpec::Pointer:
         {
-            Type* base = ResolveTypeSpec( spec->ptr.base );
+            Type* base = ResolveTypeSpec( spec->ptr.base, parentSymbol );
             result = NewPtrType( base );
         } break;
         case TypeSpec::Array:
@@ -1829,7 +1949,7 @@ Type* ResolveTypeSpec( TypeSpec* spec )
                     //return nullptr;
                 }
             }
-            Type* base = ResolveTypeSpec( spec->array.base );
+            Type* base = ResolveTypeSpec( spec->array.base, parentSymbol );
             if( spec->array.isView )
                 result = NewBufferType( base );
             else
@@ -1959,7 +2079,8 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
         {
             ResolvedExpr size = ResolveExpr( expr->sizeofExpr );
             Type* type = size.type;
-            CompleteType( type, expr->pos );
+            if( !CompleteType( type, expr->pos ) )
+                return resolvedNull;
 
             result = NewResolvedConst( intType, TypeSize( type ), expr->pos );
         } break;
@@ -2018,34 +2139,64 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
     return result;
 }
 
-void CompleteStructType( Type* type, Array<TypeField> const& fields )
+void CompleteStructType( Type* type, Array<TypeField>& fields )
 {
+    if( !IsValid( type ) )
+        return;
+
     ASSERT( type->kind == Type::Completing );
     type->kind = Type::Struct;
-    type->aggregate.fields = fields;
-
-    // TODO Alignment, field offsets, etc.
     type->size = 0;
-    for( TypeField const& f : type->aggregate.fields )
+    type->align = 0;
+
+    sz totalFieldsSize = 0;
+    for( TypeField& f : fields )
     {
+        if( !IsValid( f.type ) )
+            continue;
+
         ASSERT( f.type->kind > Type::Completing );
-        type->size += TypeSize( f.type );
+        ASSERT( IsPowerOf2( f.type->align ) );
+
+        // TODO Unnamed aggregate members
+        f.offset = type->size;
+
+        totalFieldsSize += f.type->size;
+        type->align = Max( type->align, f.type->align );
+        type->size = f.type->size + AlignUp( type->size, f.type->align );
     }
+    type->size = AlignUp( type->size, type->align );
+    //type->padding = type->size - totalFieldsSize;
+
+    type->aggregate.fields = fields;
 }
 
-void CompleteUnionType( Type* type, Array<TypeField> const& fields )
+void CompleteUnionType( Type* type, Array<TypeField>& fields )
 {
+    if( !IsValid( type ) )
+        return;
+
     ASSERT( type->kind == Type::Completing );
     type->kind = Type::Union;
-    type->aggregate.fields = fields;
-
-    // TODO Alignment, field offsets, etc.
     type->size = 0;
-    for( TypeField const& f : type->aggregate.fields )
+    type->align = 0;
+    
+    for( TypeField& f : fields )
     {
+        if( !IsValid( f.type ) )
+            continue;
+
         ASSERT( f.type->kind > Type::Completing );
-        type->size = Max( type->size, TypeSize( f.type ) );
+        ASSERT( IsPowerOf2( f.type->align ) );
+
+        // TODO Unnamed aggregate members
+
+        type->size = Max( type->size, f.type->size );
+        type->align = Max( type->align, f.type->align );
     }
+    type->size = AlignUp( type->size, type->align );
+
+    type->aggregate.fields = fields;
 }
 
 int CountAggregateItems( Array<Decl*> const& items )
@@ -2060,58 +2211,199 @@ int CountAggregateItems( Array<Decl*> const& items )
     return result;
 }
 
-void CompleteType( Type* type, SourcePos const& pos )
+bool CompleteType( Type* type, SourcePos const& pos )
 {
-    if( !type )
-        return;
+    if( !type || type->kind == Type::None )
+        return false;
 
     ASSERT( type->kind );
 
     if( type->kind == Type::Completing )
     {
-        // TODO
+        // TODO Better message
         RSLV_ERROR( pos, "Circular dependency detected" );
-        return;
+        type->kind = Type::None;
+        return false;
     }
     else if( type->kind != Type::Incomplete )
     {
         // Nothing to do
-        return;
+        return true;
     }
 
     type->kind = Type::Completing;
     ASSERT( type->symbol && type->symbol->decl );
 
-    // TODO Enums?
     Decl* decl = type->symbol->decl;
-    ASSERT( decl->kind == Decl::Struct || decl->kind == Decl::Union );
-
-    Array<TypeField> fields( &globalArena, CountAggregateItems( decl->aggregate.items ) );
-    for( Decl* d : decl->aggregate.items )
+    if( decl->kind == Decl::Enum )
     {
-        // Only care about variable & const fields
-        if( d->kind == Decl::Var )
-        {
-            Type* fieldType = ResolveTypeSpec( d->var.type );
-            CompleteType( fieldType, d->pos );
+        type->kind = Type::Enum;
 
-            // If there are several names, create a separate field for each one
-            for( char const* name : d->names )
+        Type* valueType = i32Type;
+        if( decl->enum_.type )
+        {
+            valueType = ResolveTypeSpec( decl->enum_.type );
+            CompleteType( valueType, pos );
+        }
+        type->enum_.base = valueType;
+
+        if( valueType == voidType )
+        {
+            RSLV_ERROR( decl->pos, "Cannot declare enum with a void base type" );
+            type->kind = Type::None;
+            return false;
+        }
+
+        // TODO Enum bools?
+        bool isBits = valueType->kind == Type::Bits;
+        bool isInteger = IsIntegerType( valueType );
+        bool isIntegral = IsIntegralType( valueType );
+
+        ConstValue currentValue = {};
+        if( isIntegral )
+        {
+            // TODO 
+#if 0
+            currentValue = ZeroValue( valueType );
+            IncValue( currentValue );
+#endif
+        }
+
+        for( EnumItem const& it : decl->enum_.items )
+        {
+            if( StringsEqualNoCase( it.name, "none" ) )
             {
-                // TODO Offset
-                fields.Push( { name, fieldType } );
+                RSLV_ERROR( it.pos, "'None' item is reserved" );
+                continue;
             }
 
-            d->resolvedType = fieldType;
+            if( !isIntegral && !it.initExpr )
+                RSLV_ERROR( it.pos, "Non integral enum item must be given a value" );
+
+            if( it.initExpr )
+            {
+                // TODO Self-referring items
+                ResolvedExpr init = ResolveExpr( it.initExpr, valueType );
+
+                if( IsValid( init ) )
+                {
+                    if( !ConvertType( &init, valueType ) )
+                        RSLV_ERROR( it.pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'",
+                                    valueType->name, init.type->name );
+
+                    if( IsScalarType( valueType ) )
+                    {
+                        if( !init.isConst )
+                            RSLV_ERROR( it.pos, "Initializer expression for scalar enum item must be constant" );
+                    }
+                    else
+                    {
+                        // TODO Ensure complex type initializer is constant !?
+                        // TODO Do we need to extend ConstValue so it can express a constant of any type including complex ones?
+                        // This can include:
+                        // - arrays (& buffers?)
+                        // - structs & unions
+                        // - functions
+                        // - any! (this would have to ref other constant values?)
+                    }
+                }
+            }
+            else
+            {
+                // TODO Build a syntethic expr containing the const value
+            }
+
+#if 0
+                if( isIntegral )
+                    IncValue( currentValue );
+#endif
         }
+        type->enum_.items = decl->enum_.items;
+    }
+    else
+    {
+        ASSERT( decl->kind == Decl::Struct || decl->kind == Decl::Union );
+        bool isStruct = decl->kind == Decl::Struct;
+
+        bool hasInit = false;
+        // FIXME Need a temporary array here, as we're potentially going to be adding unnamed stuff to this
+        Array<TypeField> fields( &globalArena, CountAggregateItems( decl->aggregate.items ) );
+        int itemIndex = 0;
+        for( Decl* d : decl->aggregate.items )
+        {
+            // Attributes
+            if( d->kind == Decl::Var )
+            {
+                if( !d->var.type )
+                {
+                    RSLV_ERROR( d->pos, "Aggregate field declarations must specify a type" );
+                    continue;
+                }
+
+                Type* fieldType = ResolveTypeSpec( d->var.type, type->symbol );
+
+                if( CompleteType( fieldType, d->pos ) && TypeSize( fieldType ) == 0 )
+                {
+                    if( fieldType->kind == Type::Array )
+                    {
+                        if( isStruct && itemIndex != decl->aggregate.items.count - 1 )
+                            RSLV_ERROR( d->pos, "Zero-sized array can only be declared as the last element of a struct" );
+                    }
+                    else
+                        RSLV_ERROR( d->pos, "Aggregate field of size 0 is not allowed" );
+                }
+
+                Expr* baseInitExpr = d->var.initExpr;
+                if( !isStruct && hasInit && baseInitExpr != nullptr )
+                    RSLV_ERROR( d->pos, "Only one field initializer is allowed in unions" );
+
+                hasInit |= baseInitExpr != nullptr;
+                // If there are several names, create a separate field for each one
+                int i = 0;
+                for( char const* name : d->names )
+                {
+                    Expr* initExpr = baseInitExpr;
+                    ResolvedExpr init = resolvedNull;
+
+                    if( initExpr && initExpr->kind == Expr::Comma )
+                        initExpr = (i < initExpr->commaExprs.count ) ? initExpr->commaExprs[i] : nullptr;
+
+                    if( initExpr )
+                    {
+                        init = ResolveExpr( initExpr, fieldType );
+                        if( IsValid( init ) && !ConvertType( &init, fieldType ) )
+                            RSLV_ERROR( pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'",
+                                        fieldType->name, init.type->name );
+
+                        //fieldType = init.type;
+                    }
+
+                    fields.Push( { name, fieldType, init, 0 } );
+                    i++;
+                }
+
+                // FIXME Use a Multi if there are several names
+                d->resolvedType = fieldType;
+            }
+            else 
+            {
+                // Sub-aggregates have been given their own symbol,
+                // so should resolve through the same dependency-directed process as anything else
+            }
+
+            itemIndex++;
+        }
+        type->aggregate.fields = fields;
+
+        if( isStruct )
+            CompleteStructType( type, fields );
+        else
+            CompleteUnionType( type, fields );
     }
 
-    if( decl->kind == Decl::Struct )
-        CompleteStructType( type, fields );
-    else
-        CompleteUnionType( type, fields );
-
+    // TODO Only if global and root-level?
     globalOrderedSymbols.Push( type->symbol );
+    return true;
 }
 
 
@@ -2252,12 +2544,13 @@ void ResolveSymbol( Symbol* sym )
             if( initExpr )
             {
                 ResolvedExpr init = ResolveExpr( initExpr, result );
-                if( result && init.type && !ConvertType( &init, result ) )
+                if( result && IsValid( init.type ) && !ConvertType( &init, result ) )
                 {
                     // Make an exception for empty-size arrays
                     if( result->kind != Type::Array || result->array.length != 0 )
                     {
-                        RSLV_ERROR( pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'", result->name, init.type->name );
+                        RSLV_ERROR( pos, "No implicit conversion available in initializer expression. Expected '%s', got '%s'",
+                                    result->name, init.type->name );
                     }
                 }
 
@@ -2283,7 +2576,7 @@ void ResolveSymbol( Symbol* sym )
         case Symbol::Type:
         {
             // TODO This would only be for typedefs now, as aggregates start out already resolved
-            INVALID_CODE_PATH
+            NOT_IMPLEMENTED;
         } break;
 
         case Symbol::Func:
@@ -2340,7 +2633,7 @@ INLINE bool IsForeign( Decl* decl )
 }
 
 bool ResolveStmtBlock( StmtList const* block, Type* returnType );
-Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal );
+Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol = nullptr );
 
 void ResolveFuncBody( Symbol* sym )
 {
@@ -2390,12 +2683,52 @@ void CompleteSymbol( Symbol* sym )
         ResolveFuncBody( sym );
 }
 
-Symbol* ResolveName( char const* name, SourcePos const& pos )
+void BuildQualifiedNameTmp( StringBuilder* sb, Symbol* parentSymbol, char const* name )
 {
-    Symbol* sym = GetSymbol( name );
+    if( parentSymbol )
+    {
+        BuildQualifiedNameTmp( sb, parentSymbol->parent, parentSymbol->name );
+        sb->AppendString( "." );
+    }
+
+    sb->AppendString( name );
+}
+
+char const* BuildAndInternQualifiedName( Symbol* parentSymbol, char const* name )
+{
+    StringBuilder sb( &globalTmpArena );
+    BuildQualifiedNameTmp( &sb, parentSymbol, name );
+
+    InternString* internName = Intern( sb.ToString( &globalTmpArena ) );
+    return internName->data;
+}
+
+Symbol* ResolveName( char const* name, SourcePos const& pos, Symbol* parentSymbol /*= nullptr*/ )
+{
+    char const* fullName = name;
+
+    // FIXME Make a fast path for builtin symbols that skips this
+    // FIXME Only do this if the parentSymbol is an aggregate with any defined sub-aggregates
+
+    // If there's a parent symbol, try first prepending its fully qualified name, as that would take precedence
+    if( parentSymbol )
+        fullName = BuildAndInternQualifiedName( parentSymbol, name );
+
+    Symbol* sym = GetSymbol( fullName );
     if( sym )
         ResolveSymbol( sym );
     else
+    {
+        if( parentSymbol )
+        {
+            // Try again with just the name
+            sym = GetSymbol( name );
+            if( sym )
+                ResolveSymbol( sym );
+        }
+    }
+
+    if( !sym )
         RSLV_ERROR( pos, "Undefined symbol '%s'", name );
 
     return sym;
@@ -2422,6 +2755,11 @@ void PopNode()
 bool ResolveStmt( Stmt* stmt, Type* returnType )
 {
     bool returns = false;
+
+    if( ContainsDirective( stmt, Directive::DebugBreak ) ||
+        (stmt->kind == Stmt::Decl && ContainsDirective( stmt->decl, Directive::DebugBreak )) )
+        __debugbreak();
+
     PushNode( stmt );
 
     switch( stmt->kind )
@@ -2641,9 +2979,21 @@ bool ResolveStmtBlock( StmtList const* block, Type* returnType )
     return returns;
 }
 
-Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
+char const* BuildAndInternQualifiedName( char const* prefix, char const* name )
+{
+    StringBuilder sb( &globalTmpArena );
+    sb.Append( "%s.%s", prefix, name );
+
+    InternString* internName = Intern( sb.ToString( &globalTmpArena ) );
+    return internName->data;
+}
+
+Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol /*= nullptr*/ )
 {
     ASSERT( decl->names );
+
+    if( ContainsDirective( decl, Directive::DebugBreak ) )
+        __debugbreak();
 
     Symbol::Kind kind = Symbol::None;
     switch( decl->kind )
@@ -2654,7 +3004,6 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
         case Decl::Func:
             kind = Symbol::Func;
             break;
-        // TODO Don't we need to add all sub-types and contained symbols for these?
         case Decl::Struct:
         case Decl::Union:
         case Decl::Enum:
@@ -2664,29 +3013,46 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal )
         INVALID_DEFAULT_CASE;
     }
 
-    Array<Symbol*> result( &globalTmpArena, decl->names.count );
+    BucketArray<Symbol*> result( &globalTmpArena, decl->names.count );
     for( char const* name : decl->names )
     {
+        if( parentSymbol )
+            name = BuildAndInternQualifiedName( parentSymbol->name, name );
+
         Symbol* sym = PushSymbol( name, isLocal, decl->pos );
         if( sym )
         {
             sym->decl = decl;
             sym->name = name;
             sym->kind = kind;
+            sym->parent = parentSymbol;
             sym->isLocal = isLocal;
             sym->state = Symbol::Unresolved;
 
-            if( decl->kind == Decl::Struct || decl->kind == Decl::Union )
+            if( decl->kind == Decl::Struct || decl->kind == Decl::Union || decl->kind == Decl::Enum )
             {
                 sym->state = Symbol::Resolved;
                 sym->type = NewIncompleteType( name, sym );
+
+                // Add symbols for declared sub-aggregates
+                if( decl->kind != Decl::Enum )
+                {
+                    for( Decl* inner : decl->aggregate.items )
+                    {
+                        if( inner->kind != Decl::Var )
+                        {
+                            Array<Symbol*> innerSymbols = CreateDeclSymbols( inner, isLocal, sym );
+                            result.Append( innerSymbols );
+                        }
+                    }
+                }
             }
 
             result.Push( sym );
         }
     }
 
-    return result;
+    return result.ToArray( &globalTmpArena );
 }
 
 
@@ -2710,12 +3076,10 @@ Symbol* PushGlobalTypeSymbol( char const* name, Type* type )
     sym.state = Symbol::Resolved;
 
     Symbol* result = globalSymbols.Put( name, sym );
-    //globalSymbolsList.Push( result );
-
     return result;
 }
 
-Symbol* PushGlobalConstSymbol( char const* name, Type* type, bool value )
+Symbol* PushGlobalConstSymbol( char const* name, Type* type, u64 bitsValue )
 {
     InternString* internName = Intern( String( name ) );
     // Use interned string for both key and value!
@@ -2726,11 +3090,9 @@ Symbol* PushGlobalConstSymbol( char const* name, Type* type, bool value )
     sym.type = type;
     sym.kind = Symbol::Const;
     sym.state = Symbol::Resolved;
-    sym.constValue.bitsValue = value;
+    sym.constValue.bitsValue = bitsValue;
 
     Symbol* result = globalSymbols.Put( name, sym );
-    //globalSymbolsList.Push( result );
-
     return result;
 }
 
@@ -2749,8 +3111,6 @@ Symbol* PushGlobalFuncSymbol( char const* name, Buffer<FuncArg> args, Buffer<Typ
     sym.state = Symbol::Resolved;
 
     Symbol* result = globalSymbols.Put( name, sym );
-    //globalSymbolsList.Push( result );
-
     return result;
 }
 
@@ -2770,6 +3130,8 @@ void InitResolver( int globalSymbolsCount )
     InitErrorBuffer();
 
     // Push symbols for builtin types
+    // TODO We should have a table for builtins like we do for keywords, mark their name exprs in the parser with an index
+    // into the table so resolving them is trivial
     globalCurrentScopeStart = globalScopeStack.First();
     for( BuiltinType& b : globalBuiltinTypes )
     {
@@ -2782,8 +3144,9 @@ void InitResolver( int globalSymbolsCount )
             PushGlobalTypeSymbol( b.symbolName, &b.type );
     }
 
-    PushGlobalConstSymbol( "true", boolType, true );
-    PushGlobalConstSymbol( "false", boolType, false );
+    PushGlobalConstSymbol( "true", boolType, 1u );
+    PushGlobalConstSymbol( "false", boolType, 0u );
+    PushGlobalConstSymbol( "null", NewPtrType( voidType ), 0u );
 
     // TODO Add varargs of type any
     PushGlobalFuncSymbol( "expect", BUFFER( FuncArg, { boolType } ), {} );

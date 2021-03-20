@@ -315,7 +315,7 @@ IsPowerOf2( u32 value )
 }
 
 INLINE sz
-Align( sz size, sz alignment )
+AlignUp( sz size, sz alignment )
 {
     ASSERT( IsPowerOf2( alignment ) );
     sz result = (size + (alignment - 1)) & ~(alignment - 1);
@@ -323,7 +323,7 @@ Align( sz size, sz alignment )
 }
 
 INLINE void*
-Align( const void* address, sz alignment )
+AlignUp( const void* address, sz alignment )
 {
     ASSERT( IsPowerOf2( alignment ) );
     void* result = (void*)(((sz)address + (alignment - 1)) & ~(alignment - 1));

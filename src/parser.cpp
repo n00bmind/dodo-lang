@@ -2009,7 +2009,7 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
             for( auto& it : decl->enum_.items )
             {
                 INDENT APPEND( "(%s = ", it.name );
-                DebugPrintSExpr( it.initValue, outBuf, maxLen );
+                DebugPrintSExpr( it.initExpr, outBuf, maxLen );
                 APPEND( "),\n" );
             }
             APPEND( ")\n" );

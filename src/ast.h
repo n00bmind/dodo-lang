@@ -1,3 +1,9 @@
+// TODO 
+// TODO Use 32 bit handles instead of pointers for any nodes allocated in the permanent arena
+// TODO Each handle is just an offset from the beginning of the arena (plus maybe some flags) so it can be resolved at any time
+// TODO If we decide to move AST nodes to their own pool, we can simply change it to be the index in the pool, which would be even better
+// TODO (same for Symbols and Types)
+// TODO 
 struct Expr;
 struct TypeSpec;
 
@@ -251,7 +257,7 @@ struct EnumItem
 {
     SourcePos pos;
     char const* name;
-    Expr* initValue;
+    Expr* initExpr;
     u32 index;
 };
 

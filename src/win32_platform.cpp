@@ -5,7 +5,6 @@
 
 
 PlatformAPI globalPlatform;
-const sz PlatformAPI::PointerSize = 8;
 
 internal f64 globalPerfCounterFrequency;
 
