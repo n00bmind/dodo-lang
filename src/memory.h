@@ -42,6 +42,8 @@ struct MemoryParams
     {
         None = 0,
         ClearToZero = 0x1,                  // Zeroed upon allocation
+        // FIXME Remove Temporary flag as that's a property of each allocator/arena
+        // and not something that can be specified freely per allocation
         Temporary = 0x2,              // No guaranteed persistence beyond allocation scope
     };
 

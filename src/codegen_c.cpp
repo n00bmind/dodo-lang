@@ -130,7 +130,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
     switch( type->kind )
     {
         case TypeSpec::Name:
-            // TODO Multiple names
+            // TODO Multiple names (we're composing subtype's names by hand so what's the array for?)
             return Strf( "%s%s%s", type->names[0], *symbolName ? " " : "", symbolName );
         case TypeSpec::Pointer:
             return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
@@ -176,7 +176,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
 char const* BuildQualifiedNameTmp( StmtList* parentBlock, char const* name )
 {
     StringBuilder sb( &globalTmpArena );
-    sb.Append( "%s_%s", parentBlock->globalPath.data, name );
+    sb.AppendFmt( "%s_%s", parentBlock->globalPath.data, name );
     return sb.ToString( &globalTmpArena ).data;
 }
 
@@ -233,7 +233,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         case Expr::Float:
             // TODO Copy the actual token string instead
             Out( Strf( "%f", expr->literal.floatValue ) );
-            if( expectedType->size == 4 )
+            if( expectedType && expectedType->size == 4 )
                 OUTSTR( "f" );
             break;
         case Expr::Str:
@@ -527,19 +527,26 @@ void EmitForwardDecls()
         if( !decl )
             continue;
 
+        char const* symName = sym->name;
+        if( sym->parent )
+        {
+            String cName = String::CloneReplace( symName, ".", "::", &globalTmpArena );
+            symName = cName.data;
+        }
+
         switch( decl->kind )
         {
             case Decl::Struct:
             {
                 OUTSTR( "struct " );
-                Out( sym->name );
+                Out( symName );
                 OUTSTR( ";" );
                 OutNL();
             } break;
             case Decl::Union:
             {
                 OUTSTR( "union " );
-                Out( sym->name );
+                Out( symName );
                 OUTSTR( ";" );
                 OutNL();
             } break;

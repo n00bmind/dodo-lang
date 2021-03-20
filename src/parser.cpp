@@ -921,14 +921,14 @@ void GlobalPathBuilder( StringBuilder* path, StmtList* parent, char const* name 
     }
 
     if( !path->Empty() )
-        path->AppendString( "_" );
+        path->Append( "_" );
 
     if( name )
-        path->AppendString( name );
+        path->Append( name );
     else
     {
         ASSERT( parent );
-        path->Append( "%d", parent->childCount );
+        path->AppendFmt( "%d", parent->childCount );
     }
 }
 

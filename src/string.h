@@ -67,6 +67,52 @@ INLINE void StringCopy( char const* src, char* dst, sz dstSize )
 }
 
 
+struct String;
+
+// String builder to help compose Strings piece by piece
+struct StringBuilder
+{
+    BucketArray<char> buckets;
+    MemoryParams memoryParams;
+
+    // TODO Raise bucket size when we know it works
+    StringBuilder( MemoryArena* arena, MemoryParams params = Temporary() )
+        //: buckets( arena, 32, params )
+        : buckets( arena, 4, params )
+        , memoryParams( params )
+    {}
+
+    bool Empty() const { return buckets.count == 0; }
+
+    void Append( char const* str, int length = 0 )
+    {
+        if( !length )
+            length = StringLength( str );
+
+        // Not including null terminator
+        buckets.Append( str, length );
+    }
+
+    void AppendFmt( char const* fmt, ... )
+    {
+        va_list args;
+        va_start( args, fmt );
+
+        int n = 1 + vsnprintf( nullptr, 0, fmt, args );
+        char* buf = PUSH_STRING( buckets.arena, n, memoryParams );
+
+        // TODO Does this work??
+        vsnprintf( buf, Size( n ), fmt, args );
+        va_end( args );
+
+        // TODO We probably want this struct to be made out of irregular buckets that are allocated exactly of the
+        // length needed for each append (n above) so we don't need this extra copy
+        buckets.Append( buf, n - 1 );
+    }
+
+    String ToString( MemoryArena* arena );
+};
+
 
 // Read only string
 // FIXME Review everything here to make sure we always append a null terminator
@@ -121,6 +167,32 @@ struct String
         src.CopyTo( (char*)result.data, result.length );
 
         return result;
+    }
+
+    // Non overlapping
+    static String CloneReplace( char const* src, char const* match, char const* subst,
+                                MemoryArena* arena )
+    {
+        int matchLen = StringLength( match );
+
+        StringBuilder builder( arena );
+        int index = 0;
+        while( char const* m = strstr( src + index, match ) )
+        {
+            int subLen = I32( m - (src + index) );
+            builder.Append( src + index, subLen );
+            builder.Append( subst );
+
+            index += subLen + matchLen;
+        }
+
+        int srcLen = StringLength( src );
+        ASSERT( index <= srcLen );
+
+        if( index < srcLen )
+            builder.Append( src + index, srcLen - index );
+
+        return builder.ToString( arena );
     }
 
     static String FromFormat( MemoryArena* arena, char const* fmt, va_list args )
@@ -214,6 +286,12 @@ struct String
 };
 
 
+inline String StringBuilder::ToString( MemoryArena* arena )
+{
+    buckets.Append( "\0", 1 );
+    return String::Clone( buckets, arena );
+}
+
 INLINE bool StringsEqual( String const& a, String const& b )
 {
     return a.length == b.length && strncmp( a.data, b.data, Size( a.length ) ) == 0;
@@ -230,49 +308,3 @@ INLINE u64 StringHash( String const& str )
 }
 
 
-// String builder to help compose Strings piece by piece
-struct StringBuilder
-{
-    BucketArray<char> buckets;
-    MemoryParams memoryParams;
-
-    // TODO Raise bucket size when we know it works
-    StringBuilder( MemoryArena* arena, MemoryParams params = Temporary() )
-        : buckets( arena, 16, params )
-        , memoryParams( params )
-    {}
-
-    bool Empty() const { return buckets.count == 0; }
-
-    void AppendString( char const* str, int length = 0 )
-    {
-        if( !length )
-            length = StringLength( str );
-
-        // Not including null terminator
-        buckets.Append( str, length );
-    }
-
-    void Append( char const* fmt, ... )
-    {
-        va_list args;
-        va_start( args, fmt );
-
-        int n = 1 + vsnprintf( nullptr, 0, fmt, args );
-        char* buf = PUSH_STRING( buckets.arena, n, memoryParams );
-
-        // TODO Does this work??
-        vsnprintf( buf, Size( n ), fmt, args );
-        va_end( args );
-
-        // TODO We probably want this struct to be made out of irregular buckets that are allocated exactly of the
-        // length needed for each append (n above) so we don't need this extra copy
-        buckets.Append( buf, n - 1 );
-    }
-
-    String ToString( MemoryArena* arena )
-    {
-        buckets.Append( "\0", 1 );
-        return String::Clone( buckets, arena );
-    }
-};

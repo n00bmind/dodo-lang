@@ -1891,9 +1891,9 @@ char const* BuildAndInternQualifiedName( Array<char const*> const& names )
     for( char const* n : names )
     {
         if( n != names[0] )
-            sb.AppendString( "." );
+            sb.Append( "." );
 
-        sb.AppendString( n );
+        sb.Append( n );
     }
 
     InternString* internName = Intern( sb.ToString( &globalTmpArena ) );
@@ -2688,10 +2688,10 @@ void BuildQualifiedNameTmp( StringBuilder* sb, Symbol* parentSymbol, char const*
     if( parentSymbol )
     {
         BuildQualifiedNameTmp( sb, parentSymbol->parent, parentSymbol->name );
-        sb->AppendString( "." );
+        sb->Append( "." );
     }
 
-    sb->AppendString( name );
+    sb->Append( name );
 }
 
 char const* BuildAndInternQualifiedName( Symbol* parentSymbol, char const* name )
@@ -2982,7 +2982,7 @@ bool ResolveStmtBlock( StmtList const* block, Type* returnType )
 char const* BuildAndInternQualifiedName( char const* prefix, char const* name )
 {
     StringBuilder sb( &globalTmpArena );
-    sb.Append( "%s.%s", prefix, name );
+    sb.AppendFmt( "%s.%s", prefix, name );
 
     InternString* internName = Intern( sb.ToString( &globalTmpArena ) );
     return internName->data;
