@@ -932,8 +932,11 @@ void GenerateAll()
     charToEscape['\b'] = 'b';
     charToEscape['\a'] = 'a';
 
-
+    OUTSTR( "#pragma region Preamble" );
+    OutNL();
     Out( globalPreamble );
+    OUTSTR( "#pragma endregion Preamble" );
+    OutNL();
     OutNL();
 
     OUTSTR( "///// Forward declarations" );
