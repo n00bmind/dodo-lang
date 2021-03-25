@@ -41,8 +41,8 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 
 
 #define SIZEOF(s) Sz( sizeof(s) )
+#define OFFSETOF(type, member) Sz( (uintptr_t)&(((type *)0)->member) )
 #define ARRAYCOUNT(array) Sz( sizeof(array) / sizeof((array)[0]) )
-#define OFFSETOF(type, member) Sz( &(((type *)0)->member) )
 #define STR(s) _STR(s)
 #define _STR(s) #s
 

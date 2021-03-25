@@ -110,7 +110,8 @@ ENUM_STRUCT_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( Length,      "length" ) \
     x( Size,        "size" ) \
     x( Offset,      "offset" ) \
-    x( EnumName,    "enum_name" ) \
+    x( Index,       "index" ) \
+    x( Name,        "name" ) \
 
 ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
 #undef KEYWORDS

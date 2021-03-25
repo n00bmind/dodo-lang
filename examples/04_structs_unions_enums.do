@@ -72,7 +72,7 @@ main :: ()
         byte :b8;
     }
 
-    // Only one of the fields can have a default initializer though
+    // Only one of the fields can have a default initializer
     // Likewise with provided initializers in a declaration
     value: ConstValue = { .real = 3.14 };
 
@@ -105,7 +105,7 @@ main :: ()
 
     // When no type is declared, int is assumed
     tkk :TokenKind;
-    printf( "TokenKind size = %d\n", tkk#size );
+    printf( "TokenKind size = %lld\n", tkk#size );
 
     // They're also initialized according to the same rules as everybody else
     printf( "tkk = %d\n", tkk );
@@ -117,7 +117,7 @@ main :: ()
     //tokeKind = 25;
 
     // Printing the declared name instead of the value of enum members is extremely easy
-    printf( "tkk = '%s'\n", tkk#enum_name );
+    printf( "tkk = '%s'\n", tkk#name );
     // It's easy to iterate over all declared values, which is also true for all aggregate types
     // This is left to the meta-programming example a bit later
 

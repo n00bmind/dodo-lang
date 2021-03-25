@@ -434,7 +434,7 @@ bool Run( int argCount, char const* args[] )
     globalTgtPlatform.PointerSize = 8;
 
 #if !CONFIG_RELEASE
-    RunTests();
+    //RunTests();
     if( globalErrorCount )
     {
         globalPlatform.Error( "Tests found %d errors.", globalErrorCount );

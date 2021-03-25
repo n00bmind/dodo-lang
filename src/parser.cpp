@@ -243,12 +243,12 @@ Expr* NewIndexExpr( SourcePos const& pos, Expr* base, Expr* index )
     return result;
 }
 
-Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name, bool meta )
+Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name, bool isMeta )
 {
     Expr* result = NewExpr( pos, Expr::Field );
     result->field.base = base;
     result->field.name = name;
-    result->field.meta = meta;
+    result->field.isMeta = isMeta;
 
     return result;
 }

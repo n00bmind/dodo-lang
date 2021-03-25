@@ -63,7 +63,10 @@ struct Type
         Bool,
         Bits,
         Int,
-        Enum,       // TODO This is NOT just the scalar enum (non-struct). Expression resolution rn assumes this can only be int or bits!
+        // TODO This is NOT just the scalar enum (non-struct). Expression resolution rn assumes this can only be int or bits!
+        // Also, expression resolution treats this as the underlying value, but we've now moved to store the index instead
+        // Review all use cases
+        Enum,
         Float,
         Pointer,
         Func,
@@ -103,7 +106,7 @@ struct Type
         struct
         {
             // List of the (resolved) items, including None
-            // TODO This should probably just be an array of ConstValue, when that supports complex types
+            // TODO This should probably contain ConstValues instead, when that supports complex types
             ::Array<EnumItem> items;
             Type* base;
         } enum_;
@@ -140,13 +143,17 @@ internal BucketArray<Symbol*> globalOrderedSymbols;
 
 // Local lexical scopes for functions
 internal BucketArray<Symbol> globalScopeStack;
-internal BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
+// TODO Remove?
+//internal BucketArray<Symbol>::Idx<false> globalCurrentScopeStart;
 
 BucketArray<Stmt*> globalNodeStack;
 
 // List of unique interned types (a.k.a hash consing)
 // TODO Hashtable!
 internal BucketArray<Type*> globalCachedTypes;
+
+// Inner decl that will have to be emitted in the global scope in the C codegen
+internal BucketArray<Decl*> globalInnerDecls;
 
 // Builtins
 struct BuiltinType
@@ -877,7 +884,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
 
         case Keyword::Offset:
         {
-            Expr* fieldBase = (base->kind == Expr::Field && !base->field.meta) ? base->field.base : nullptr;
+            Expr* fieldBase = (base->kind == Expr::Field && !base->field.isMeta) ? base->field.base : nullptr;
             Type* fieldBaseType = fieldBase ? fieldBase->resolvedExpr.type : nullptr;
 
             if( fieldBaseType && fieldBaseType->kind == Type::TypeVal )
@@ -912,7 +919,17 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
             }
         } break;
 
-        case Keyword::EnumName:
+        case Keyword::Index:
+        {
+            if( baseType->kind != Type::Enum )
+            {
+                RSLV_ERROR( pos, "'%' attribute is only valid for enum values", name );
+                return resolvedNull;
+            }
+
+            result = NewResolvedRvalue( i32Type );
+        } break;
+        case Keyword::Name:
         {
             if( baseType->kind != Type::Enum )
             {
@@ -942,7 +959,7 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
         return resolvedNull;
     CompleteType( baseType, expr->pos );
 
-    if( expr->field.meta )
+    if( expr->field.isMeta )
         return ResolveMetaFieldExpr( expr->field.base, expr->field.name, expr->pos );
 
     // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
@@ -1014,7 +1031,7 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
     {
         // If this is a user type we may be trying to access a subtype
         Symbol* sym = ResolveName( expr->field.name, expr->pos, srcBaseType->symbol );
-        return NewResolvedRvalue( sym->type );
+        return NewResolvedRvalue( NewTypeValType( sym->type, sym ) );
     }
 
     RSLV_ERROR( expr->pos, "No field named '%s' in type '%s'", expr->field.name, baseType->name );
@@ -2211,6 +2228,79 @@ int CountAggregateItems( Array<Decl*> const& items )
     return result;
 }
 
+ResolvedExpr ZeroValue( Type* type, SourcePos const& pos )
+{
+    switch( type->kind )
+    {
+        case Type::Int:
+        return NewResolvedConst( type, (i64)0, pos );
+        case Type::Bits:
+        return NewResolvedConst( type, 0ull, pos );
+        case Type::Bool:
+        return NewResolvedConst( type, false );
+
+        default:
+        INVALID_CODE_PATH;
+        return resolvedNull;
+    }
+}
+
+void IncValue( ResolvedExpr* value )
+{
+    // TODO Handle overflow
+    switch( value->type->kind )
+    {
+        case Type::Int:
+        case Type::Bool:
+        value->constValue.bitsValue++;
+        break;
+        case Type::Bits:
+        value->constValue.bitsValue = value->constValue.bitsValue
+            ? value->constValue.bitsValue * 2
+            : 1;
+        break;
+
+        default:
+        INVALID_CODE_PATH;
+    }
+}
+
+Expr* NewInitExpr( ResolvedExpr const& value, SourcePos const& pos )
+{
+    Expr* result = NewExpr( pos, Expr::Int );
+    switch( value.type->kind )
+    {
+        case Type::Int:
+        {
+            result->literal.intValue = value.constValue.intValue;
+        } break;
+        case Type::Bits:
+            // TODO 
+            result->literal.modifier = Token::Hexadecimal;
+            // Fallthrough
+        case Type::Bool:
+        {
+            result->literal.intValue = (i64)value.constValue.bitsValue;
+        } break;
+
+        default:
+        INVALID_CODE_PATH;
+    }
+
+    result->resolvedExpr = value;
+    return result;
+}
+
+EnumItem NewEnumItem( SourcePos const& pos, char const* name, Expr* initExpr )
+{
+    EnumItem item = {};
+    item.pos = pos;
+    item.name = name;
+    item.initExpr = initExpr;
+
+    return item;
+}
+
 bool CompleteType( Type* type, SourcePos const& pos )
 {
     if( !type || type->kind == Type::None )
@@ -2238,6 +2328,9 @@ bool CompleteType( Type* type, SourcePos const& pos )
     if( decl->kind == Decl::Enum )
     {
         type->kind = Type::Enum;
+        // Underlying data is just the index
+        type->size = 4;
+        type->align = 4;
 
         Type* valueType = i32Type;
         if( decl->enum_.type )
@@ -2259,15 +2352,16 @@ bool CompleteType( Type* type, SourcePos const& pos )
         bool isInteger = IsIntegerType( valueType );
         bool isIntegral = IsIntegralType( valueType );
 
-        ConstValue currentValue = {};
+        ResolvedExpr currentValue = { nullptr };
         if( isIntegral )
-        {
-            // TODO 
-#if 0
-            currentValue = ZeroValue( valueType );
-            IncValue( currentValue );
-#endif
-        }
+            currentValue = ZeroValue( valueType, decl->pos );
+        Expr* initExpr = NewInitExpr( currentValue, decl->pos );
+
+        INIT( type->enum_.items ) Array<EnumItem>( &globalArena, decl->enum_.items.count + 1 );
+        type->enum_.items.Push( NewEnumItem( decl->pos, "None", initExpr ) );
+
+        if( isIntegral )
+            IncValue( &currentValue );
 
         for( EnumItem const& it : decl->enum_.items )
         {
@@ -2277,13 +2371,14 @@ bool CompleteType( Type* type, SourcePos const& pos )
                 continue;
             }
 
-            if( !isIntegral && !it.initExpr )
+            initExpr = it.initExpr;
+            if( !isIntegral && !initExpr )
                 RSLV_ERROR( it.pos, "Non integral enum item must be given a value" );
 
-            if( it.initExpr )
+            if( initExpr )
             {
                 // TODO Self-referring items
-                ResolvedExpr init = ResolveExpr( it.initExpr, valueType );
+                ResolvedExpr init = ResolveExpr( initExpr, valueType );
 
                 if( IsValid( init ) )
                 {
@@ -2307,18 +2402,16 @@ bool CompleteType( Type* type, SourcePos const& pos )
                         // - any! (this would have to ref other constant values?)
                     }
                 }
+                currentValue = init;
             }
             else
-            {
-                // TODO Build a syntethic expr containing the const value
-            }
+                initExpr = NewInitExpr( currentValue, it.pos );
 
-#if 0
-                if( isIntegral )
-                    IncValue( currentValue );
-#endif
+            type->enum_.items.Push( NewEnumItem( it.pos, it.name, initExpr ) );
+
+            if( isIntegral )
+                IncValue( &currentValue );
         }
-        type->enum_.items = decl->enum_.items;
     }
     else
     {
@@ -2401,8 +2494,11 @@ bool CompleteType( Type* type, SourcePos const& pos )
             CompleteUnionType( type, fields );
     }
 
-    // TODO Only if global and root-level?
-    globalOrderedSymbols.Push( type->symbol );
+    decl->resolvedType = type;
+
+    if( !type->symbol->isLocal )
+        globalOrderedSymbols.Push( type->symbol );
+
     return true;
 }
 
@@ -2775,6 +2871,9 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
             Array<Symbol*> symbols = CreateDeclSymbols( stmt->decl, true );
             for( Symbol* sym : symbols )
                 CompleteSymbol( sym );
+
+            if( stmt->decl->kind == Decl::Enum )
+                globalInnerDecls.Push( stmt->decl );
         } break;
         case Stmt::Assign:
         {
@@ -3116,7 +3215,17 @@ Symbol* PushGlobalFuncSymbol( char const* name, Buffer<FuncArg> args, Buffer<Typ
 
 void InitResolver( int globalSymbolsCount )
 {
+    // NOTE These store the symbols
+    // We want to make the global symbols hashtable be a fixed size so we count how many total symbols there are
+    const int builtinConstsAndFuncs = 4;
+    INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,
+        globalSymbolsCount + I32( ARRAYCOUNT(globalBuiltinTypes) ) + builtinConstsAndFuncs, HTF_FixedSize );
+
     INIT( globalScopeStack ) BucketArray<Symbol>( &globalArena, 1024 );
+    // TODO This is not used ??
+    //globalCurrentScopeStart = globalScopeStack.First();
+
+    // These refer to symbols in one of the previous tables
     INIT( globalSymbolsList ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalOrderedSymbols ) BucketArray<Symbol*>( &globalArena, 256 );
     INIT( globalNodeStack ) BucketArray<Stmt*>( &globalArena, 16 );
@@ -3124,15 +3233,13 @@ void InitResolver( int globalSymbolsCount )
     // TODO Make a generic type comparator so we can turn this into a hashtable
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
-    INIT( globalSymbols ) Hashtable<char const*, Symbol, MemoryArena>( &globalArena,
-        globalSymbolsCount + I32( ARRAYCOUNT(globalBuiltinTypes) ), HTF_FixedSize );
+    INIT( globalInnerDecls ) BucketArray<Decl*>( &globalArena, 16 );
 
     InitErrorBuffer();
 
     // Push symbols for builtin types
     // TODO We should have a table for builtins like we do for keywords, mark their name exprs in the parser with an index
     // into the table so resolving them is trivial
-    globalCurrentScopeStart = globalScopeStack.First();
     for( BuiltinType& b : globalBuiltinTypes )
     {
         if( IsNullOrEmpty( b.symbolName ) )

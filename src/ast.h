@@ -161,7 +161,7 @@ struct Expr
         {
             Expr* base;
             char const* name;
-            bool meta;
+            bool isMeta;
         } field;
         Array<CompoundField> compoundFields;
         struct
@@ -258,7 +258,6 @@ struct EnumItem
     SourcePos pos;
     char const* name;
     Expr* initExpr;
-    u32 index;
 };
 
 struct Decl : public Node

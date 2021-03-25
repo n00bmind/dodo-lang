@@ -64,6 +64,24 @@ internal void EmitPos( SourcePos const& pos )
     }
 }
 
+char const* BuildQualifiedNameTmp( StmtList* parentBlock, char const* name )
+{
+    StringBuilder sb( &globalTmpArena );
+    sb.AppendFmt( "%s_%s", parentBlock->globalPath.data, name );
+    return sb.ToString( &globalTmpArena ).data;
+}
+
+// NOTE Only uses first name in decl
+char const* BuildQualifiedNameTmp( Decl* decl )
+{
+    char const* name = decl->names[0];
+    // Do we actually need to qualify the name?
+    if( decl->parentBlock )
+        name = BuildQualifiedNameTmp( decl->parentBlock, name );
+
+    return name;
+}
+
 char const* CdeclType( Type* type )
 {
     switch( type->kind )
@@ -72,14 +90,58 @@ char const* CdeclType( Type* type )
             return "void";
         case Type::Bool:
             return "bool";
+        case Type::Bits:
+        {
+            switch( type->size )
+            {
+                case 1:
+                return "b8";
+                case 2:
+                return "b16";
+                case 4:
+                return "b32";
+                case 8:
+                return "b64";
+                INVALID_DEFAULT_CASE;
+            }
+        } break;
         case Type::Int:
-            return "int";
+        {
+            switch( type->size )
+            {
+                case 1:
+                return "i8";
+                case 2:
+                return "i16";
+                case 4:
+                return "i32";
+                case 8:
+                return "i64";
+                INVALID_DEFAULT_CASE;
+            }
+        } break;
         case Type::Float:
-            return "float";
-        case Type::Enum:
+        {
+            switch( type->size )
+            {
+                case 4:
+                return "f32";
+                case 8:
+                return "f64";
+                INVALID_DEFAULT_CASE;
+            }
+        } break;
         case Type::Struct:
         case Type::Union:
-            return type->symbol->name;
+        {
+            String cName = String::CloneReplace( type->symbol->name, ".", "::", &globalTmpArena );
+            return cName.data;
+        }
+        case Type::Enum:
+        {
+            Decl* enumDecl = type->symbol->decl;
+            return BuildQualifiedNameTmp( enumDecl );
+        } break;
 
         INVALID_DEFAULT_CASE;
     }
@@ -93,24 +155,28 @@ char* OptParen( char* str, bool b )
 
 char* TypeToCdecl( Type* type, char const* symbolName )
 {
+    ASSERT( symbolName );
+    bool haveSymbol = *symbolName != 0;
+
     switch( type->kind )
     {
         case Type::Void:
         case Type::Bool:
+        case Type::Bits:
         case Type::Int:
         case Type::Float:
-        case Type::Enum:
         case Type::Struct:
         case Type::Union:
-            return Strf( "%s%s%s", CdeclType( type ), *symbolName ? " " : "", symbolName );
+        case Type::Enum:
+            return Strf( "%s%s%s", CdeclType( type ), haveSymbol ? " " : "", symbolName );
         case Type::Pointer:
-            return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
+            return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), haveSymbol ) );
         case Type::Array:
-            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.length ), !IsNullOrEmpty( symbolName ) ) );
+            return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.length ), haveSymbol ) );
         case Type::Func:
         {
             char* result = nullptr;
-            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
+            result = Strf( "%s(", OptParen( Strf( "*%s", symbolName ), haveSymbol ) );
             for( FuncArg& arg : type->func.args )
                 result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeToCdecl( arg.type, "" ) );
 
@@ -125,20 +191,31 @@ char* TypeToCdecl( Type* type, char const* symbolName )
 
 void EmitExpr( Expr* expr, Type* expectedType = nullptr, StmtList* parentBlock = nullptr );
 
-char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
+char const* NamesToCType( Array<char const*> const& names, int index = 0 )
 {
+    if( index >= names.count )
+        return nullptr;
+
+    char const* rhs = NamesToCType( names, index + 1 );
+    return Strf( "%s%s%s", names[index], rhs ? "::" : "", rhs ? rhs : "" );
+}
+
+char const* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
+{
+    ASSERT( symbolName );
+    bool haveSymbol = *symbolName != 0;
+
     switch( type->kind )
     {
         case TypeSpec::Name:
-            // TODO Multiple names (we're composing subtype's names by hand so what's the array for?)
-            return Strf( "%s%s%s", type->names[0], *symbolName ? " " : "", symbolName );
+            return Strf( "%s%s%s", NamesToCType( type->names ), haveSymbol ? " " : "", symbolName );
         case TypeSpec::Pointer:
-            return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), !IsNullOrEmpty( symbolName ) ) );
+            return TypeSpecToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), haveSymbol ) );
         case TypeSpec::Array:
         {
             if( type->array.isView )
             {
-                return Strf( "buffer<%s>%s%s", TypeSpecToCdecl( type->array.base, "" ), *symbolName ? " " : "", symbolName );
+                return Strf( "buffer<%s>%s%s", TypeSpecToCdecl( type->array.base, "" ), haveSymbol ? " " : "", symbolName );
             }
 
             char* countStr = "";
@@ -153,7 +230,7 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
                 ASSERT( globalTmpArena.base == startBase );
                 outArena = &globalOutArena;
             }
-            char* result = TypeSpecToCdecl( type->array.base, OptParen( Strf( "%s[%s]", symbolName, countStr ), !IsNullOrEmpty( symbolName ) ) );
+            char const* result = TypeSpecToCdecl( type->array.base, OptParen( Strf( "%s[%s]", symbolName, countStr ), !IsNullOrEmpty( symbolName ) ) );
             return result;
         } break;
         case TypeSpec::Func:
@@ -171,13 +248,6 @@ char* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
         INVALID_DEFAULT_CASE;
     }
     return nullptr;
-}
-
-char const* BuildQualifiedNameTmp( StmtList* parentBlock, char const* name )
-{
-    StringBuilder sb( &globalTmpArena );
-    sb.AppendFmt( "%s_%s", parentBlock->globalPath.data, name );
-    return sb.ToString( &globalTmpArena ).data;
 }
 
 internal char charToEscape[256];
@@ -223,6 +293,55 @@ void EmitStringLiteral( String const& str, bool isChar )
         OUTSTR( "\"" );
 }
 
+bool EmitMetaExpr( Expr* base, char const* name )
+{
+    // TODO We could associate the keyword/directive index with each entry while interning them too
+    int index = -1, i = 0;
+    for( char const* k : globalKeywords )
+    {
+        if( k == name )
+        {
+            index = i;
+            break;
+        }
+        i++;
+    }
+    ASSERT( index >= 0 );
+
+    switch( index )
+    {
+        case Keyword::Size:
+            OUTSTR( "SIZEOF( " );
+            EmitExpr( base );
+            OUTSTR( " )" );
+            break;
+        case Keyword::Offset:
+        {
+            ASSERT( base->kind == Expr::Field );
+            name = base->field.name;
+            base = base->field.base;
+
+            OUTSTR( "OFFSETOF( " );
+            EmitExpr( base );
+            OUTSTR( ", " );
+            Out( name );
+            OUTSTR( " )" );
+        } break;
+        case Keyword::Name:
+        {
+            EmitExpr( base );
+            OUTSTR( ".name()" );
+        } break;
+
+        // Use default behaviour for fields
+        case Keyword::Index:
+        default:
+            return false;
+    }
+
+    return true;
+}
+
 void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlock /*= nullptr*/ )
 {
     switch( expr->kind )
@@ -243,7 +362,9 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         } break;
         case Expr::Name:
         {
+            char const* name = expr->name.ident;
             Type* nameType = expr->resolvedExpr.type;
+
             if( expectedType && expectedType->kind == Type::Buffer && nameType->kind == Type::Array )
             {
                 OUTSTR( "{ " );
@@ -257,13 +378,25 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 Symbol* sym = expr->name.symbol;
                 Decl* funcDecl = sym->decl;
 
-                char const* name = expr->name.ident;
                 if( funcDecl && funcDecl->parentBlock && !IsForeign( funcDecl ) )
                     name = BuildQualifiedNameTmp( funcDecl->parentBlock, expr->name.ident );
                 Out( name );
             }
+            else if( nameType->kind == Type::TypeVal && nameType->value.type->kind == Type::Enum )
+            {
+                Symbol* sym = expr->name.symbol;
+                Decl* enumDecl = sym->decl;
+
+                name = BuildQualifiedNameTmp( enumDecl );
+                Out( name );
+            }
             else
-                Out( expr->name.ident );
+            {
+                if( name == Intern( String( "null" ) )->data )
+                    name = "nullptr";
+
+                Out( name );
+            }
         } break;
         case Expr::Cast:
             OUTSTR( "(" );
@@ -299,7 +432,8 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 // Make a copy so we don't modify the resolved type while converting
                 ResolvedExpr givenExpr = argExpr->resolvedExpr;
 
-                if( !ConvertType( &givenExpr, wantedType ) )
+                ResolvedExpr cnvtExpr = givenExpr;
+                if( !ConvertType( &cnvtExpr, wantedType ) )
                 {
                     ASSERT( wantedArg.isVararg );
                     wantedIndex++;
@@ -307,10 +441,16 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 }
 
                 // Convert strings inside foreign function calls
+                // TODO All this shit we're only doing because of printf, so make a better print function
                 if( isForeign )
                 {
-                    if( argExpr->resolvedExpr.type == stringType && !argExpr->resolvedExpr.isConst )
+                    if( givenExpr.type == stringType && !givenExpr.isConst )
                         OUTSTR( "(char const*)" );
+                    else if( givenExpr.type->kind == Type::Enum )
+                    {
+                        Type* valueType = givenExpr.type->enum_.base;
+                        OUTSTR( "(" ); Out( TypeToCdecl( valueType, "" ) ); OUTSTR( ")" );
+                    }
                 }
 
                 EmitExpr( argExpr, wantedType );
@@ -330,10 +470,21 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             OUTSTR( "]" );
             break;
         case Expr::Field:
-            EmitExpr( expr->field.base );
-            OUTSTR( "." );
+        {
+            if( expr->field.isMeta && EmitMetaExpr( expr->field.base, expr->field.name ) )
+                break;
+
+            Expr* base = expr->field.base;
+            EmitExpr( base );
+
+            bool isType = base->resolvedExpr.type->kind == Type::TypeVal;
+            if( isType )
+                OUTSTR( "::" );
+            else
+                OUTSTR( "." );
+
             Out( expr->field.name );
-            break;
+        } break;
         case Expr::Compound:
         {
             // Check if we need an inplace conversion to buffer
@@ -480,17 +631,6 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
     }
 }
 
-// NOTE Only uses first name in decl
-char const* BuildQualifiedNameTmp( Decl* decl )
-{
-    char const* name = decl->names[0];
-    // Do we actually need to qualify the name?
-    if( decl->parentBlock )
-        name = BuildQualifiedNameTmp( decl->parentBlock, name );
-
-    return name;
-}
-
 void EmitFuncDecl( Decl* decl )
 {
     ASSERT( decl->kind == Decl::Func );
@@ -518,45 +658,9 @@ void EmitFuncDecl( Decl* decl )
     OUTSTR( ")" );
 }
 
-void EmitForwardDecls()
-{
-    for( auto idx = globalOrderedSymbols.First(); idx; ++idx )
-    {
-        Symbol const* sym = *idx;
-        Decl* decl = sym->decl;
-        if( !decl )
-            continue;
-
-        char const* symName = sym->name;
-        if( sym->parent )
-        {
-            String cName = String::CloneReplace( symName, ".", "::", &globalTmpArena );
-            symName = cName.data;
-        }
-
-        switch( decl->kind )
-        {
-            case Decl::Struct:
-            {
-                OUTSTR( "struct " );
-                Out( symName );
-                OUTSTR( ";" );
-                OutNL();
-            } break;
-            case Decl::Union:
-            {
-                OUTSTR( "union " );
-                Out( symName );
-                OUTSTR( ";" );
-                OutNL();
-            } break;
-        }
-    }
-}
-
 void EmitStmtBlock( StmtList const* block );
 
-void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested )
+void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested, bool init = true )
 {
     Type* resolvedType = decl->resolvedType; 
 
@@ -569,33 +673,60 @@ void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested )
             //OUTSTR( "const " );
     }
 
-    TypeSpec* typeSpec = decl->var.type;
-    if( typeSpec )
-        Out( TypeSpecToCdecl( typeSpec, name ) );
-    else
+    //TypeSpec* typeSpec = decl->var.type;
+    //if( typeSpec )
+        //Out( TypeSpecToCdecl( typeSpec, name ) );
+    //else
         Out( TypeToCdecl( resolvedType, name ) );
 
-    OUTSTR( " = " );
-
-    Expr* initExpr = decl->var.initExpr;
-    if( initExpr && initExpr->kind == Expr::Comma )
-        initExpr = exprIndex < initExpr->commaExprs.count ? initExpr->commaExprs[exprIndex] : nullptr;
-
-    if( initExpr )
+    if( init )
     {
-        if( resolvedType == boolType && initExpr->resolvedExpr.type != boolType )
-            OUTSTR( "(bool)" );
-        EmitExpr( initExpr, resolvedType );
+        Expr* initExpr = decl->var.initExpr;
+
+        if( initExpr && resolvedType->kind == Type::Union )
+        {
+            OUTSTR( "; " );
+
+            // TODO Should probably clear out the whole thing (largest field) first
+            ASSERT( initExpr->kind == Expr::Compound && initExpr->compoundFields.count == 1 );
+            CompoundField const& field = initExpr->compoundFields[0];
+            ASSERT( field.kind == CompoundField::Name );
+
+            Out( name );
+            OUTSTR( "." );
+            Out( field.name );
+
+            initExpr = field.initValue;
+            // Find out which type is the actual field we're initializing
+            for( TypeField const& f : resolvedType->aggregate.fields )
+            {
+                if( f.name == field.name )
+                    resolvedType = f.type;
+            }
+        }
+
+        OUTSTR( " = " );
+
+        if( initExpr && initExpr->kind == Expr::Comma )
+            initExpr = exprIndex < initExpr->commaExprs.count ? initExpr->commaExprs[exprIndex] : nullptr;
+
+        if( initExpr )
+        {
+            if( resolvedType == boolType && initExpr->resolvedExpr.type != boolType )
+                OUTSTR( "(bool)" );
+
+            EmitExpr( initExpr, resolvedType );
+        }
+        else
+            OUTSTR( "{}" );
     }
-    else
-        OUTSTR( "{}" );
 
     OUTSTR( ";" );
     OutNL();
 }
 
 // TODO Remove 'nested' and link nodes to parent nodes so we have that info available here
-void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
+void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false, bool init = true )
 {
     if( decl->flags & Node::SkipCodegen )
         return;
@@ -614,7 +745,7 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
                 int i = 0;
                 for( char const* name : decl->names )
                 {
-                    EmitVarDecl( decl, name, i, nested );
+                    EmitVarDecl( decl, name, i, nested, init );
                     i++;
                 }
             }
@@ -625,29 +756,115 @@ void EmitDecl( Decl* decl, Symbol* symbol = nullptr, bool nested = false )
                 ASSERT( name );
 
                 int index = I32( name - decl->names.begin() );
-                EmitVarDecl( decl, symbol->name, index, nested );
+                EmitVarDecl( decl, symbol->name, index, nested, init );
             }
         } break;
         case Decl::Struct:
         case Decl::Union:
         {
             OutIndent();
-            if( decl->kind == Decl::Struct )
+            bool isStruct = decl->kind == Decl::Struct;
+            if( isStruct )
                 OUTSTR( "struct " );
             else
                 OUTSTR( "union " );
             Out( decl->names[0] );
             OutNL();
+            OutIndent();
             OUTSTR( "{" );
             OutNL();
 
             globalIndent++;
+
+            Decl* initField = nullptr;
+            // If this is a union, find out which single member to initialize
+            if( !isStruct )
+            {
+                sz maxFieldSize = 0;
+                Decl* largestField = nullptr;
+                for( Decl* field : decl->aggregate.items )
+                {
+                    if( field->kind != Decl::Var )
+                        continue;
+
+                    if( field->var.initExpr )
+                    {
+                        initField = field;
+                        break;
+                    }
+
+                    sz fieldSize = field->resolvedType->size;
+                    if( fieldSize > maxFieldSize )
+                    {
+                        maxFieldSize = fieldSize;
+                        largestField = field;
+                    }
+                }
+
+                if( !initField )
+                    initField = largestField;
+            }
+
             for( Decl* field : decl->aggregate.items )
             {
-                EmitDecl( field, nullptr, true );
+                EmitDecl( field, nullptr, true, isStruct || field == initField );
             }
+
             globalIndent--;
+            OutIndent();
             OUTSTR( "};" );
+            OutNL();
+        } break;
+
+        case Decl::Enum:
+        {
+            // TODO Have a quick check in Godbolt how this code compares against the ENUM_STRUCT for the typical ops
+
+            Type* type = decl->resolvedType;
+            Type* baseType = type->enum_.base;
+
+            char const* typeName = BuildQualifiedNameTmp( decl );
+            char const* baseTypeName = TypeToCdecl( baseType, "" );
+
+            OutIndent(); OUTSTR( "struct " ); Out( typeName ); OutNL();
+            OutIndent(); OUTSTR( "{" ); OutNL();
+
+            globalIndent++;
+
+            OutIndent(); Out( TypeToCdecl( i32Type, "index" ) ); OUTSTR( ";" ); OutNL();
+            OutNL();
+            OutIndent(); OUTSTR( "INLINE char const* name() const { return names[index]; }" ); OutNL();
+            OutIndent(); OUTSTR( "INLINE " ); Out( baseTypeName ); OUTSTR( " const& value() const { return values[index]; }" ); OutNL();
+            OutIndent(); OUTSTR( "INLINE operator " ); Out( baseTypeName ); OUTSTR( " const& () const { return value(); }" ); OutNL();
+            OutNL();
+            // TODO These should be Strings
+            OutIndent(); OUTSTR( "static constexpr char const* const names[] = { " );
+            for( EnumItem const& it : type->enum_.items )
+            {
+                OUTSTR( "\"" ); Out( it.name ); OUTSTR( "\", " );
+            }
+            OUTSTR( "};" ); OutNL();
+            OutIndent(); OUTSTR( "static constexpr " ); Out( baseTypeName ); OUTSTR( " const values[] = { " );
+            for( EnumItem const& it : type->enum_.items )
+            {
+                EmitExpr( it.initExpr ); OUTSTR( ", " );
+            }
+            OUTSTR( "};" ); OutNL();
+
+            for( EnumItem const& it : type->enum_.items )
+            {
+                OutIndent(); OUTSTR( "static " ); Out( typeName ); OUTSTR( " const " ); Out( it.name ); OUTSTR( ";" ); OutNL();
+            }
+
+            globalIndent--;
+            OUTSTR( "};" ); OutNL();
+
+            int index = 0;
+            for( EnumItem const& it : type->enum_.items )
+            {
+                OutIndent(); OUTSTR( "constexpr " ); Out( typeName ); OUTSTR( " const " ); Out( typeName ); OUTSTR( "::" ); Out( it.name );
+                OUTSTR( " = {" ); Out( Strf( "%d", index++ ) ); OUTSTR( "};" ); OutNL();
+            }
             OutNL();
         } break;
 
@@ -703,7 +920,9 @@ void EmitStmt( Stmt* stmt )
             OUTSTR( ";" );
             break;
         case Stmt::Decl:
-            EmitDecl( stmt->decl, nullptr, true );
+            // Enums must be emitted in the global scope
+            if( stmt->decl->kind != Decl::Enum )
+                EmitDecl( stmt->decl, nullptr, true );
             break;
         case Stmt::Assign:
         {
@@ -866,6 +1085,42 @@ void EmitStmtBlock( StmtList const* block )
     OutNL();
 }
 
+void EmitForwardDecls()
+{
+    for( auto idx = globalOrderedSymbols.First(); idx; ++idx )
+    {
+        Symbol const* sym = *idx;
+        Decl* decl = sym->decl;
+        if( !decl )
+            continue;
+
+        char const* symName = sym->name;
+        if( sym->parent )
+        {
+            String cName = String::CloneReplace( symName, ".", "::", &globalTmpArena );
+            symName = cName.data;
+        }
+
+        switch( decl->kind )
+        {
+            case Decl::Struct:
+            {
+                OUTSTR( "struct " );
+                Out( symName );
+                OUTSTR( ";" );
+                OutNL();
+            } break;
+            case Decl::Union:
+            {
+                OUTSTR( "union " );
+                Out( symName );
+                OUTSTR( ";" );
+                OutNL();
+            } break;
+        }
+    }
+}
+
 void EmitOrderedSymbols()
 {
     for( auto idx = globalOrderedSymbols.First(); idx; ++idx )
@@ -893,6 +1148,16 @@ void EmitOrderedSymbols()
         EmitFuncDecl( decl );
         OutNL();
         EmitStmtBlock( decl->func.body );
+        OutNL();
+    }
+}
+
+void EmitInnerDecls()
+{
+    for( auto idx = globalInnerDecls.First(); idx; ++idx )
+    {
+        Decl* decl = *idx;
+        EmitDecl( decl, nullptr, true );
         OutNL();
     }
 }
@@ -942,6 +1207,10 @@ void GenerateAll()
     OUTSTR( "///// Forward declarations" );
     OutNL();
     EmitForwardDecls();
+    OutNL();
+    OUTSTR( "///// Inner declarations" );
+    OutNL();
+    EmitInnerDecls();
     OutNL();
     OUTSTR( "///// Ordered declarations" );
     OutNL();

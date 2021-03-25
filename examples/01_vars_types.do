@@ -28,7 +28,7 @@ main :: ()
     // TODO Use a flag to mark which ones are null terminated and which arent?
 
     // Constants use a second : instead of =
-    // They're actual compile-time constexprs, so they don't take any space
+    // They're actual compile-time constexprs
     pi :: 3.1415926;
     // TODO How to show maximum precision here?
     printf( "pi = %f\n", pi );

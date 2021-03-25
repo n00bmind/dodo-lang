@@ -4,7 +4,9 @@ R"~~~(#include <stdio.h>
 #include <string.h>
 
 #define ARGS(...) __VA_ARGS__  
-#define ARRAYCOUNT(array) I32( sizeof(array) / sizeof((array)[0]) )
+#define SIZEOF(s) Sz( sizeof(s) )
+#define OFFSETOF(type, member) Sz( (uintptr_t)&(((type *)0)->member) )
+#define ARRAYCOUNT(array) Sz( sizeof(array) / sizeof((array)[0]) )
 
 #if _MSC_VER
 #define INLINE __forceinline
