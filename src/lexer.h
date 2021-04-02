@@ -77,7 +77,6 @@ struct TokenKindValue
     \
     x(Name,             "identifier",   ( "IDN", 0 )) \
     x(Keyword,          "keyword",      ( "KWD", 0 )) \
-    x(Directive,        "directive",    ( "DIR", 0 )) \
     x(StringLiteral,    "string",       ( "STR", 0 )) \
     x(IntLiteral,       "integer",      ( "INT", 0 )) \
     x(FloatLiteral,     "float",        ( "FLT", 0 )) \
@@ -107,15 +106,21 @@ ENUM_STRUCT_WITH_NAMES_VALUES(TokenKind, TokenKindValue, TOKENS)
     x( Continue,    "continue" ) \
     x( Return,      "return" ) \
     x( In,          "in" ) \
+
+ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
+#undef KEYWORDS
+
+#define META(x) \
     x( Length,      "length" ) \
     x( Size,        "size" ) \
     x( Offset,      "offset" ) \
     x( Index,       "index" ) \
     x( Name,        "name" ) \
 
-ENUM_STRUCT_WITH_NAMES(Keyword, KEYWORDS)
-#undef KEYWORDS
+ENUM_STRUCT_WITH_NAMES(MetaAttr, META)
+#undef META
 
+extern char const* globalMetaAttrs[MetaAttr::itemCount];
 
 struct DirectiveInfo
 {
@@ -152,7 +157,7 @@ struct Token
     };
 
     SourcePos pos;
-    String text;
+    String text;            // NOTE Not null terminated
     TokenKind::Enum kind; 
 
     union
@@ -172,7 +177,9 @@ struct Token
         , mod(None)
     {}
 
-    bool HasFlag( TokenFlags f )
+    char const* Text() const;
+
+    bool HasFlag( TokenFlags f ) const
     {
         return (TokenKind::items[ kind ].value.flags & (u32)f) != 0;
     }
@@ -184,7 +191,8 @@ struct InternString
     {
         None = 0,
         Keyword = 0x1,
-        Directive = 0x2,
+        MetaAttr = 0x2,
+        Directive = 0x4,
     };
     
     char const* data;

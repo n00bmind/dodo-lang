@@ -222,9 +222,11 @@ IsInitialized( const MemoryArena& arena )
 inline void *
 _PushSize( MemoryArena *arena, sz size, sz minAlignment, MemoryParams params = DefaultMemoryParams() )
 {
+#if 0
     if( !(params.flags & MemoryParams::Temporary) )
         // Need to pass temp memory flag if the arena has an ongoing temp memory block
         ASSERT( arena->tempCount == 0 );
+#endif
 
     void* block = arena->base + arena->used;
     void* result = block;

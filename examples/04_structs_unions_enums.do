@@ -105,15 +105,17 @@ main :: ()
 
     // When no type is declared, int is assumed
     tkk :TokenKind;
+    // Right now, an enum type just stores the index
     printf( "TokenKind size = %lld\n", tkk#size );
 
     // They're also initialized according to the same rules as everybody else
     printf( "tkk = %d\n", tkk );
     // Access to members is of course qualified with a dot
     tkk = TokenKind.String;
+    // They implicitly convert to their underlying value type
     printf( "tkk = %d\n", tkk );
-    // They implicitly convert to/from their underlying value type
-    // TODO Do we want to optionally enforce at debug-time all values to belong to the declared set?
+    // TODO Do we want to allow a (checked) conversion _from_ the value type or index?
+    // How would we revert to the implicit None value when trying to store and out of bounds index?
     //tokeKind = 25;
 
     // Printing the declared name instead of the value of enum members is extremely easy

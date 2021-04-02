@@ -200,6 +200,32 @@ char const* NamesToCType( Array<char const*> const& names, int index = 0 )
     return Strf( "%s%s%s", names[index], rhs ? "::" : "", rhs ? rhs : "" );
 }
 
+char const* TypeSpecToCdecl( TypeSpec* type, char const* symbolName );
+
+// TODO Test!
+char const* ReturnTypeSpecToCdecl( TypeSpec* funcType, char const* funcCdecl )
+{
+    ASSERT( funcType->kind == TypeSpec::Func );
+
+    char const* result = nullptr;
+    Array<TypeSpec*> const& types = funcType->func.returnTypes;
+
+    if( types )
+    {
+        if( types.count == 1 )
+            result = TypeSpecToCdecl( types[0], funcCdecl );
+        else
+        {
+            // TODO Create a new type using the function's name and line and the types returned
+            NOT_IMPLEMENTED;
+        }
+    }
+    else
+        result = Strf( "void %s", funcCdecl );
+
+    return result;
+}
+
 char const* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
 {
     ASSERT( symbolName );
@@ -242,7 +268,7 @@ char const* TypeSpecToCdecl( TypeSpec* type, char const* symbolName )
                 result = Strf( "%s%s%s", result, &arg == type->func.args.begin() ? "" : ", ", TypeSpecToCdecl( arg.type, "" ) );
 
             result = Strf( "%s)", result );
-            return TypeSpecToCdecl( type->func.returnType, result );
+            return ReturnTypeSpecToCdecl( type, result );
         } break;
 
         INVALID_DEFAULT_CASE;
@@ -295,27 +321,17 @@ void EmitStringLiteral( String const& str, bool isChar )
 
 bool EmitMetaExpr( Expr* base, char const* name )
 {
-    // TODO We could associate the keyword/directive index with each entry while interning them too
-    int index = -1, i = 0;
-    for( char const* k : globalKeywords )
-    {
-        if( k == name )
-        {
-            index = i;
-            break;
-        }
-        i++;
-    }
+    int index = FindMetaAttr( name );
     ASSERT( index >= 0 );
 
     switch( index )
     {
-        case Keyword::Size:
+        case MetaAttr::Size:
             OUTSTR( "SIZEOF( " );
             EmitExpr( base );
             OUTSTR( " )" );
             break;
-        case Keyword::Offset:
+        case MetaAttr::Offset:
         {
             ASSERT( base->kind == Expr::Field );
             name = base->field.name;
@@ -327,14 +343,14 @@ bool EmitMetaExpr( Expr* base, char const* name )
             Out( name );
             OUTSTR( " )" );
         } break;
-        case Keyword::Name:
+        case MetaAttr::Name:
         {
             EmitExpr( base );
             OUTSTR( ".name()" );
         } break;
 
         // Use default behaviour for fields
-        case Keyword::Index:
+        case MetaAttr::Index:
         default:
             return false;
     }
@@ -418,8 +434,9 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
 
             int givenIndex = 0, wantedIndex = 0;
             Array<FuncArg> const& wantedArgs = funcType->func.args;
-            Array<Expr*> const& givenArgs = expr->call.args;
+            Array<ArgExpr> const& givenArgs = expr->call.args;
 
+            // TODO Named args
             while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
             {
                 if( givenIndex || wantedIndex )
@@ -428,9 +445,9 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 FuncArg const& wantedArg = wantedArgs[wantedIndex];
                 Type* wantedType = wantedArg.type;
 
-                Expr* argExpr = expr->call.args[givenIndex];
+                ArgExpr argExpr = expr->call.args[givenIndex];
                 // Make a copy so we don't modify the resolved type while converting
-                ResolvedExpr givenExpr = argExpr->resolvedExpr;
+                ResolvedExpr givenExpr = argExpr.expr->resolvedExpr;
 
                 ResolvedExpr cnvtExpr = givenExpr;
                 if( !ConvertType( &cnvtExpr, wantedType ) )
@@ -453,7 +470,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                     }
                 }
 
-                EmitExpr( argExpr, wantedType );
+                EmitExpr( argExpr.expr, wantedType );
 
                 givenIndex++;
                 if( !wantedArg.isVararg )
@@ -631,19 +648,34 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
     }
 }
 
+void EmitReturnTypes( Decl* decl, char const* funcName )
+{
+    ASSERT( decl->kind == Decl::Func );
+    
+    Array<TypeSpec*> const& types = decl->func.returnTypes;
+    if( types )
+    {
+        if( types.count == 1 )
+            Out( TypeSpecToCdecl( types[0], funcName ) );
+        else
+        {
+            NOT_IMPLEMENTED;
+        }
+    }
+    else
+    {
+        OUTSTR( "void " );
+        Out( funcName );
+    }
+}
+
 void EmitFuncDecl( Decl* decl )
 {
     ASSERT( decl->kind == Decl::Func );
 
     char const* name = BuildQualifiedNameTmp( decl );
 
-    if( decl->func.returnType )
-        Out( TypeSpecToCdecl( decl->func.returnType, name ) );
-    else
-    {
-        OUTSTR( "void " );
-        Out( name );
-    }
+    EmitReturnTypes( decl, name );
     OUTSTR( "(" );
     if( decl->func.args.count )
         OUTSTR( " " );

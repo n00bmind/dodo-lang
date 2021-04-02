@@ -1,48 +1,3 @@
-TypeSpec* NewTypeSpec( SourcePos const& pos, TypeSpec::Kind kind )
-{
-    TypeSpec* result = PUSH_STRUCT( &globalArena, TypeSpec );
-    result->pos = pos;
-    result->kind = kind;
-
-    return result;
-}
-
-TypeSpec* NewNameTypeSpec( SourcePos const& pos, BucketArray<char const*> const& names )
-{
-    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Name );
-    new( &result->names ) Array<char const*>( &globalArena, names.count );
-    names.CopyTo( &result->names );
-
-    return result;
-}
-
-TypeSpec* NewPtrTypeSpec( SourcePos const& pos, TypeSpec* ofType )
-{
-    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Pointer );
-    result->ptr.base = ofType;
-
-    return result;
-}
-
-TypeSpec* NewFuncTypeSpec( SourcePos const& pos, BucketArray<FuncArgSpec> const& args, TypeSpec* returnType )
-{
-    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Func );
-    new( &result->func.args ) Array<FuncArgSpec>( &globalArena, args.count );
-    args.CopyTo( &result->func.args );
-    result->func.returnType = returnType;
-
-    return result;
-}
-
-TypeSpec* NewArrayTypeSpec( SourcePos const& pos, TypeSpec* ofType, Expr* size, bool isView )
-{
-    TypeSpec* result = NewTypeSpec( pos, TypeSpec::Array );
-    result->array.base = ofType;
-    result->array.length = size;
-    result->array.isView = isView;
-
-    return result;
-}
 
 // NOTE All ParseXXX() functions leave the token "cursor" at the next immediate token after the expression
 // (This is required as sometimes we don't know whether an expression has finished until we find a token that's not part of it)
@@ -78,20 +33,43 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
     else if( MatchToken( TokenKind::OpenParen, token ) )
     {
         // Function type
+        // TODO This should probably just call into ParseLambdaExpr() but without parsing a body
+
         BucketArray<FuncArgSpec> args( &globalTmpArena, 8, Temporary() );
+        BucketArray<TypeSpec*> returnTypes( &globalTmpArena, 2, Temporary() );
 
         NextToken( lexer );
         while( !MatchToken( TokenKind::CloseParen, token ) )
         {
+            // TODO Func types don't care about the names of each arg?
+#if 0
+            char const* name = nullptr;
+            RequireToken( TokenKind::Name, lexer );
+
+            Token nextToken = PeekToken( lexer );
+            if( MatchToken( TokenKind::Colon, nextToken ) )
+            {
+                name = lexer->token.ident;
+                NextToken( lexer );
+                RequireTokenAndAdvance( TokenKind::Colon, lexer );
+            }
+#endif
+
             TypeSpec* argType = ParseTypeSpec( lexer );
 
             bool vararg = false;
-            if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
+            Expr* defaultValue = nullptr;
+            if( MatchToken( TokenKind::Assign, lexer->token ) )
+            {
+                NextToken( lexer );
+                defaultValue = ParseExpr( lexer );
+            }
+            else if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
             {
                 vararg = true;
                 NextToken( lexer );
             }
-            args.Push( { argType, vararg } );
+            args.Push( { argType, defaultValue, vararg } );
 
             if( !MatchToken( TokenKind::Comma, token ) )
                 break;
@@ -103,13 +81,19 @@ TypeSpec* ParseBaseTypeSpec( Lexer* lexer )
         if( MatchToken( TokenKind::RightArrow, token ) )
         {
             NextToken( lexer );
-            returnType = ParseTypeSpec( lexer );
+            returnTypes.Push( ParseTypeSpec( lexer ) );
+
+            while( MatchToken( TokenKind::Comma, token ) )
+            {
+                NextToken( lexer );
+                returnTypes.Push( ParseTypeSpec( lexer ) );
+            }
         }
 
         // TODO Capture / closure / restrict
 
         if( lexer->IsValid() )
-            type = NewFuncTypeSpec( pos, args, returnType );
+            type = NewFuncTypeSpec( pos, args, returnTypes );
     }
 
     return type;
@@ -162,152 +146,6 @@ TypeSpec* ParseTypeSpec( Lexer* lexer )
     return type;
 }
  
-Expr* NewExpr( SourcePos const& pos, Expr::Kind kind )
-{
-    Expr* result = PUSH_STRUCT( &globalArena, Expr );
-    result->pos = pos;
-    result->kind = kind;
-
-    return result;
-}
-
-Expr* NewCompoundExpr( SourcePos const& pos, BucketArray<CompoundField> const& fields )
-{
-    Expr* result = NewExpr( pos, Expr::Compound );
-    new( &result->compoundFields ) Array<CompoundField>( &globalArena, fields.count );
-    fields.CopyTo( &result->compoundFields );
-
-    return result;
-}
-
-Expr* NewNameExpr( SourcePos const& pos, char const* name )
-{
-    Expr* result = NewExpr( pos, Expr::Name );
-    result->name.ident = name;
-    result->name.symbol = nullptr;
-
-    return result;
-}
-
-Expr* NewIntExpr( SourcePos const &pos, i64 value, Token::LiteralMod modifier )
-{
-    Expr* result = NewExpr( pos, Expr::Int );
-    result->literal.intValue = value;
-    result->literal.modifier = modifier;
-
-    return result;
-}
-
-Expr* NewFloatExpr( SourcePos const &pos, f64 value, Token::LiteralMod modifier )
-{
-    Expr* result = NewExpr( pos, Expr::Float );
-    result->literal.floatValue = value;
-    result->literal.modifier = modifier;
-
-    return result;
-}
-
-Expr* NewStringExpr( SourcePos const &pos, String const& value, Token::LiteralMod modifier )
-{
-    Expr* result = NewExpr( pos, Expr::Str );
-    result->literal.strValue = value;
-    result->literal.modifier = modifier;
-
-    return result;
-}
-
-Expr* NewSizeofExpr( SourcePos const& pos, Expr* expr )
-{
-    Expr* result = NewExpr( pos, Expr::Sizeof );
-    result->sizeofExpr = expr;
-
-    return result;
-}
-
-Expr* NewCallExpr( SourcePos const& pos, Expr* expr, BucketArray<Expr*> const& args )
-{
-    Expr* result = NewExpr( pos, Expr::Call );
-    result->call.func = expr;
-    new( &result->call.args ) Array<Expr*>( &globalArena, args.count );
-    args.CopyTo( &result->call.args );
-
-    return result;
-}
-
-Expr* NewIndexExpr( SourcePos const& pos, Expr* base, Expr* index )
-{
-    Expr* result = NewExpr( pos, Expr::Index );
-    result->index.base = base;
-    result->index.index = index;
-
-    return result;
-}
-
-Expr* NewFieldExpr( SourcePos const& pos, Expr* base, char const* name, bool isMeta )
-{
-    Expr* result = NewExpr( pos, Expr::Field );
-    result->field.base = base;
-    result->field.name = name;
-    result->field.isMeta = isMeta;
-
-    return result;
-}
-
-Expr* NewCastExpr( SourcePos const& pos, TypeSpec* type, Expr* castedExpr )
-{
-    Expr* result = NewExpr( pos, Expr::Cast );
-    result->cast.type = type;
-    result->cast.expr = castedExpr;
-
-    return result;
-}
-
-Expr* NewUnaryExpr( SourcePos const& pos, TokenKind::Enum op, Expr* expr )
-{
-    Expr* result = NewExpr( pos, Expr::Unary );
-    result->unary.expr = expr;
-    result->unary.op = op;
-
-    return result;
-}
-
-Expr* NewBinaryExpr( SourcePos const& pos, TokenKind::Enum op, Expr* left, Expr* right )
-{
-    Expr* result = NewExpr( pos, Expr::Binary );
-    result->binary.left = left;
-    result->binary.right = right;
-    result->binary.op = op;
-
-    return result;
-}
-
-Expr* NewTernaryExpr( SourcePos const& pos, Expr* cond, Expr* thenExpr, Expr* elseExpr )
-{
-    Expr* result = NewExpr( pos, Expr::Ternary );
-    result->ternary.cond = cond;
-    result->ternary.thenExpr = thenExpr;
-    result->ternary.elseExpr = elseExpr;
-
-    return result;
-}
-
-Expr* NewCommaExpr( SourcePos const& pos, BucketArray<Expr*> const& exprList )
-{
-    Expr* result = NewExpr( pos, Expr::Comma );
-    new( &result->commaExprs ) Array<Expr*>( &globalArena, exprList.count );
-    exprList.CopyTo( &result->commaExprs );
-
-    return result;
-}
-
-Expr* NewRangeExpr( SourcePos const& pos, Expr* lowerBound, Expr* upperBound )
-{
-    Expr* result = NewExpr( pos, Expr::Range );
-    result->range.lowerBound = lowerBound;
-    result->range.upperBound = upperBound;
-
-    return result;
-}
 
 CompoundField ParseCompoundFieldExpr( Lexer* lexer )
 {
@@ -377,7 +215,138 @@ Expr* ParseCompoundExpr( Lexer* lexer )
     return expr;
 }
 
-Expr* ParseUnaryExpr( Lexer* lexer );
+Stmt* ParseStmt( Lexer* lexer, StmtList* parent ); 
+
+void AddStmtListStmts( StmtList* block, BucketArray<Stmt*> const& stmts )
+{
+    new( &block->stmts ) Array<Stmt*>( &globalArena, stmts.count );
+    stmts.CopyTo( &block->stmts );
+}
+
+StmtList* ParseStmtBlock( Lexer* lexer, StmtList* parent, char const* name )
+{
+    SourcePos pos = lexer->token.pos;
+    BucketArray<Stmt*> stmts( &globalTmpArena, 16, Temporary() );
+    
+    StmtList* result = NewStmtList( pos, parent, name );
+
+    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
+    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
+    {
+        stmts.Push( ParseStmt( lexer, result ) );
+    }
+    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
+
+    if( lexer->IsValid() )
+    {
+        AddStmtListStmts( result, stmts );
+        return result;
+    }
+
+    return nullptr;
+}
+
+FuncArgDecl ParseFuncArgDecl( Lexer* lexer, bool requireName )
+{
+    FuncArgDecl result = {};
+    SourcePos pos = lexer->pos;
+
+    char const* name = nullptr;
+    RequireToken( TokenKind::Name, lexer );
+
+    // Foreign funcs don't have to specify an argument name
+    if( requireName )
+        name = lexer->token.ident;
+    else
+    {
+        Token nextToken = PeekToken( lexer );
+        if( MatchToken( TokenKind::Colon, nextToken ) )
+            name = lexer->token.ident;
+    }
+
+    if( name )
+    {
+        NextToken( lexer );
+        RequireTokenAndAdvance( TokenKind::Colon, lexer );
+    }
+
+    TypeSpec* type = ParseTypeSpec( lexer );
+
+    bool vararg = false;
+    Expr* defaultValue = nullptr;
+    if( MatchToken( TokenKind::Assign, lexer->token ) )
+    {
+        NextToken( lexer );
+        defaultValue = ParseExpr( lexer );
+    }
+    else if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
+    {
+        vararg = true;
+        NextToken( lexer );
+    }
+
+    if( lexer->IsValid() )
+        result = { pos, name, type, defaultValue, vararg };
+
+    return result;
+}
+
+void ParseLambda( Lexer* lexer, char const* name, bool isForeign, BucketArray<FuncArgDecl>* args, BucketArray<TypeSpec*>* returnTypes, StmtList** body )
+{
+    if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
+    {
+        args->Push( ParseFuncArgDecl( lexer, !isForeign ) );
+        while( MatchToken( TokenKind::Comma, lexer->token ) )
+        {
+            NextToken( lexer );
+            args->Push( ParseFuncArgDecl( lexer, !isForeign ) );
+        }
+        RequireToken( TokenKind::CloseParen, lexer );
+    }
+
+    NextToken( lexer );
+    if( MatchToken( TokenKind::RightArrow, lexer->token ) )
+    {
+        NextToken( lexer );
+        returnTypes->Push( ParseTypeSpec( lexer ) );
+
+        while( MatchToken( TokenKind::Comma, lexer->token ) )
+        {
+            NextToken( lexer );
+            returnTypes->Push( ParseTypeSpec( lexer ) );
+        }
+    }
+
+    *body = nullptr;
+    if( isForeign )
+        RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+    else
+    {
+        RequireToken( TokenKind::OpenBrace, lexer );
+        if( lexer->IsValid() )
+            *body = ParseStmtBlock( lexer, nullptr, name ? name : "<lambda>" );
+    }
+}
+
+Expr* ParseLambdaExpr( Lexer* lexer, SourcePos const& pos )
+{
+    BucketArray<FuncArgDecl> args( &globalTmpArena, 8, Temporary() );
+    BucketArray<TypeSpec*> returnTypes( &globalTmpArena, 2 );;
+    StmtList* body = nullptr;
+
+    ParseLambda( lexer, nullptr, false, &args, &returnTypes, &body );
+
+    if( lexer->IsValid() )
+    {
+        // TODO Do we care about this?
+        StmtList* parentBlock = nullptr;
+
+        Decl* decl = NewFuncDecl( pos, "", args, body, returnTypes, BucketArray<NodeDirective>::Empty, 0, parentBlock );
+        return NewLambdaExpr( pos, decl );
+    }
+
+    return nullptr;
+}
 
 Expr* ParseBaseExpr( Lexer* lexer )
 {
@@ -385,6 +354,7 @@ Expr* ParseBaseExpr( Lexer* lexer )
     SourcePos pos = token.pos;
 
     bool advance = true;
+
     Expr* expr = nullptr;
     if( MatchToken( TokenKind::Name, token ) )
     {
@@ -421,8 +391,31 @@ Expr* ParseBaseExpr( Lexer* lexer )
     else if( MatchToken( TokenKind::OpenParen, token ) )
     {
         NextToken( lexer );
-        expr = ParseExpr( lexer );
-        RequireToken( TokenKind::CloseParen, lexer );
+
+        // TODO Test empty parenthesised expr
+        if( MatchToken( TokenKind::Name, token ) )
+        {
+            Token nextToken = PeekToken( lexer );
+            if( MatchToken( TokenKind::Colon, nextToken ) ||
+                MatchToken( TokenKind::Comma, nextToken ) ||
+                MatchToken( TokenKind::CloseParen, nextToken ) )
+            {
+                expr = ParseLambdaExpr( lexer, pos );
+            }
+        }
+        else if( MatchToken( TokenKind::CloseParen, token ) )
+            expr = ParseLambdaExpr( lexer, pos );
+
+        if( expr )
+            advance = false;
+        // FIXME Decide whether ParseLambdaExpr failing and returning null means we should continue trying
+        // (in that case we need to silence any errors above!)
+        else
+        {
+            // Parenthesized expression
+            expr = ParseExpr( lexer );
+            RequireToken( TokenKind::CloseParen, lexer );
+        }
     }
     else if( MatchToken( TokenKind::Range, token ) )
     {
@@ -446,6 +439,20 @@ Expr* ParseBaseExpr( Lexer* lexer )
 
 Expr* ParseAddExpr( Lexer* lexer );
 
+ArgExpr ParseArgExpr( Lexer* lexer )
+{
+    Expr* expr = ParseExpr( lexer );
+    Expr* nameExpr = nullptr;
+    if( MatchToken( TokenKind::Assign, lexer->token ) )
+    {
+        NextToken( lexer );
+        nameExpr = expr;
+        expr = ParseExpr( lexer );
+    }
+
+    return { expr, nameExpr };
+}
+
 Expr* ParsePostfixExpr( Lexer* lexer )
 {
     Expr* expr = ParseBaseExpr( lexer );
@@ -456,16 +463,18 @@ Expr* ParsePostfixExpr( Lexer* lexer )
 
         if( MatchToken( TokenKind::OpenParen, lexer->token ) )
         {
-            BucketArray<Expr*> args( &globalTmpArena, 16, Temporary() );
+            BucketArray<ArgExpr> args( &globalTmpArena, 8, Temporary() );
 
             Token token = NextToken( lexer );
             if( !MatchToken( TokenKind::CloseParen, token ) )
             {
-                args.Push( ParseExpr( lexer ) );
+                ArgExpr arg = ParseArgExpr( lexer );
+                args.Push( arg );
                 while( MatchToken( TokenKind::Comma, lexer->token ) )
                 {
                     NextToken( lexer );
-                    args.Push( ParseExpr( lexer ) );
+                    arg = ParseArgExpr( lexer );
+                    args.Push( arg );
                 }
             }
             RequireToken( TokenKind::CloseParen, lexer );
@@ -498,8 +507,12 @@ Expr* ParsePostfixExpr( Lexer* lexer )
         {
             Token field = NextToken( lexer );
             if( field.kind == TokenKind::Name )
-                PARSE_ERROR( field.pos, "Unknown meta attribute '%s' in expression", field.ident );
-            else if( field.kind != TokenKind::Keyword )
+            {
+                InternString* intern = FindIntern( field.ident );
+                if( !intern || (intern->flags & InternString::MetaAttr) == 0 )
+                    PARSE_ERROR( field.pos, "Unknown meta attribute '%s' in expression", field.ident );
+            }
+            else 
             {
                 char const* desc = TokenKind::names[ field.kind ];
                 PARSE_ERROR( field.pos, "Unexpected token '%s' in expression", desc );
@@ -695,63 +708,12 @@ Expr* ParseCommaExpr( Lexer* lexer )
     return expr;
 }
 
+// NOTE This does not parse comma exprs
 Expr* ParseExpr( Lexer* lexer )
 {
     return ParseTernaryExpr( lexer );
 }
 
-
-Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, char const* name, BucketArray<NodeDirective> const& directives, u32 flags,
-               StmtList* parentBlock )
-{
-    Decl* result = PUSH_STRUCT( &globalArena, Decl );
-    result->pos = pos;
-    new( &result->names ) Array<char const*>( &globalArena, 1 );
-    result->names.Push( name );
-    result->parentBlock = parentBlock;
-    result->kind = kind;
-    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
-    result->flags = flags;
-
-    return result;
-}
-
-Decl* NewDecl( SourcePos const& pos, Decl::Kind kind, BucketArray<char const*> const& names, BucketArray<NodeDirective> const& directives,
-               u32 flags, StmtList* parentBlock )
-{
-    Decl* result = PUSH_STRUCT( &globalArena, Decl );
-    result->pos = pos;
-    // Copy names array to ensure it's in the global arena
-    new( &result->names ) Array<char const*>( &globalArena, names.count );
-    names.CopyTo( &result->names );
-    result->parentBlock = parentBlock;
-    result->kind = kind;
-    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
-    result->flags = flags;
-
-    return result;
-}
-
-Decl* NewAggregateDecl( SourcePos const& pos, int kind, char const* name, BucketArray<Decl*> const& items,
-                        BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock  )
-{
-    Decl::Kind declKind = Decl::None;
-    switch( kind )
-    {
-        case Keyword::Struct: declKind = Decl::Struct; break;
-        case Keyword::Union: declKind = Decl::Union; break;
-    }
-
-    Decl* result = nullptr;
-    if( declKind != Decl::None )
-    {
-        result = NewDecl( pos, declKind, name, directives, flags, parentBlock );
-        new( &result->aggregate.items ) Array<Decl*>( &globalArena, items.count );
-        items.CopyTo( &result->aggregate.items );
-    }
-
-    return result;
-}
 
 Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock );
 
@@ -805,17 +767,6 @@ EnumItem ParseEnumItemDecl( Lexer* lexer )
     return result;
 }
 
-Decl* NewEnumDecl( SourcePos const& pos, char const* name, TypeSpec* type, BucketArray<EnumItem> const& items,
-                   BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
-{
-    Decl* result = NewDecl( pos, Decl::Enum, name, directives, flags, parentBlock );
-    new( &result->enum_.items ) Array<EnumItem>( &globalArena, items.count );
-    items.CopyTo( &result->enum_.items );
-    result->enum_.type = type;
-
-    return result;
-}
-
 Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, BucketArray<NodeDirective> const& directives, u32 flags,
                           StmtList* parentBlock, Lexer* lexer )
 {
@@ -848,142 +799,6 @@ Decl* ParseEnumBlockDecl( SourcePos const& pos, char const* name, BucketArray<No
 
     return result;
 }
-
-FuncArgDecl ParseFuncArgDecl( Lexer* lexer )
-{
-    FuncArgDecl result = {};
-    SourcePos pos = lexer->pos;
-
-    // TODO Omit arg names for foreign funcs
-    RequireToken( TokenKind::Name, lexer );
-    char const* name = lexer->token.ident;
-
-    NextToken( lexer );
-    RequireTokenAndAdvance( TokenKind::Colon, lexer );
-
-    TypeSpec* type = ParseTypeSpec( lexer );
-
-    bool vararg = false;
-    if( MatchToken( TokenKind::Ellipsis, lexer->token ) )
-    {
-        vararg = true;
-        NextToken( lexer );
-    }
-
-    if( lexer->IsValid() )
-        result = { pos, name, type, vararg };
-
-    return result;
-}
-
-Decl* NewFuncDecl( SourcePos const& pos, char const* name, BucketArray<FuncArgDecl> const& args, StmtList* body,
-                   TypeSpec* returnType, BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
-{
-    Decl* result = NewDecl( pos, Decl::Func, name, directives, flags, parentBlock );
-    new( &result->func.args ) Array<FuncArgDecl>( &globalArena, args.count );
-    args.CopyTo( &result->func.args );
-    result->func.body = body;
-    result->func.returnType = returnType;
-
-    return result;
-}
-
-Decl* NewVarDecl( SourcePos const& pos, BucketArray<char const*> const& names, TypeSpec* type, Expr* initExpr, bool isConst,
-                  BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock )
-{
-    Decl* result = NewDecl( pos, Decl::Var, names, directives, flags, parentBlock );
-    result->var.type = type;
-    result->var.initExpr = initExpr;
-    result->var.isConst = isConst;
-
-    return result;
-}
-
-// For synthetic Decls
-Decl* NewVarDecl( SourcePos const& pos, char const* name, TypeSpec* type, Expr* initExpr, BucketArray<NodeDirective> const& directives,
-                  u32 flags, StmtList* parentBlock )
-{
-    BucketArray<char const*> names( &globalTmpArena, 1, Temporary() );
-    names.Push( name );
-
-    return NewVarDecl( pos, names, type, initExpr, false, directives, flags, parentBlock );
-}
-
-Stmt* ParseStmt( Lexer* lexer, StmtList* parent ); 
-
-void GlobalPathBuilder( StringBuilder* path, StmtList* parent, char const* name )
-{
-    StmtList* p = parent;
-    while( p )
-    {
-        GlobalPathBuilder( path, p->parent, p->name );
-        p = p->parent;
-    }
-
-    if( !path->Empty() )
-        path->Append( "_" );
-
-    if( name )
-        path->Append( name );
-    else
-    {
-        ASSERT( parent );
-        path->AppendFmt( "%d", parent->childCount );
-    }
-}
-
-String GlobalPathString( StmtList* parent, char const* name )
-{
-    StringBuilder path( &globalTmpArena );
-    GlobalPathBuilder( &path, parent, name );
-
-    return path.ToString( &globalArena);
-}
-
-StmtList* NewStmtList( SourcePos const& pos, StmtList* parent, char const* name )
-{
-    StmtList* result = PUSH_STRUCT( &globalArena, StmtList );
-    result->pos = pos;
-    result->parent = parent;
-    result->name = name;
-
-    if( parent )
-        parent->childCount++;
-
-    result->globalPath = GlobalPathString( parent, name );
-
-    return result;
-}
-
-void AddStmtListStmts( StmtList* block, BucketArray<Stmt*> const& stmts )
-{
-    new( &block->stmts ) Array<Stmt*>( &globalArena, stmts.count );
-    stmts.CopyTo( &block->stmts );
-}
-
-StmtList* ParseStmtBlock( Lexer* lexer, StmtList* parent, char const* name )
-{
-    SourcePos pos = lexer->token.pos;
-    BucketArray<Stmt*> stmts( &globalTmpArena, 16, Temporary() );
-    
-    StmtList* result = NewStmtList( pos, parent, name );
-
-    RequireTokenAndAdvance( TokenKind::OpenBrace, lexer );
-    while( !MatchToken( TokenKind::CloseBrace, lexer->token ) )
-    {
-        stmts.Push( ParseStmt( lexer, result ) );
-    }
-    RequireTokenAndAdvance( TokenKind::CloseBrace, lexer );
-
-    if( lexer->IsValid() )
-    {
-        AddStmtListStmts( result, stmts );
-        return result;
-    }
-
-    return nullptr;
-}
-
 
 Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<NodeDirective> const& directives, u32 flags, StmtList* parentBlock,
                       Lexer* lexer )
@@ -1034,56 +849,31 @@ Decl* ParseNamedDecl( SourcePos const& pos, Expr* namesExpr, BucketArray<NodeDir
             return ParseEnumBlockDecl( pos, namesExpr->name.ident, directives, flags, parentBlock, lexer );
         }
 
+        // Func
         else if( MatchToken( TokenKind::OpenParen, lexer->token ) )
         {
+            NextToken( lexer );
+
             if( namesExpr->kind != Expr::Name )
             {
                 PARSE_ERROR( pos, "Function declaration cannot be given more than one name" );
                 return nullptr;
             }
+            char const* name = namesExpr->name.ident;
 
-            // Func
-            BucketArray<FuncArgDecl> args( &globalTmpArena, 16, Temporary() );
-
-            NextToken( lexer );
-            if( !MatchToken( TokenKind::CloseParen, lexer->token ) )
-            {
-                args.Push( ParseFuncArgDecl( lexer ) );
-                while( MatchToken( TokenKind::Comma, lexer->token ) )
-                {
-                    NextToken( lexer );
-                    args.Push( ParseFuncArgDecl( lexer ) );
-                }
-                RequireToken( TokenKind::CloseParen, lexer );
-            }
-
-            NextToken( lexer );
-            TypeSpec* returnType = nullptr;
-            if( MatchToken( TokenKind::RightArrow, lexer->token ) )
-            {
-                NextToken( lexer );
-                returnType = ParseTypeSpec( lexer );
-            }
-
-            StmtList* body = nullptr;
             bool isForeign = ContainsDirective( directives, Directive::Foreign );
-
-            if( isForeign )
-                RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
-            else
-            {
-                RequireToken( TokenKind::OpenBrace, lexer );
-                if( lexer->IsValid() )
-                    body = ParseStmtBlock( lexer, nullptr, namesExpr->name.ident );
-            }
+            BucketArray<FuncArgDecl> args( &globalTmpArena, 8, Temporary() );
+            BucketArray<TypeSpec*> returnTypes( &globalTmpArena, 2 );
+            StmtList* body = nullptr;
+            ParseLambda( lexer, name, isForeign, &args, &returnTypes, &body );
 
             if( lexer->IsValid() )
-                return NewFuncDecl( pos, namesExpr->name.ident, args, body, returnType, directives, flags, parentBlock );
+                return NewFuncDecl( pos, name, args, body, returnTypes, directives, flags, parentBlock );
         }
         else
         {
             // Const
-            // TODO So const vars cannot have a type specifier?
+            // TODO So const vars cannot have a type specifier? (Answer: yes they can!)
             initExpr = ParseCommaExpr( lexer );
             isConst = true;
 
@@ -1245,45 +1035,6 @@ Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock )
     return ParseNamedDecl( pos, expr, directives, flags, parentBlock, lexer );
 }
 
-Stmt* NewStmt( SourcePos const& pos, Stmt::Kind kind, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = PUSH_STRUCT( &globalArena, Stmt );
-    result->pos = pos;
-    result->kind = kind;
-    result->parentBlock = parentBlock;
-    INIT( result->directives ) Array<NodeDirective>( directives, &globalArena );
-    result->flags = flags;
-
-    return result;
-}
-
-Stmt* NewDeclStmt( SourcePos const& pos, Decl* decl, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Decl, parentBlock, directives, flags );
-    result->decl = decl;
-
-    return result;
-}
-
-Stmt* NewAssignStmt( SourcePos const& pos, Expr* leftExpr, TokenKind::Enum op, Expr* rightExpr, StmtList* parentBlock,
-                     BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Assign, parentBlock, directives, flags );
-    result->assign.left = leftExpr;
-    result->assign.right = rightExpr;
-    result->assign.op = op;
-
-    return result;
-}
-
-Stmt* NewExprStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Expr, parentBlock, directives, flags );
-    result->expr = expr;
-    
-    return result;
-}
-
 //a, b, c :: 10, 1.0, "whatever";
 //a, b, c := some_func();
 //a, b, c = some_func(), b+c, x > 10 ? 1 : 0;
@@ -1354,66 +1105,6 @@ StmtList* ParseStmtOrStmtBlock( Lexer* lexer, StmtList* parent )
         if( lexer->IsValid() )
             AddStmtListStmts( result, stmts );
     }
-
-    return result;
-}
-
-Stmt* NewIfStmt( SourcePos const& pos, Expr* cond, StmtList* thenBlock, BucketArray<ElseIf> const& elseIfs, StmtList* elseBlock,
-                 StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::If, parentBlock, directives, flags );
-    result->if_.cond = cond;
-    result->if_.thenBlock = thenBlock;
-    result->if_.elseBlock = elseBlock;
-    INIT( result->if_.elseIfs ) Array<ElseIf>( elseIfs, &globalArena );
-
-    return result;
-}
-
-Stmt* NewWhileStmt( SourcePos const& pos, Expr* cond, StmtList* block, bool isDoWhile, StmtList* parentBlock,
-                    BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::While, parentBlock, directives, flags );
-    result->while_.cond = cond;
-    result->while_.block = block;
-    result->while_.isDoWhile = isDoWhile;
-
-    return result;
-}
-
-Stmt* NewForStmt( SourcePos const& pos, char const* indexName, Expr* rangeExpr, StmtList* block, StmtList* parentBlock,
-                  BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::For, parentBlock, directives, flags );
-    result->for_.indexName = indexName;
-    result->for_.rangeExpr = rangeExpr;
-    result->for_.block = block;
-
-    return result;
-}
-        
-Stmt* NewSwitchStmt( SourcePos const& pos, Expr* expr, BucketArray<SwitchCase> const& cases, StmtList* parentBlock,
-                     BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Switch, parentBlock, directives, flags );
-    result->switch_.expr = expr;
-    INIT( result->switch_.cases ) Array<SwitchCase>( cases, &globalTmpArena );
-
-    return result;
-}
-
-Stmt* NewReturnStmt( SourcePos const& pos, Expr* expr, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Return, parentBlock, directives, flags );
-    result->expr = expr;
-
-    return result;
-}
-
-Stmt* NewBlockStmt( SourcePos const& pos, StmtList* block, StmtList* parentBlock, BucketArray<NodeDirective> const& directives, u32 flags )
-{
-    Stmt* result = NewStmt( pos, Stmt::Block, parentBlock, directives, flags );
-    result->block = block;
 
     return result;
 }
@@ -1605,7 +1296,7 @@ Stmt* ParseStmt( Lexer* lexer, StmtList* parentBlock )
 
         NextToken( lexer );
         if( !MatchToken( TokenKind::Semicolon, lexer->token ) )
-            expr = ParseExpr( lexer );
+            expr = ParseCommaExpr( lexer );
 
         if( lexer->IsValid() )
             stmt = NewReturnStmt( pos, expr, parentBlock, directives, flags );
@@ -1711,7 +1402,19 @@ void DebugPrintTypeSpec( TypeSpec* type, char*& outBuf, sz& maxLen )
                 DebugPrintTypeSpec( a.type, outBuf, maxLen );
             }
             APPEND( " ) -> " );
-            DebugPrintTypeSpec( type->func.returnType, outBuf, maxLen );
+            if( !type->func.returnTypes )
+            {
+                APPEND( "void" );
+            }
+            else
+            {
+                for( TypeSpec*& t : type->func.returnTypes )
+                {
+                    if( &t != type->func.returnTypes.begin() )
+                        APPEND( ", " );
+                    DebugPrintTypeSpec( t, outBuf, maxLen );
+                }
+            }
         } break;
         case TypeSpec::Array:
         {
@@ -1767,7 +1470,14 @@ void DebugPrintSExpr( Expr* expr, char*& outBuf, sz& maxLen )
             {
                 if( i )
                     APPEND( ", " );
-                DebugPrintSExpr( expr->call.args[i], outBuf, maxLen );
+
+                ArgExpr const& arg = expr->call.args[i];
+                if( arg.nameExpr )
+                {
+                    DebugPrintSExpr( arg.nameExpr, outBuf, maxLen );
+                    APPEND( " = " );
+                }
+                DebugPrintSExpr( arg.expr, outBuf, maxLen );
             }
             APPEND( "))" );
         } break;
@@ -2055,7 +1765,12 @@ void DebugPrintSExpr( Decl* decl, char*& outBuf, sz& maxLen, int& indent )
                 DebugPrintTypeSpec( a.type, outBuf, maxLen );
             }
             APPEND( " ) -> " );
-            DebugPrintTypeSpec( decl->func.returnType, outBuf, maxLen );
+            for( TypeSpec*& t : decl->func.returnTypes )
+            {
+                if( &t != decl->func.returnTypes.begin() )
+                    APPEND( ", " );
+                DebugPrintTypeSpec( t, outBuf, maxLen );
+            }
             APPEND( "\n" );
 
             indent++;

@@ -104,8 +104,8 @@ config_win_release = Config(
         name           = 'Release',
         platform       = platform_win,
         cmdline_opts   = ['r', 'rel', 'release'],
-        compiler_flags = ['-DCONFIG_RELEASE=1', '-Z7', '-MT', '-O2'],
-        linker_flags   = ['/debug:full']
+        compiler_flags = ['-DCONFIG_RELEASE=1', '-Z7', '-MT', '-O2', '-GL'],
+        linker_flags   = ['/debug:full', '/LTCG']
 )
 
 

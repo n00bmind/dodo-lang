@@ -69,6 +69,10 @@ struct Array
         return count == other.count && PEQUAL( data, other.data, count * SIZEOF(T) );
     }
 
+    explicit operator bool() const
+    {
+        return data != nullptr && count != 0;
+    }
 
     void Resize( i32 new_count )
     {
@@ -101,12 +105,6 @@ struct Array
     {
         ASSERT( i >= 0 && i < count );
         return data[i];
-    }
-
-    // TODO Not too sure about this!
-    explicit operator bool() const
-    {
-        return data != nullptr;
     }
 
     T* PushEmpty( bool clear = true )
@@ -1086,6 +1084,9 @@ private:
 // while Pop() returns the item at the "tail" (oldest). Can also remove newest item with PopHead() for a LIFO stack behaviour.
 // Head and tail will wrap around when needed and can never overlap.
 // Can be iterated both from tail to head (oldest to newest) or the other way around.
+
+// TODO Make this thread-safe by masking the indices (instead of resetting them to 0), and using atomic increment
+// We could then easily use this as a fixed-capacity thread-safe queue
 
 template <typename T>
 struct RingBuffer

@@ -26,6 +26,7 @@ TgtPlatformSpec globalTgtPlatform;
 int globalErrorCount = 0;
 
 
+#include "ast.cpp"
 #include "common.cpp"
 #include "lexer.cpp"
 #include "parser.cpp"

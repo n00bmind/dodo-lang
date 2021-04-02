@@ -41,6 +41,7 @@ struct Symbol
 struct FuncArg
 {
     Type* type;
+    Expr* defaultValue;     // Just point to the (resolved) expr, if any
     bool isVararg;
 };
 
@@ -95,9 +96,8 @@ struct Type
     {
         struct
         {
-            // TODO Varargs
             ::Array<FuncArg> args;
-            Type* returnType;
+            Type* returnType;       // NOTE This will be a Multi type when there are multiple return values
         } func;
         struct
         {
@@ -858,31 +858,34 @@ TypeField const* FindTypeField( Type* baseType, char const* name )
     return result;
 }
 
-ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const& pos )
+int FindMetaAttr( char const* name )
 {
-    Type* baseType = base->resolvedExpr.type;
-
-    // TODO We could associate the keyword/directive index with each entry while interning them too
-    int index = -1, i = 0;
-    for( char const* k : globalKeywords )
-    {
-        if( k == name )
+    int index = -1;
+    for( int i = 0; i < ARRAYCOUNT(globalMetaAttrs); ++i )
+        if( globalMetaAttrs[i] == name )
         {
             index = i;
             break;
         }
-        i++;
-    }
+
+    return index;
+}
+
+ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const& pos )
+{
+    int index = FindMetaAttr( name );
     ASSERT( index >= 0 );
 
     ResolvedExpr result = resolvedNull;
+    Type* baseType = base->resolvedExpr.type;
+
     switch( index )
     {
-        case Keyword::Size:
+        case MetaAttr::Size:
             result = NewResolvedConst( i64Type, baseType->size, pos );
             break;
 
-        case Keyword::Offset:
+        case MetaAttr::Offset:
         {
             Expr* fieldBase = (base->kind == Expr::Field && !base->field.isMeta) ? base->field.base : nullptr;
             Type* fieldBaseType = fieldBase ? fieldBase->resolvedExpr.type : nullptr;
@@ -903,7 +906,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
         } break;
 
     // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
-        case Keyword::Length:
+        case MetaAttr::Length:
         {
             if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
             {
@@ -919,7 +922,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
             }
         } break;
 
-        case Keyword::Index:
+        case MetaAttr::Index:
         {
             if( baseType->kind != Type::Enum )
             {
@@ -929,7 +932,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
 
             result = NewResolvedRvalue( i32Type );
         } break;
-        case Keyword::Name:
+        case MetaAttr::Name:
         {
             if( baseType->kind != Type::Enum )
             {
@@ -962,8 +965,8 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
     if( expr->field.isMeta )
         return ResolveMetaFieldExpr( expr->field.base, expr->field.name, expr->pos );
 
+#if 0
     // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
-    // (is that true though? shouldn't buffers be readonly?)
     if( MatchKeyword( Keyword::Length, expr->field.name ) )
     {
         if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
@@ -981,6 +984,7 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
         return result;
     }
+#endif
 
     // 'Normal' field access of aggregates or pointers to such
     if( baseType->kind == Type::Pointer )
@@ -1791,17 +1795,18 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
     }
 
     // TODO Optionals
+    // TODO Named args
     int givenIndex = 0, wantedIndex = 0;
     Array<FuncArg> const& wantedArgs = result.type->func.args;
-    Array<Expr*> const& givenArgs = expr->call.args;
+    Array<ArgExpr> const& givenArgs = expr->call.args;
 
     while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
     {
         FuncArg const& wantedArg = wantedArgs[wantedIndex];
         Type* wantedArgType = wantedArg.type;
-        Expr* givenArg = givenArgs[givenIndex];
+        ArgExpr givenArg = givenArgs[givenIndex];
 
-        ResolvedExpr resolvedArg = ResolveExpr( givenArg, wantedArgType );
+        ResolvedExpr resolvedArg = ResolveExpr( givenArg.expr, wantedArgType );
         if( !ConvertType( &resolvedArg, wantedArgType ) )
         {
             // Try with the next one
@@ -1811,7 +1816,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
                 continue;
             }
 
-            RSLV_ERROR( givenArg->pos, "No implicit conversion available in function call argument (expected '%s', got '%s')",
+            RSLV_ERROR( givenArg.expr->pos, "No implicit conversion available in function call argument (expected '%s', got '%s')",
                         wantedArgType->name, resolvedArg.type->name );
             return resolvedNull;
         }
@@ -1827,16 +1832,16 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
     if( wantedIndex < wantedArgs.count )
     {
         // TODO Improve this
-        RSLV_ERROR( givenArgs.Last()->pos, "Missing arguments in function call" ); // (expected %d, got %d)",
+        RSLV_ERROR( givenArgs.Last().expr->pos, "Missing arguments in function call" ); // (expected %d, got %d)",
                     //result.type->func.args.count, expr->call.args.count );
         if( funcDecl )
-            RSLV_INFO( givenArgs.Last()->pos, "First unmatched argument was '%s'", funcDecl->func.args[wantedIndex].name );
+            RSLV_INFO( givenArgs.Last().expr->pos, "First unmatched argument was '%s'", funcDecl->func.args[wantedIndex].name );
         return resolvedNull;
     }
     if( givenIndex < givenArgs.count )
     {
         // TODO Improve this
-        RSLV_ERROR( givenArgs[givenIndex]->pos, "Too many arguments in function call" ); // (expected %d, got %d)",
+        RSLV_ERROR( givenArgs[givenIndex].expr->pos, "Too many arguments in function call" ); // (expected %d, got %d)",
         //result.type->func.args.count, expr->call.args.count );
         return resolvedNull;
     }
@@ -1977,11 +1982,25 @@ Type* ResolveTypeSpec( TypeSpec* spec, Symbol* parentSymbol = nullptr )
             Array<FuncArg> args( &globalArena, spec->func.args.count );
             for( FuncArgSpec const& argSpec : spec->func.args )
             {
-                Type* arg = ResolveTypeSpec( argSpec.type );
-                args.Push( { arg, argSpec.isVararg } );
+                Type* argType = ResolveTypeSpec( argSpec.type );
+                if( argSpec.defaultValue )
+                    ResolveExpr( argSpec.defaultValue, argType );
+                args.Push( { argType, argSpec.defaultValue, argSpec.isVararg } );
             }
-            Type* ret = ResolveTypeSpec( spec->func.returnType );
-            result = NewFuncType( args, ret );
+            Array<Type*> returnTypes( &globalArena, spec->func.returnTypes.count );
+            for( TypeSpec* ts : spec->func.returnTypes )
+            {
+                Type* ret = ResolveTypeSpec( ts );
+                returnTypes.Push( ret );
+            }
+
+            Type* returnType = voidType;
+            if( returnTypes.count == 1 )
+                returnType = returnTypes[0];
+            else if( returnTypes.count > 1 )
+                returnType = NewMultiType( returnTypes );
+
+            result = NewFuncType( args, returnType );
         } break;
 
         INVALID_DEFAULT_CASE
@@ -2682,17 +2701,32 @@ void ResolveSymbol( Symbol* sym )
             {
                 Type* argType = ResolveTypeSpec( a.type );
                 CompleteType( argType, a.pos );
-                args.Push( { argType, a.isVararg } );
+                if( a.defaultValue )
+                    ResolveExpr( a.defaultValue, argType );
+
+                args.Push( { argType, a.defaultValue, a.isVararg } );
             }
 
-            Type* retType = voidType;
-            if( decl->func.returnType )
+            Array<Type*> returnTypes( &globalArena, decl->func.returnTypes.count );
+            for( TypeSpec* ts : decl->func.returnTypes )
             {
-                retType = ResolveTypeSpec( decl->func.returnType );
-                CompleteType( retType, decl->func.returnType->pos );
+                Type* retType = voidType;
+                if( ts )
+                {
+                    retType = ResolveTypeSpec( ts );
+                    CompleteType( retType, ts->pos );
+                }
+
+                returnTypes.Push( retType );
             }
 
-            result = NewFuncType( args, retType );
+            Type* returnType = voidType;
+            if( returnTypes.count == 1 )
+                returnType = returnTypes[0];
+            else if( returnTypes.count > 1 )
+                returnType = NewMultiType( returnTypes );
+
+            result = NewFuncType( args, returnType );
         } break;
 
         case Symbol::Module:
@@ -2749,15 +2783,15 @@ void ResolveFuncBody( Symbol* sym )
         Type* argType = type->func.args[i].type;
         CompleteType( argType, a.pos );
 
-        // Create a synthetic Decl
-        Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
-        CreateDeclSymbols( varDecl, true );
+        if( a.name )
+        {
+            // Create a synthetic Decl
+            Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
+            CreateDeclSymbols( varDecl, true );
+        }
     }
 
-    if( type->func.returnType )
-        CompleteType( type->func.returnType, decl->func.returnType->pos );
-    else
-        type->func.returnType = voidType;
+    ASSERT( type->func.returnType && type->func.returnType->kind > Type::Completing );
 
     if( !IsForeign( decl ) )
     {

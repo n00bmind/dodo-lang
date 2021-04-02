@@ -226,6 +226,7 @@ struct String
     {
         char* result = PUSH_ARRAY( arena, char, length + 1, params );
         PCOPY( data, result, length * SIZEOF(char) );
+        result[length] = 0;
 
         return result;
     }

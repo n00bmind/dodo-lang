@@ -2,6 +2,7 @@
 struct DirectiveWithIndex
 {
     Directive::Enum d;
+    // Predicate
     bool operator()( NodeDirective const& item )
     {
         return item.name == globalDirectives[d];

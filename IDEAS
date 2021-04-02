@@ -20,8 +20,12 @@ ________________________________________________________________________________
   independent functions while using the same exact syntax all along. Go find that video and write down the details.
 
 - Carefully consider NOT supporting function overloading?
+  Pros:
+    · It's just very convenient!
   Cons:
     · It makes code harder to follow, since a simple search by function name brings up potentially totally unrelated calls
+
+- Consider marking any function arguments that can modify the source value with the 'ref' keyword, and make all others immutable.
 
 - Maybe even do something like in Python where there is a kind of "correspondence" between function args and struct fields,
   and you can trivially pack/unpack structs as function args
@@ -152,7 +156,7 @@ ________________________________________________________________________________
 
 - Can we do a reliable almonst-equal operator for floats? (~=)
 
-- Have a concept of scopes (file, module, global) for global declarations like in Jai, but allow specifying them for aggregate members too. This allows for something like private attributes without the OOP stupidity.
+- Have a concept of scopes (file, module, global) for global declarations like in Jai, AND allow specifying them for aggregate members too. This allows for something like private attributes without the OOP stupidity.
 
 - I think the general idea of having constructor/destructor like we do in Glowmade allows for a lot of agility for everyday code compared to having to constantly be thinking about all the lifetimes and scopes etc.
   Think how this could be integrated in the language without bringing any of the RAII garbage along with it.
@@ -160,6 +164,10 @@ ________________________________________________________________________________
 - Learn a bit about UTF8 and find out how many actual bytes a character literal can get to be.. seems its anything from b8 to b32
 
 - Think of a sane way of implementing functors
+
+- Investigate how to support hot code reloading at the binary level
+
+- Add a directive for enums that forces you to provide values for each item ('explicit'?)
 ________________________________________________________________________________ 
 
 

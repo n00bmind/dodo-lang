@@ -1,11 +1,18 @@
 
 internal char const* globalKeywords[Keyword::itemCount];
+char const* globalMetaAttrs[MetaAttr::itemCount];
 char const* globalDirectives[Directive::itemCount];
 
 internal int charToDigit[256];
 internal int escapeToChar[256];
 TokenKind::Enum assignOpToBinaryOp[TokenKind::itemCount];
 
+
+InternString* FindIntern( char const* str )
+{
+    InternString* entry = globalInternStrings.entries.Get( String( str ) );
+    return entry;
+}
 
 internal InternString* Intern( String const& string, u32 flags = 0 )
 {
@@ -30,6 +37,11 @@ internal InternString* Intern( String const& string, u32 flags = 0 )
     return result;
 }
 
+char const* Token::Text() const
+{
+    return text.CString( &globalTmpArena );
+}
+
 Token NextToken( Lexer* lexer );
 
 Lexer::Lexer( String const& input, char const* filename_ )
@@ -44,6 +56,11 @@ Lexer::Lexer( String const& input, char const* filename_ )
     {
         InternString* intern = Intern( String( k.name ), InternString::Keyword );
         globalKeywords[k.index] = intern->data;
+    }
+    for( MetaAttr::Item const& k : MetaAttr::items )
+    {
+        InternString* intern = Intern( String( k.name ), InternString::MetaAttr );
+        globalMetaAttrs[k.index] = intern->data;
     }
     for( Directive::Item const& k : Directive::items )
     {
@@ -316,8 +333,6 @@ internal void NextTokenRaw( Lexer* lexer )
 
             if( intern->flags & InternString::Keyword )
                 token.kind = TokenKind::Keyword;
-            else if( intern->flags & InternString::Directive )
-                token.kind = TokenKind::Directive;
         } break;
 #undef IDENT
 
@@ -623,11 +638,15 @@ void RequireKeywordAndAdvance( int kw, Lexer* lexer )
 char const* RequireDirective( Lexer* lexer )
 {
     Token const& token = lexer->token;
-    if( token.kind != TokenKind::Directive )
+
+    if( token.kind != TokenKind::Name )
     {
-        PARSE_ERROR( token.pos, "Expected directive (got '%s')",
-               TokenKind::names[token.kind] );
+        PARSE_ERROR( token.pos, "Expected directive (got '%s')", TokenKind::names[token.kind] );
+        return nullptr;
     }
+    InternString* intern = FindIntern( token.ident );
+    if( !intern || (intern->flags & InternString::Directive) == 0 )
+        PARSE_ERROR( token.pos, "Unknown directive '%s'", token.Text() );
 
     return token.ident;
 }

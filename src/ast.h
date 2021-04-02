@@ -10,6 +10,7 @@ struct TypeSpec;
 struct FuncArgSpec
 {
     TypeSpec* type;
+    Expr* defaultValue;
     bool isVararg;
 };
 
@@ -34,8 +35,8 @@ struct TypeSpec
         struct
         {
             ::Array<FuncArgSpec> args;
-            TypeSpec* returnType;
-            // TODO Multiple return types
+            // TODO Make this a union with a TypeSpec* so that the 0 & 1 cases avoid a second indirection?
+            ::Array<TypeSpec*> returnTypes;
         } func;
         struct
         {
@@ -97,6 +98,14 @@ struct CompoundField
     Kind kind;
 };
 
+struct ArgExpr
+{
+    Expr* expr;
+    Expr* nameExpr;   // Optional
+};
+
+struct Decl;
+
 struct Expr
 {
     enum Kind
@@ -116,7 +125,8 @@ struct Expr
         Ternary,
         Comma,
         Range,
-        Sizeof,
+        Lambda,
+        Sizeof,     //?
         //Typeof,
         //OffsetOf,
     };
@@ -149,7 +159,7 @@ struct Expr
 
         struct
         {
-            Array<Expr*> args;
+            Array<ArgExpr> args;
             Expr* func;
         } call;
         struct
@@ -194,6 +204,10 @@ struct Expr
             Expr* lowerBound;     // Inclusive
             Expr* upperBound;     // Exclusive, null when iterating over an iterable
         } range;
+        struct
+        {
+            Decl* decl;
+        } lambda;
     };
 };
 
@@ -250,6 +264,7 @@ struct FuncArgDecl
     SourcePos pos;
     char const* name;
     TypeSpec* type;
+    Expr* defaultValue;
     bool isVararg;
 };
 
@@ -284,12 +299,8 @@ struct Decl : public Node
     {
         struct
         {
-            // TODO Lambdas?
-            // TODO Varargs
-            // TODO Default values (this probably should just be a list of decls!)
             Array<FuncArgDecl> args;
-            // TODO Multiple return types
-            TypeSpec* returnType;
+            Array<TypeSpec*> returnTypes;
             StmtList* body;
         } func;
 
