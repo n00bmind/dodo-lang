@@ -35,7 +35,6 @@ struct TypeSpec
         struct
         {
             ::Array<FuncArgSpec> args;
-            // TODO Make this a union with a TypeSpec* so that the 0 & 1 cases avoid a second indirection?
             ::Array<TypeSpec*> returnTypes;
         } func;
         struct
@@ -55,7 +54,7 @@ struct TypeSpec
 
 struct ConstValue
 {
-    // TODO Array of T?
+    // TODO Array of T? 'Complex' types?
     union
     {
         String strValue = {};

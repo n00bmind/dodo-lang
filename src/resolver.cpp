@@ -97,7 +97,10 @@ struct Type
         struct
         {
             ::Array<FuncArg> args;
-            Type* returnType;       // NOTE This will be a Multi type when there are multiple return values
+            // NOTE This will be a Multi type when there are multiple return values
+            Type* returnType;
+            // Annotated source decl (if available) to access arg names
+            Decl* resolvedDecl;
         } func;
         struct
         {
@@ -1775,16 +1778,69 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     return NewResolvedRvalue( type );
 }
 
+FuncArg* ResolveArgNameExpr( Type* funcType, Expr* nameExpr )
+{
+    ASSERT( funcType->kind == Type::Func );
+
+    Decl* funcDecl = funcType->func.resolvedDecl;
+    /*
+    // NOTE There's an issue here with named args which is not quite solved
+    Func types don't contain arg names, as we don't consider them part of a func type definition (two different functions providing
+    different names but matching types for their arguments should have the same type as they can both be called with the same call
+    expression in most situations). We could break this equivalence and introduce arg names as part of the type, but it just doesn't seem
+    to make sense (we would get unresolved type errors for functions that seem like they should match?).
+
+    We do have some cases where args can only be called by name though, so we _require_ knowing the names in those situations.
+    So for now we annotate the resolved func type with the source declaration in those places where it is available, but this obviously
+    doesn't solve all situations. For the remaining situations where the func decl is not available, we just show the normal
+    "unknown argument" error.
+    */
+    if( funcDecl )
+    {
+        Array<FuncArg>& args = funcType->func.args;
+        Array<FuncArgDecl> const& declArgs = funcDecl->func.args;
+        ASSERT( declArgs.count == args.count );
+
+        for( int i = 0; i < args.count; ++i )
+        {
+            if( declArgs[i].name == nameExpr->name.ident )
+                return &args[i];
+        }
+    }
+
+    return nullptr;
+}
+
+void PrintMissingArgsInfo( Type* funcType, Array<FuncArg> const& wantedArgs, SourcePos const& pos )
+{
+    ASSERT( funcType->kind == Type::Func );
+
+    Decl* funcDecl = funcType->func.resolvedDecl;
+    if( funcDecl )
+    {
+        Array<FuncArgDecl> const& declArgs = funcDecl->func.args;
+        ASSERT( declArgs.count == wantedArgs.count );
+
+        for( int i = 0; i < wantedArgs.count; ++i )
+        {
+            FuncArg const& arg = wantedArgs[i];
+
+            // Hasn't been yet crossed out
+            if( arg.type != nullptr && arg.defaultValue == nullptr && !arg.isVararg )
+            {
+                char const* name = declArgs[i].name;
+                RSLV_INFO( pos, "Argument '%s' is not optional", name );
+            }
+        }
+    }
+}
+
 ResolvedExpr ResolveCallExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Call );
     ResolvedExpr result = ResolveExpr( expr->call.func );
     if( !IsValid( result ) )
         return resolvedNull;
-
-    Decl* funcDecl = nullptr;
-    if( expr->call.func->kind == Expr::Name )
-        funcDecl = expr->call.func->name.symbol->decl;  // Nais
 
     CompleteType( result.type, expr->pos );
 
@@ -1794,55 +1850,102 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
         return resolvedNull;
     }
 
-    // TODO Optionals
-    // TODO Named args
+    /*
+       Rules for function arguments:
+       - Only one vararg for now. Any args after the vararg can only be passed by name
+       - Any number of optionals, but if any is ommitted in the call, args after that one can only be passed by name
+       - After a named arg appears in the call, all args after it must be named too
+       // TODO Test all these combinations thoroughly
+       // TODO Add any corresponding checks during parsing/resolving of lambda decls
+    */
     int givenIndex = 0, wantedIndex = 0;
-    Array<FuncArg> const& wantedArgs = result.type->func.args;
-    Array<ArgExpr> const& givenArgs = expr->call.args;
+    bool requireNamed = false;
 
+    Array<ArgExpr> const& givenArgs = expr->call.args;
+    // Copy target func type args array and cross out args as they're found in the call
+    Array<FuncArg> wantedArgs = result.type->func.args.Clone( &globalTmpArena );
+
+    FuncArg* wantedArg = nullptr;
     while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
     {
-        FuncArg const& wantedArg = wantedArgs[wantedIndex];
-        Type* wantedArgType = wantedArg.type;
+        wantedArg = &wantedArgs[wantedIndex];
+
         ArgExpr givenArg = givenArgs[givenIndex];
+        if( givenArg.nameExpr )
+        {
+            wantedArg = ResolveArgNameExpr( result.type, givenArg.nameExpr );
+            if( wantedArg == nullptr )
+            {
+                RSLV_ERROR( givenArg.nameExpr->pos, "Unknown argument '%s' in function call", givenArg.nameExpr->name.ident );
+                return resolvedNull;
+            }
+            else if( wantedArg->type == nullptr )
+            {
+                RSLV_ERROR( givenArg.nameExpr->pos, "Passing argument '%s' twice in function call", givenArg.nameExpr->name.ident );
+                return resolvedNull;
+            }
+            requireNamed = true;
+        }
+        else if( requireNamed )
+        {
+            RSLV_ERROR( givenArg.expr->pos, "Only named arguments allowed after a named argument is given" );
+            return resolvedNull;
+        }
+
+        Type* wantedArgType = wantedArg->type;
+        ASSERT( wantedArgType, "This argument has already been given!" );
 
         ResolvedExpr resolvedArg = ResolveExpr( givenArg.expr, wantedArgType );
         if( !ConvertType( &resolvedArg, wantedArgType ) )
         {
-            // Try with the next one
-            if( wantedArg.isVararg )
-            {
-                wantedIndex++;
-                continue;
-            }
-
             RSLV_ERROR( givenArg.expr->pos, "No implicit conversion available in function call argument (expected '%s', got '%s')",
                         wantedArgType->name, resolvedArg.type->name );
             return resolvedNull;
         }
 
         givenIndex++;
-        if( !wantedArg.isVararg )
+        // If it's a vararg, keep swallowing the next arg
+        if( !wantedArg->isVararg )
+        {
+            // Otherwise mark it as done
+            wantedArg->type = nullptr;
             wantedIndex++;
+        }
     }
     // If the last expected argument was a vararg, consider that one done
-    if( wantedIndex < wantedArgs.count && wantedArgs[wantedIndex].isVararg )
+    if( wantedArg && wantedArg->isVararg )
+    {
+        wantedArg->type = nullptr;
         wantedIndex++;
+    }
 
     if( wantedIndex < wantedArgs.count )
     {
-        // TODO Improve this
-        RSLV_ERROR( givenArgs.Last().expr->pos, "Missing arguments in function call" ); // (expected %d, got %d)",
-                    //result.type->func.args.count, expr->call.args.count );
-        if( funcDecl )
-            RSLV_INFO( givenArgs.Last().expr->pos, "First unmatched argument was '%s'", funcDecl->func.args[wantedIndex].name );
-        return resolvedNull;
+        bool argsMissing = false;
+
+        // Check if all remaining args are optional
+        for( FuncArg const& arg : wantedArgs )
+        {
+            if( arg.type != nullptr && arg.defaultValue == nullptr && !arg.isVararg )
+            {
+                argsMissing = true;
+                break;
+            }
+        }
+
+        if( argsMissing )
+        {
+            SourcePos const& pos = givenArgs.Last().expr->pos;
+            RSLV_ERROR( pos, "Missing arguments in function call (expected %d, got %d)", wantedArgs.count, givenArgs.count );
+            PrintMissingArgsInfo( result.type, wantedArgs, pos );
+
+            return resolvedNull;
+        }
     }
     if( givenIndex < givenArgs.count )
     {
-        // TODO Improve this
-        RSLV_ERROR( givenArgs[givenIndex].expr->pos, "Too many arguments in function call" ); // (expected %d, got %d)",
-        //result.type->func.args.count, expr->call.args.count );
+        RSLV_ERROR( givenArgs[givenIndex].expr->pos, "Too many arguments in function call (expected %d, got %d)",
+                    wantedArgs.count, givenArgs.count );
         return resolvedNull;
     }
 
@@ -2051,7 +2154,7 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
         else
         {
             if( !lowerBoundExpr )
-                RSLV_ERROR( expr->pos, "Scalar range expression must have a lower bound" );
+                RSLV_ERROR( expr->pos, "Non-iterator range expression must have a lower bound" );
 
             if( !ConvertType( &upperBound, lowerBound.type ) )
                 RSLV_ERROR( expr->pos, "Upper bound and lower bound in scalar range expression must have the same type" );
@@ -2164,6 +2267,48 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             result = NewResolvedRvalue( NewMultiType( expectedTypes ) );
             // It's an l-value if all sub-expressions were too
             result.isLvalue = isLvalue;
+        } break;
+
+        case Expr::Lambda:
+        {
+            Decl* decl = expr->lambda.decl;
+            ASSERT( decl->kind == Decl::Func );
+
+            Array<FuncArg> args( &globalArena, decl->func.args.count );
+            for( FuncArgDecl const& a : decl->func.args )
+            {
+                Type* argType = ResolveTypeSpec( a.type );
+                CompleteType( argType, a.pos );
+                if( a.defaultValue )
+                    ResolveExpr( a.defaultValue, argType );
+
+                args.Push( { argType, a.defaultValue, a.isVararg } );
+            }
+
+            Array<Type*> returnTypes( &globalArena, decl->func.returnTypes.count );
+            for( TypeSpec* ts : decl->func.returnTypes )
+            {
+                Type* retType = voidType;
+                if( ts )
+                {
+                    retType = ResolveTypeSpec( ts );
+                    CompleteType( retType, ts->pos );
+                }
+
+                returnTypes.Push( retType );
+            }
+
+            Type* returnType = voidType;
+            if( returnTypes.count == 1 )
+                returnType = returnTypes[0];
+            else if( returnTypes.count > 1 )
+                returnType = NewMultiType( returnTypes );
+
+            Type* funcType = NewFuncType( args, returnType );
+            // Remember the decl so we can access arg names
+            funcType->func.resolvedDecl = decl;
+
+            result = NewResolvedRvalue( funcType );
         } break;
 
         INVALID_DEFAULT_CASE
@@ -2727,6 +2872,8 @@ void ResolveSymbol( Symbol* sym )
                 returnType = NewMultiType( returnTypes );
 
             result = NewFuncType( args, returnType );
+            // Remember the decl so we can access arg names
+            result->func.resolvedDecl = decl;
         } break;
 
         case Symbol::Module:
@@ -2786,7 +2933,10 @@ void ResolveFuncBody( Symbol* sym )
         if( a.name )
         {
             // Create a synthetic Decl
-            Decl* varDecl = NewVarDecl( a.pos, a.name, a.type, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
+            TypeSpec* varType = a.type;
+            if( a.isVararg )
+                varType = NewArrayTypeSpec( a.pos, varType, nullptr, true );
+            Decl* varDecl = NewVarDecl( a.pos, a.name, varType, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
             CreateDeclSymbols( varDecl, true );
         }
     }

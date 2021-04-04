@@ -26,6 +26,12 @@ main :: ()
     printf( "y = %d\n", y );
     expect( y == 15 );
 
+    // Can be called in place
+    ()
+    {
+        printf( "Hello lambda!" );
+    }();
+
     // Optional arguments
     PrintStuff :: ( a: string, b: string = "World" )
     {
@@ -60,6 +66,9 @@ main :: ()
     // Named arguments
     PrintStuff( a = "Ahoy", b = "sensei!" );
 
+    y = doMoarStuff( x2 = 3, x1 = 9 );
+    printf( "y = %d\n", y );
+    expect( y == 27 );
 
     // TODO Function overloads
 }
