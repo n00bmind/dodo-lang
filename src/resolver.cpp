@@ -1778,7 +1778,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     return NewResolvedRvalue( type );
 }
 
-FuncArg* ResolveArgNameExpr( Type* funcType, Expr* nameExpr )
+FuncArg* ResolveArgNameExpr( Type* funcType, Array<FuncArg>& wantedArgs, Expr* nameExpr )
 {
     ASSERT( funcType->kind == Type::Func );
 
@@ -1798,13 +1798,14 @@ FuncArg* ResolveArgNameExpr( Type* funcType, Expr* nameExpr )
     if( funcDecl )
     {
         Array<FuncArg>& args = funcType->func.args;
+        ASSERT( wantedArgs.count == args.count );
         Array<FuncArgDecl> const& declArgs = funcDecl->func.args;
         ASSERT( declArgs.count == args.count );
 
-        for( int i = 0; i < args.count; ++i )
+        for( int i = 0; i < wantedArgs.count; ++i )
         {
             if( declArgs[i].name == nameExpr->name.ident )
-                return &args[i];
+                return &wantedArgs[i];
         }
     }
 
@@ -1873,7 +1874,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
         ArgExpr givenArg = givenArgs[givenIndex];
         if( givenArg.nameExpr )
         {
-            wantedArg = ResolveArgNameExpr( result.type, givenArg.nameExpr );
+            wantedArg = ResolveArgNameExpr( result.type, wantedArgs, givenArg.nameExpr );
             if( wantedArg == nullptr )
             {
                 RSLV_ERROR( givenArg.nameExpr->pos, "Unknown argument '%s' in function call", givenArg.nameExpr->name.ident );
@@ -2168,6 +2169,44 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
     return result;
 }
 
+Type* ResolveFuncDecl( Decl* decl )
+{
+    ASSERT( decl->kind == Decl::Func );
+
+    Array<FuncArg> args( &globalArena, decl->func.args.count );
+    for( FuncArgDecl const& a : decl->func.args )
+    {
+        Type* argType = ResolveTypeSpec( a.type );
+        CompleteType( argType, a.pos );
+        if( a.defaultValue )
+            ResolveExpr( a.defaultValue, argType );
+
+        args.Push( { argType, a.defaultValue, a.isVararg } );
+    }
+
+    Array<Type*> returnTypes( &globalArena, decl->func.returnTypes.count );
+    for( TypeSpec* ts : decl->func.returnTypes )
+    {
+        Type* retType = voidType;
+        if( ts )
+        {
+            retType = ResolveTypeSpec( ts );
+            CompleteType( retType, ts->pos );
+        }
+
+        returnTypes.Push( retType );
+    }
+
+    Type* returnType = voidType;
+    if( returnTypes.count == 1 )
+        returnType = returnTypes[0];
+    else if( returnTypes.count > 1 )
+        returnType = NewMultiType( returnTypes );
+
+    Type* funcType = NewFuncType( args, returnType );
+    return funcType;
+}
+
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
 {
     ResolvedExpr result = {};
@@ -2274,37 +2313,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             Decl* decl = expr->lambda.decl;
             ASSERT( decl->kind == Decl::Func );
 
-            Array<FuncArg> args( &globalArena, decl->func.args.count );
-            for( FuncArgDecl const& a : decl->func.args )
-            {
-                Type* argType = ResolveTypeSpec( a.type );
-                CompleteType( argType, a.pos );
-                if( a.defaultValue )
-                    ResolveExpr( a.defaultValue, argType );
-
-                args.Push( { argType, a.defaultValue, a.isVararg } );
-            }
-
-            Array<Type*> returnTypes( &globalArena, decl->func.returnTypes.count );
-            for( TypeSpec* ts : decl->func.returnTypes )
-            {
-                Type* retType = voidType;
-                if( ts )
-                {
-                    retType = ResolveTypeSpec( ts );
-                    CompleteType( retType, ts->pos );
-                }
-
-                returnTypes.Push( retType );
-            }
-
-            Type* returnType = voidType;
-            if( returnTypes.count == 1 )
-                returnType = returnTypes[0];
-            else if( returnTypes.count > 1 )
-                returnType = NewMultiType( returnTypes );
-
-            Type* funcType = NewFuncType( args, returnType );
+            Type* funcType = ResolveFuncDecl( decl );
             // Remember the decl so we can access arg names
             funcType->func.resolvedDecl = decl;
 
@@ -2841,37 +2850,7 @@ void ResolveSymbol( Symbol* sym )
 
         case Symbol::Func:
         {
-            Array<FuncArg> args( &globalArena, decl->func.args.count );
-            for( FuncArgDecl const& a : decl->func.args )
-            {
-                Type* argType = ResolveTypeSpec( a.type );
-                CompleteType( argType, a.pos );
-                if( a.defaultValue )
-                    ResolveExpr( a.defaultValue, argType );
-
-                args.Push( { argType, a.defaultValue, a.isVararg } );
-            }
-
-            Array<Type*> returnTypes( &globalArena, decl->func.returnTypes.count );
-            for( TypeSpec* ts : decl->func.returnTypes )
-            {
-                Type* retType = voidType;
-                if( ts )
-                {
-                    retType = ResolveTypeSpec( ts );
-                    CompleteType( retType, ts->pos );
-                }
-
-                returnTypes.Push( retType );
-            }
-
-            Type* returnType = voidType;
-            if( returnTypes.count == 1 )
-                returnType = returnTypes[0];
-            else if( returnTypes.count > 1 )
-                returnType = NewMultiType( returnTypes );
-
-            result = NewFuncType( args, returnType );
+            result = ResolveFuncDecl( decl );
             // Remember the decl so we can access arg names
             result->func.resolvedDecl = decl;
         } break;
@@ -2914,6 +2893,8 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol
 
 void ResolveFuncBody( Symbol* sym )
 {
+    // FIXME How do we mark this body as fully resolved so we don't ever do this more than once?
+
     ASSERT( sym->state == Symbol::Resolved );
 
     Decl* decl = sym->decl;

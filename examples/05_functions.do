@@ -9,16 +9,19 @@ main :: ()
         return x ? x * Factorial( x - 1 ) : 1;
     }
 
-    y := Factorial( 10 );
+    // Function 'pointer'
+    doStuff := Factorial;
+
+    y := doStuff( 10 );
     printf( "y = %d\n", y );
     expect( y == 3628800 );
 
-    // Function 'pointer'
-    doStuff := Factorial;
     // Lambda expression stored in a variable
     // TODO Do we wanna just add a 'func' keyword to avoid backtracking during parsing?
     doMoarStuff := ( x1: int, x2: int ) -> int
     {
+        // FIXME 
+        #debugbreak
         return x1 * x2;
     };
 

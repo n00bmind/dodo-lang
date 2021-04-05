@@ -131,7 +131,7 @@ struct DirectiveInfo
     x( Foreign,         "foreign",          () ) \
     x( Expect,          "expect",           ("condition", "errormsg"))  /* TODO Varargs */\
     x( ExpectError,     "expect_error",     ()) \
-    x( DebugBreak,      "debug_break",      ()) \
+    x( DebugBreak,      "debugbreak",       ()) \
 
 ENUM_STRUCT_WITH_NAMES_VALUES(Directive, DirectiveInfo, DIRECTIVES)
 #undef DIRECTIVES
