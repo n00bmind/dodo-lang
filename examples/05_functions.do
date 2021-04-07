@@ -20,44 +20,42 @@ main :: ()
     // TODO Do we wanna just add a 'func' keyword to avoid backtracking during parsing?
     doMoarStuff := ( x1: int, x2: int ) -> int
     {
-        // FIXME 
-        #debugbreak
-        return x1 * x2;
+        return x1 - x2;
     };
 
     y = doMoarStuff( 3, 5 );
     printf( "y = %d\n", y );
-    expect( y == 15 );
+    expect( y == -2 );
 
     // Can be called in place
     ()
     {
-        printf( "Hello lambda!" );
+        printf( "Hello lambda!\n" );
     }();
 
     // Optional arguments
     PrintStuff :: ( a: string, b: string = "World" )
     {
-        printf( "%s %s", a, b );
+        printf( "%s %s\n", a, b );
     }
 
     PrintStuff( "Hello" );
     PrintStuff( "Hello", "Sailor" );
 
     // Multiple return values
-    Values :: () -> int, int
+    Values :: () -> int, int, int
     {
-        return 10, 42;
+        return 10, 42, 100;
     }
 
-    a, b := Values();
-    printf( "a = %d, b = %d\n", a, b );
+    a, b, c := Values();
+    printf( "a = %d, b = %d, c = %d\n", a, b, c );
 
     // Varargs
     PrintManyThings :: ( things: string... )
     {
         // 'things' is literally a buffer of string
-        printf( "Got %d things: ", things#length );
+        printf( "Got %lld things: ", things#length );
 
         for( t in ..things )
             printf( " %s", t );
@@ -67,11 +65,11 @@ main :: ()
     PrintManyThings( "skrillex", "42", "techno", "cowabunga" );
 
     // Named arguments
-    PrintStuff( a = "Ahoy", b = "sensei!" );
+    PrintStuff( b = "sensei!", a = "Ahoy" );
 
     y = doMoarStuff( x2 = 3, x1 = 9 );
     printf( "y = %d\n", y );
-    expect( y == 27 );
+    expect( y == 6 );
 
     // TODO Function overloads
 }

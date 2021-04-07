@@ -28,6 +28,7 @@ struct TypeSpec
     };
     
     SourcePos pos;
+    //Type* resolvedType;
     Kind kind;
 
     union

@@ -87,50 +87,19 @@ char const* CdeclType( Type* type )
     switch( type->kind )
     {
         case Type::Void:
-            return "void";
         case Type::Bool:
-            return "bool";
+        case Type::String:
+            return type->name;
+        // Use the sized versions for all integral and arithmetic types
         case Type::Bits:
-        {
-            switch( type->size )
-            {
-                case 1:
-                return "b8";
-                case 2:
-                return "b16";
-                case 4:
-                return "b32";
-                case 8:
-                return "b64";
-                INVALID_DEFAULT_CASE;
-            }
-        } break;
+            type = (type == bitsType) ? b32Type : type;
+            return type->name;
         case Type::Int:
-        {
-            switch( type->size )
-            {
-                case 1:
-                return "i8";
-                case 2:
-                return "i16";
-                case 4:
-                return "i32";
-                case 8:
-                return "i64";
-                INVALID_DEFAULT_CASE;
-            }
-        } break;
+            type = (type == intType) ? i32Type : type;
+            return type->name;
         case Type::Float:
-        {
-            switch( type->size )
-            {
-                case 4:
-                return "f32";
-                case 8:
-                return "f64";
-                INVALID_DEFAULT_CASE;
-            }
-        } break;
+            type = (type == floatType) ? f32Type : type;
+            return type->name;
         case Type::Struct:
         case Type::Union:
         {
@@ -165,6 +134,7 @@ char* TypeToCdecl( Type* type, char const* symbolName )
         case Type::Bits:
         case Type::Int:
         case Type::Float:
+        case Type::String:
         case Type::Struct:
         case Type::Union:
         case Type::Enum:
@@ -173,6 +143,8 @@ char* TypeToCdecl( Type* type, char const* symbolName )
             return TypeToCdecl( type->ptr.base, OptParen( Strf( "*%s", symbolName ), haveSymbol ) );
         case Type::Array:
             return TypeToCdecl( type->array.base, OptParen( Strf( "%s[%lld]", symbolName, type->array.length ), haveSymbol ) );
+        case Type::Buffer:
+            return Strf( "buffer<%s>%s%s", TypeToCdecl( type->array.base, "" ), haveSymbol ? " " : "", symbolName );
         case Type::Func:
         {
             char* result = nullptr;
@@ -358,6 +330,51 @@ bool EmitMetaExpr( Expr* base, char const* name )
     return true;
 }
 
+void EmitStmtBlock( StmtList const* block );
+
+ArgExpr const* FindByName( Type* funcType, int wantedIndex, Array<ArgExpr> const& givenArgs )
+{
+    ASSERT( funcType->kind == Type::Func );
+
+    // TODO Same issue here as in ResolveArgNameExpr()
+    Decl* funcDecl = funcType->func.resolvedDecl;
+    // Assert so we find out where this doesn't hold
+    ASSERT( funcDecl );
+
+    if( funcDecl )
+    {
+        Array<FuncArgDecl> const& declArgs = funcDecl->func.args;
+        char const* wantedName = declArgs[wantedIndex].name;
+
+        for( ArgExpr const& a : givenArgs )
+        {
+            if( a.nameExpr && a.nameExpr->name.ident == wantedName )
+                return &a;
+        }
+    }
+
+    return nullptr;
+}
+
+void EmitArgExpr( ArgExpr const& arg, Type* wantedType, bool isForeignFunc )
+{
+    ResolvedExpr const& givenExpr = arg.expr->resolvedExpr;
+    // Convert strings inside foreign function calls
+    // TODO All this shit we're only doing because of printf, so make a better print function
+    if( isForeignFunc )
+    {
+        if( givenExpr.type == stringType && !givenExpr.isConst )
+            OUTSTR( "(char const*)" );
+        else if( givenExpr.type->kind == Type::Enum )
+        {
+            Type* valueType = givenExpr.type->enum_.base;
+            OUTSTR( "(" ); Out( TypeToCdecl( valueType, "" ) ); OUTSTR( ")" );
+        }
+    }
+
+    EmitExpr( arg.expr, wantedType );
+}
+
 void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlock /*= nullptr*/ )
 {
     switch( expr->kind )
@@ -392,7 +409,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             else if( nameType->kind == Type::Func )
             {
                 Symbol* sym = expr->name.symbol;
-                Decl* funcDecl = sym->decl;
+                Decl* funcDecl = (sym->kind == Symbol::Func) ? sym->decl : nullptr;
 
                 if( funcDecl && funcDecl->parentBlock && !IsForeign( funcDecl ) )
                     name = BuildQualifiedNameTmp( funcDecl->parentBlock, expr->name.ident );
@@ -416,7 +433,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
         } break;
         case Expr::Cast:
             OUTSTR( "(" );
-            Out( TypeSpecToCdecl( expr->cast.type, "" ) );
+            Out( TypeToCdecl( expr->resolvedExpr.type, "" ) );
             OUTSTR( ")" );
             EmitExpr( expr->cast.expr );
             break;
@@ -426,58 +443,116 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             Type* funcType = expr->call.func->resolvedExpr.type;
             ASSERT( funcType->kind == Type::Func );
 
-            // TODO This doesn't work for function "pointers"
+            // FIXME This doesn't work for anything that doesn't call directly by name
+            // TODO Add 'foreign' as a flag to the type
             Symbol* sym = expr->call.func->kind == Expr::Name ? expr->call.func->name.symbol : nullptr;
             bool isForeign = (sym && sym->decl) ? IsForeign( sym->decl ) : false;
-
-            OUTSTR( "( " );
 
             int givenIndex = 0, wantedIndex = 0;
             Array<FuncArg> const& wantedArgs = funcType->func.args;
             Array<ArgExpr> const& givenArgs = expr->call.args;
 
-            // TODO Named args
+            struct EmittedArgExpr
+            {
+                FuncArg const* wantedArg;
+                ArgExpr const* givenArg;
+                int varargLen;
+            };
+            // Copy given args array to house the final args we'll emit
+            Array<EmittedArgExpr> emittedArgs( &globalTmpArena, wantedArgs.count );
+            emittedArgs.ResizeToCapacity();
+
+            // TODO Test thoroughly
+            int varargCount = 0;
             while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
             {
-                if( givenIndex || wantedIndex )
-                    OUTSTR( ", " );
-
                 FuncArg const& wantedArg = wantedArgs[wantedIndex];
                 Type* wantedType = wantedArg.type;
 
-                ArgExpr argExpr = expr->call.args[givenIndex];
-                // Make a copy so we don't modify the resolved type while converting
-                ResolvedExpr givenExpr = argExpr.expr->resolvedExpr;
-
-                ResolvedExpr cnvtExpr = givenExpr;
-                if( !ConvertType( &cnvtExpr, wantedType ) )
+                ArgExpr const* givenArg = &givenArgs[givenIndex];
+                ArgExpr const* namedArg = FindByName( funcType, wantedIndex, givenArgs );
+                if( namedArg )
                 {
-                    ASSERT( wantedArg.isVararg );
-                    wantedIndex++;
-                    continue;
+                    givenArg = namedArg;
                 }
-
-                // Convert strings inside foreign function calls
-                // TODO All this shit we're only doing because of printf, so make a better print function
-                if( isForeign )
+                else if( wantedArg.isVararg )
                 {
-                    if( givenExpr.type == stringType && !givenExpr.isConst )
-                        OUTSTR( "(char const*)" );
-                    else if( givenExpr.type->kind == Type::Enum )
+                    if( !varargCount )
+                        emittedArgs[wantedIndex] = { &wantedArg, givenArg, 0 };
+
+                    // Keep adding the given args to the vararg until the type doesn't match anymore
+                    ResolvedExpr const& givenExpr = givenArg->expr->resolvedExpr;
+                    // Make a copy so we don't modify the resolved type while converting
+                    ResolvedExpr cnvtExpr = givenExpr;
+                    if( ConvertType( &cnvtExpr, wantedType ) )
                     {
-                        Type* valueType = givenExpr.type->enum_.base;
-                        OUTSTR( "(" ); Out( TypeToCdecl( valueType, "" ) ); OUTSTR( ")" );
+                        varargCount++;
+                        givenIndex++;
+                        continue;
+                    }
+                    else
+                    {
+                        emittedArgs[wantedIndex].varargLen = varargCount;
+                        varargCount = 0;
+                        wantedIndex++;
+                        continue;
                     }
                 }
 
-                EmitExpr( argExpr.expr, wantedType );
+                emittedArgs[wantedIndex] = { &wantedArg, givenArg, 0 };
 
                 givenIndex++;
-                if( !wantedArg.isVararg )
-                    wantedIndex++;
+                wantedIndex++;
+            }
+            // If the last one is a vararg, fix the count
+            FuncArg const& lastWantedArg = wantedArgs.Last();
+            if( lastWantedArg.isVararg )
+                emittedArgs[wantedArgs.count - 1].varargLen = varargCount;
+
+            ASSERT( givenIndex == givenArgs.count );
+            ASSERT( wantedIndex == wantedArgs.count );
+
+
+            // Emit resulting args
+            OUTSTR( "(" );
+            if( emittedArgs.count )
+                OUTSTR( " " );
+
+            for( EmittedArgExpr const& a : emittedArgs )
+            {
+                if( &a != emittedArgs.begin() )
+                    OUTSTR( ", " );
+
+                Type* wantedType = a.wantedArg->type;
+                if( a.wantedArg->isVararg )
+                {
+                    if( !isForeign )
+                    {
+                        OUTSTR( "BUFFER( " );
+                        Out( TypeToCdecl( wantedType, "" ) );
+                        OUTSTR( ", " );
+                    }
+
+                    for( int i = 0; i < a.varargLen; ++i )
+                    {
+                        if( i != 0 )
+                            OUTSTR( ", " );
+                        // FIXME Assert givenArg in range
+                        EmitArgExpr( a.givenArg[i], wantedType, isForeign );
+                    }
+
+                    if( !isForeign )
+                        OUTSTR( " )" );
+
+                    continue;
+                }
+                else
+                    EmitArgExpr( *a.givenArg, wantedType, isForeign );
             }
 
-            OUTSTR( " )" );
+            if( emittedArgs.count )
+                OUTSTR( " " );
+            OUTSTR( ")" );
         } break;
 
         case Expr::Index:
@@ -644,29 +719,64 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
             OUTSTR( ")" );
             break;
 
+        case Expr::Lambda:
+        {
+            Decl* decl = expr->lambda.decl;
+            auto const& declArgs = decl->func.args;
+            auto const& args = decl->resolvedType->func.args;
+
+            // TODO Multiple return types
+            OUTSTR( "[](" );
+            if( args.count )
+                OUTSTR( " " );
+            int i = 0;
+            for( FuncArg const& a : args )
+            {
+                if( &a != args.begin() )
+                    OUTSTR( ", " );
+                char const* name = declArgs[i++].name;
+                Out( TypeToCdecl( a.type, name ) );
+                if( a.defaultValue )
+                {
+                    OUTSTR( " = " );
+                    EmitExpr( a.defaultValue );
+                }
+            }
+            if( args.count )
+                OUTSTR( " " );
+            OUTSTR( ")" );
+
+            OutNL();
+            EmitStmtBlock( decl->func.body );
+            OutNL();
+        } break;
+
         INVALID_DEFAULT_CASE
     }
+}
+
+char const* BuildTypeName( Array<Type*> const& types )
+{
+    StringBuilder sb( &globalTmpArena );
+    for( Type* t : types )
+        sb.Append( t->name );
+    return sb.ToString( &globalTmpArena ).data;
 }
 
 void EmitReturnTypes( Decl* decl, char const* funcName )
 {
     ASSERT( decl->kind == Decl::Func );
     
-    Array<TypeSpec*> const& types = decl->func.returnTypes;
-    if( types )
+    Type* type = decl->resolvedType->func.returnType;
+    if( type->kind == Type::Multi )
     {
-        if( types.count == 1 )
-            Out( TypeSpecToCdecl( types[0], funcName ) );
-        else
-        {
-            NOT_IMPLEMENTED;
-        }
-    }
-    else
-    {
-        OUTSTR( "void " );
+        Array<Type*> const& types = type->multi.types;
+        Out( BuildTypeName( types ) );
+        OUTSTR( " " );
         Out( funcName );
     }
+    else
+        Out( TypeToCdecl( type, funcName ) );
 }
 
 void EmitFuncDecl( Decl* decl )
@@ -676,40 +786,68 @@ void EmitFuncDecl( Decl* decl )
     char const* name = BuildQualifiedNameTmp( decl );
 
     EmitReturnTypes( decl, name );
+    auto const& declArgs = decl->func.args;
+    auto const& args = decl->resolvedType->func.args;
     OUTSTR( "(" );
-    if( decl->func.args.count )
+    if( args.count )
         OUTSTR( " " );
-    for( FuncArgDecl const& a : decl->func.args )
+    int i = 0;
+    for( FuncArg const& a : args )
     {
-        if( &a != decl->func.args.begin() )
+        if( &a != args.begin() )
             OUTSTR( ", " );
-        Out( TypeSpecToCdecl( a.type, a.name ) );
+        name = declArgs[i++].name;
+        Out( TypeToCdecl( a.type, name ) );
+        if( a.defaultValue )
+        {
+            OUTSTR( " = " );
+            EmitExpr( a.defaultValue );
+        }
     }
-    if( decl->func.args.count )
+    if( args.count )
         OUTSTR( " " );
     OUTSTR( ")" );
 }
-
-void EmitStmtBlock( StmtList const* block );
 
 void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested, bool init = true )
 {
     Type* resolvedType = decl->resolvedType; 
 
     OutIndent();
-    if( decl->var.isConst )
+    char const* multiTypeVarName = nullptr;
+    if( resolvedType->kind == Type::Multi )
     {
-        //if( nested )
-            OUTSTR( "static constexpr " );
-        //else
-            //OUTSTR( "const " );
-    }
+        multiTypeVarName = Strf( "__multi%d", decl->pos.lineNumber );
 
-    //TypeSpec* typeSpec = decl->var.type;
-    //if( typeSpec )
-        //Out( TypeSpecToCdecl( typeSpec, name ) );
-    //else
-        Out( TypeToCdecl( resolvedType, name ) );
+        // NOTE Assume multi decls are processed in order
+        if( exprIndex == 0 )
+        {
+            Array<Type*> const& types = resolvedType->multi.types;
+            Out( BuildTypeName( types ) );
+            OUTSTR( " " );
+
+            Out( multiTypeVarName );
+        }
+        else
+            init = false;
+    }
+    else
+    {
+        if( decl->var.isConst )
+        {
+            if( nested )
+                OUTSTR( "static " );
+            OUTSTR( "constexpr " );
+        }
+
+#if 0
+        TypeSpec* typeSpec = decl->var.type;
+        if( typeSpec )
+            Out( TypeSpecToCdecl( typeSpec, name ) );
+        else
+#endif
+            Out( TypeToCdecl( resolvedType, name ) );
+    }
 
     if( init )
     {
@@ -755,6 +893,64 @@ void EmitVarDecl( Decl* decl, char const* name, int exprIndex, bool nested, bool
 
     OUTSTR( ";" );
     OutNL();
+
+    if( resolvedType->kind == Type::Multi )
+    {
+        resolvedType = resolvedType->multi.types[exprIndex];
+
+        OutIndent();
+        if( decl->var.isConst )
+        {
+            if( nested )
+                OUTSTR( "static " );
+            OUTSTR( "constexpr " );
+        }
+
+#if 0
+        TypeSpec* typeSpec = decl->var.type;
+        if( typeSpec )
+            Out( TypeSpecToCdecl( typeSpec, name ) );
+        else
+#endif
+            Out( TypeToCdecl( resolvedType, name ) );
+
+        OUTSTR( " = " );
+        Out( multiTypeVarName );
+        Out( Strf( "._%d", exprIndex ) );
+        OUTSTR( ";" );
+        OutNL();
+    }
+}
+
+void EmitMultiType( Type* type )
+{
+    ASSERT( type->kind == Type::Multi );
+
+    Array<Type*> const& types = type->multi.types;
+
+    OutIndent();
+    OUTSTR( "struct " );
+    Out( BuildTypeName( types ) );
+    OutNL();
+    OutIndent();
+    OUTSTR( "{" );
+    OutNL();
+
+    globalIndent++;
+    int i = 0;
+    for( Type* t : types )
+    {
+        OutIndent();
+        Out( TypeToCdecl( t, Strf( "_%d", i++ ) ) );
+        OUTSTR( ";" );
+        OutNL();
+    }
+    globalIndent--;
+    OutIndent();
+    OUTSTR( "};" );
+    OutNL();
+
+    type->flags |= Type::Emitted;
 }
 
 // TODO Remove 'nested' and link nodes to parent nodes so we have that info available here
@@ -1025,22 +1221,36 @@ void EmitStmt( Stmt* stmt )
             }
             break;
         case Stmt::For:
+        {
             OutIndent();
             OUTSTR( "for( " );
-            // TODO Array & string iterables
-            Out( TypeToCdecl( stmt->for_.rangeExpr->range.lowerBound->resolvedExpr.type, stmt->for_.indexName ) );
-            OUTSTR( " = " );
-            EmitExpr( stmt->for_.rangeExpr->range.lowerBound );
-            OUTSTR( "; " );
-            Out( stmt->for_.indexName );
-            OUTSTR( " < " );
-            EmitExpr( stmt->for_.rangeExpr->range.upperBound );
-            OUTSTR( "; ++" );
-            Out( stmt->for_.indexName );
+
+            Expr* rangeExpr = stmt->for_.rangeExpr;
+            // TODO Iterator range
+            Expr* lowerBound = rangeExpr->range.lowerBound;
+            if( lowerBound )
+            {
+                //Out( TypeToCdecl( lowerBound->resolvedExpr.type, stmt->for_.indexName ) );
+                Out( TypeToCdecl( rangeExpr->resolvedExpr.type, stmt->for_.indexName ) );
+                OUTSTR( " = " );
+                EmitExpr( lowerBound );
+                OUTSTR( "; " );
+                Out( stmt->for_.indexName );
+                OUTSTR( " < " );
+                EmitExpr( rangeExpr->range.upperBound );
+                OUTSTR( "; ++" );
+                Out( stmt->for_.indexName );
+            }
+            else
+            {
+                Out( TypeToCdecl( rangeExpr->resolvedExpr.type, stmt->for_.indexName ) );
+                OUTSTR( " : " );
+                EmitExpr( rangeExpr->range.upperBound );
+            }
             OUTSTR( " )" );
             OutNL();
             EmitStmtBlock( stmt->for_.block );
-            break;
+        } break;
 
         case Stmt::Switch:
             OutIndent();
@@ -1087,7 +1297,11 @@ void EmitStmt( Stmt* stmt )
             if( stmt->expr )
             {
                 OUTSTR( " " );
+                if( stmt->expr->kind == Expr::Comma )
+                    OUTSTR( "{ " );
                 EmitExpr( stmt->expr );
+                if( stmt->expr->kind == Expr::Comma )
+                    OUTSTR( " }" );
             }
             OUTSTR( ";" );
             break;
@@ -1151,6 +1365,24 @@ void EmitForwardDecls()
             } break;
         }
     }
+
+    for( auto idx = globalForwardDecls.First(); idx; ++idx )
+    {
+        Decl* decl = *idx;
+        EmitDecl( decl, nullptr, true );
+        OutNL();
+    }
+
+    for( auto idx = globalForwardTypes.First(); idx; ++idx )
+    {
+        Type* type = *idx;
+        // Emit a synthetic type to hold Multi types
+        if( type->kind == Type::Multi && (type->flags & Type::Emitted) == 0 )
+        {
+            EmitMultiType( type );
+            OutNL();
+        }
+    }
 }
 
 void EmitOrderedSymbols()
@@ -1180,16 +1412,6 @@ void EmitOrderedSymbols()
         EmitFuncDecl( decl );
         OutNL();
         EmitStmtBlock( decl->func.body );
-        OutNL();
-    }
-}
-
-void EmitInnerDecls()
-{
-    for( auto idx = globalInnerDecls.First(); idx; ++idx )
-    {
-        Decl* decl = *idx;
-        EmitDecl( decl, nullptr, true );
         OutNL();
     }
 }
@@ -1239,10 +1461,6 @@ void GenerateAll()
     OUTSTR( "///// Forward declarations" );
     OutNL();
     EmitForwardDecls();
-    OutNL();
-    OUTSTR( "///// Inner declarations" );
-    OutNL();
-    EmitInnerDecls();
     OutNL();
     OUTSTR( "///// Ordered declarations" );
     OutNL();

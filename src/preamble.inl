@@ -218,6 +218,8 @@ public:
     {}
 
     operator T*() { return data; }
+    T const* begin() const { return data; }
+    T const* end() const { return data + length; }
 };
 
 #define BUFFER(T, ...)                                        \

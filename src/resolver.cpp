@@ -84,13 +84,20 @@ struct Type
         Any,
     };
 
+    enum Flags
+    {
+        Emitted     = 0x1,
+    };
+
     char const* name;
     // NOTE Only user types (aggregates and enums) will have one
     // (only user created types are biunivocally associated with a symbol)
     Symbol* symbol;
+    // TODO I guess we could make these two 32 bits without real harm?
     sz size;
     sz align;
     Kind kind;
+    u32 flags;
 
     union
     {
@@ -155,8 +162,10 @@ BucketArray<Stmt*> globalNodeStack;
 // TODO Hashtable!
 internal BucketArray<Type*> globalCachedTypes;
 
-// Inner decl that will have to be emitted in the global scope in the C codegen
-internal BucketArray<Decl*> globalInnerDecls;
+// Special decls that will have to be emitted in the global scope in the C codegen
+internal BucketArray<Decl*> globalForwardDecls;
+// Multi types also need to be emitted before any function body that uses them
+internal BucketArray<Type*> globalForwardTypes;
 
 // Builtins
 struct BuiltinType
@@ -219,12 +228,12 @@ Type* i8Type = NewBuiltinType( "i8", Type::Int, 1, 1 );
 Type* i16Type = NewBuiltinType( "i16", Type::Int, 2, 2 );
 Type* i32Type = NewBuiltinType( "i32", Type::Int, 4, 4 );
 Type* i64Type = NewBuiltinType( "i64", Type::Int, 8, 8 );
-Type* intType = NewBuiltinType( "int", i64Type );
+Type* intType = NewBuiltinType( "int", i32Type );
 Type* b8Type = NewBuiltinType( "b8", Type::Bits, 1, 1 );
 Type* b16Type = NewBuiltinType( "b16", Type::Bits, 2, 2 );
 Type* b32Type = NewBuiltinType( "b32", Type::Bits, 4, 4 );
 Type* b64Type = NewBuiltinType( "b64", Type::Bits, 8, 8 );
-Type* bitsType = NewBuiltinType( "bits", b64Type );
+Type* bitsType = NewBuiltinType( "bits", b32Type );
 Type* f32Type = NewBuiltinType( "f32", Type::Float, 4, 4 );
 Type* f64Type = NewBuiltinType( "f64", Type::Float, 8, 8 );
 Type* floatType = NewBuiltinType( "float", f32Type );
@@ -256,6 +265,7 @@ Type* NewType( char const* name, Type::Kind kind, sz size, sz alignment )
     result->kind = kind;
     result->size = size;
     result->align = alignment;
+    result->flags = 0;
 
     globalCachedTypes.Push( result );
 
@@ -1784,7 +1794,7 @@ FuncArg* ResolveArgNameExpr( Type* funcType, Array<FuncArg>& wantedArgs, Expr* n
 
     Decl* funcDecl = funcType->func.resolvedDecl;
     /*
-    // NOTE There's an issue here with named args which is not quite solved
+    // TODO There's an issue here with named args which is not quite solved
     Func types don't contain arg names, as we don't consider them part of a func type definition (two different functions providing
     different names but matching types for their arguments should have the same type as they can both be called with the same call
     expression in most situations). We could break this equivalence and introduce arg names as part of the type, but it just doesn't seem
@@ -1839,13 +1849,14 @@ void PrintMissingArgsInfo( Type* funcType, Array<FuncArg> const& wantedArgs, Sou
 ResolvedExpr ResolveCallExpr( Expr* expr )
 {
     ASSERT( expr->kind == Expr::Call );
-    ResolvedExpr result = ResolveExpr( expr->call.func );
-    if( !IsValid( result ) )
+    ResolvedExpr resolvedFunc = ResolveExpr( expr->call.func );
+    if( !IsValid( resolvedFunc ) )
         return resolvedNull;
 
-    CompleteType( result.type, expr->pos );
+    Type* funcType = resolvedFunc.type;
+    CompleteType( funcType, expr->pos );
 
-    if( result.type->kind != Type::Func )
+    if( funcType->kind != Type::Func )
     {
         RSLV_ERROR( expr->pos, "Cannot call non-function value" );
         return resolvedNull;
@@ -1864,17 +1875,17 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
 
     Array<ArgExpr> const& givenArgs = expr->call.args;
     // Copy target func type args array and cross out args as they're found in the call
-    Array<FuncArg> wantedArgs = result.type->func.args.Clone( &globalTmpArena );
+    Array<FuncArg> wantedArgs = funcType->func.args.Clone( &globalTmpArena );
 
     FuncArg* wantedArg = nullptr;
     while( givenIndex < givenArgs.count && wantedIndex < wantedArgs.count )
     {
         wantedArg = &wantedArgs[wantedIndex];
 
-        ArgExpr givenArg = givenArgs[givenIndex];
+        ArgExpr const& givenArg = givenArgs[givenIndex];
         if( givenArg.nameExpr )
         {
-            wantedArg = ResolveArgNameExpr( result.type, wantedArgs, givenArg.nameExpr );
+            wantedArg = ResolveArgNameExpr( funcType, wantedArgs, givenArg.nameExpr );
             if( wantedArg == nullptr )
             {
                 RSLV_ERROR( givenArg.nameExpr->pos, "Unknown argument '%s' in function call", givenArg.nameExpr->name.ident );
@@ -1895,6 +1906,10 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
 
         Type* wantedArgType = wantedArg->type;
         ASSERT( wantedArgType, "This argument has already been given!" );
+
+        // Use the base type for varargs
+        if( wantedArg->isVararg && wantedArgType->kind == Type::Buffer )
+            wantedArgType = wantedArgType->array.base;
 
         ResolvedExpr resolvedArg = ResolveExpr( givenArg.expr, wantedArgType );
         if( !ConvertType( &resolvedArg, wantedArgType ) )
@@ -1938,7 +1953,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
         {
             SourcePos const& pos = givenArgs.Last().expr->pos;
             RSLV_ERROR( pos, "Missing arguments in function call (expected %d, got %d)", wantedArgs.count, givenArgs.count );
-            PrintMissingArgsInfo( result.type, wantedArgs, pos );
+            PrintMissingArgsInfo( funcType, wantedArgs, pos );
 
             return resolvedNull;
         }
@@ -1950,7 +1965,7 @@ ResolvedExpr ResolveCallExpr( Expr* expr )
         return resolvedNull;
     }
 
-    return NewResolvedRvalue( result.type->func.returnType );
+    return NewResolvedRvalue( funcType->func.returnType );
 }
 
 ResolvedExpr ResolveTernaryExpr( Expr* expr, Type* expectedType )
@@ -2087,6 +2102,8 @@ Type* ResolveTypeSpec( TypeSpec* spec, Symbol* parentSymbol = nullptr )
             for( FuncArgSpec const& argSpec : spec->func.args )
             {
                 Type* argType = ResolveTypeSpec( argSpec.type );
+                if( argSpec.isVararg )
+                    argType = NewBufferType( argType );
                 if( argSpec.defaultValue )
                     ResolveExpr( argSpec.defaultValue, argType );
                 args.Push( { argType, argSpec.defaultValue, argSpec.isVararg } );
@@ -2102,7 +2119,10 @@ Type* ResolveTypeSpec( TypeSpec* spec, Symbol* parentSymbol = nullptr )
             if( returnTypes.count == 1 )
                 returnType = returnTypes[0];
             else if( returnTypes.count > 1 )
+            {
                 returnType = NewMultiType( returnTypes );
+                globalForwardTypes.Push( returnType );
+            }
 
             result = NewFuncType( args, returnType );
         } break;
@@ -2136,6 +2156,9 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
     Expr* upperBoundExpr = expr->range.upperBound;
     ResolvedExpr lowerBound = {}, upperBound = {};
 
+    // Resolve as the type of the range's elements
+    Type* resolvedType = nullptr;
+
     if( lowerBoundExpr )
     {
         lowerBound = ResolveExpr( lowerBoundExpr );
@@ -2151,6 +2174,8 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
         {
             if( lowerBoundExpr )
                 RSLV_ERROR( expr->pos, "Ranged buffer expression cannot have a lower bound" );
+
+            resolvedType = upperBound.type->array.base;
         }
         else
         {
@@ -2159,14 +2184,20 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
 
             if( !ConvertType( &upperBound, lowerBound.type ) )
                 RSLV_ERROR( expr->pos, "Upper bound and lower bound in scalar range expression must have the same type" );
+
+            resolvedType = upperBound.type;
         }
     }
 
-    // TODO What type is this thing? Do we need a Range type?
-    ResolvedExpr result = NewResolvedRvalue( intType );
+    ResolvedExpr result = NewResolvedRvalue( resolvedType );
     result.isConst = (lowerBoundExpr == nullptr && upperBoundExpr == nullptr) || (lowerBound.isConst && upperBound.isConst);
 
     return result;
+}
+
+INLINE bool IsForeign( Decl* decl )
+{
+    return ContainsDirective( decl, Directive::Foreign );
 }
 
 Type* ResolveFuncDecl( Decl* decl )
@@ -2177,6 +2208,8 @@ Type* ResolveFuncDecl( Decl* decl )
     for( FuncArgDecl const& a : decl->func.args )
     {
         Type* argType = ResolveTypeSpec( a.type );
+        if( a.isVararg && !IsForeign( decl ) )
+            argType = NewBufferType( argType );
         CompleteType( argType, a.pos );
         if( a.defaultValue )
             ResolveExpr( a.defaultValue, argType );
@@ -2201,10 +2234,65 @@ Type* ResolveFuncDecl( Decl* decl )
     if( returnTypes.count == 1 )
         returnType = returnTypes[0];
     else if( returnTypes.count > 1 )
+    {
         returnType = NewMultiType( returnTypes );
+        globalForwardTypes.Push( returnType );
+    }
 
     Type* funcType = NewFuncType( args, returnType );
     return funcType;
+}
+
+BucketArray<Symbol>::Idx<false> EnterScope()
+{
+    return globalScopeStack.End();
+}
+
+void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
+{
+    globalScopeStack.PopUntil( scopeStartIdx );
+    ASSERT( globalScopeStack.End() == scopeStartIdx );
+}
+
+bool ResolveStmtBlock( StmtList const* block, Type* returnType );
+Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol = nullptr );
+
+void ResolveFuncBody( Decl* decl )
+{
+    // FIXME How do we mark this body as fully resolved so we don't ever do this more than once?
+
+    ASSERT( decl->kind == Decl::Func );
+    Type* type = decl->resolvedType;
+
+    auto scopeIdx = EnterScope();
+
+    int i = 0;
+    for( FuncArgDecl const& a : decl->func.args )
+    {
+        Type* argType = type->func.args[i].type;
+        CompleteType( argType, a.pos );
+
+        if( a.name )
+        {
+            // Create a synthetic Decl
+            TypeSpec* varType = a.type;
+            if( a.isVararg )
+                varType = NewArrayTypeSpec( a.pos, varType, nullptr, true );
+            Decl* varDecl = NewVarDecl( a.pos, a.name, varType, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
+            CreateDeclSymbols( varDecl, true );
+        }
+    }
+
+    ASSERT( type->func.returnType && type->func.returnType->kind > Type::Completing );
+
+    if( !IsForeign( decl ) )
+    {
+        bool returns = ResolveStmtBlock( decl->func.body, type->func.returnType );
+        if( !returns && type->func.returnType != voidType )
+            RSLV_ERROR( decl->pos, "Not all control paths return a value" );
+    }
+
+    LeaveScope( scopeIdx );
 }
 
 ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
@@ -2316,6 +2404,9 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             Type* funcType = ResolveFuncDecl( decl );
             // Remember the decl so we can access arg names
             funcType->func.resolvedDecl = decl;
+
+            decl->resolvedType = funcType;
+            ResolveFuncBody( decl );
 
             result = NewResolvedRvalue( funcType );
         } break;
@@ -2729,17 +2820,6 @@ Symbol* PushSymbol( char const* name, bool isLocal, SourcePos const& pos )
     return sym;
 }
 
-BucketArray<Symbol>::Idx<false> EnterScope()
-{
-    return globalScopeStack.End();
-}
-
-void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
-{
-    globalScopeStack.PopUntil( scopeStartIdx );
-    ASSERT( globalScopeStack.End() == scopeStartIdx );
-}
-
 void ResolveSymbol( Symbol* sym )
 {
     if( sym->state == Symbol::Resolved || sym->state == Symbol::Tainted )
@@ -2883,57 +2963,6 @@ ResolvedExpr ResolveConditionalExpr( Expr* expr )
     return cond;
 }
 
-INLINE bool IsForeign( Decl* decl )
-{
-    return ContainsDirective( decl, Directive::Foreign );
-}
-
-bool ResolveStmtBlock( StmtList const* block, Type* returnType );
-Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol = nullptr );
-
-void ResolveFuncBody( Symbol* sym )
-{
-    // FIXME How do we mark this body as fully resolved so we don't ever do this more than once?
-
-    ASSERT( sym->state == Symbol::Resolved );
-
-    Decl* decl = sym->decl;
-    ASSERT( decl->kind == Decl::Func );
-
-    Type* type = sym->type;
-    ASSERT( type->kind == Type::Func );
-
-    auto scopeIdx = EnterScope();
-
-    int i = 0;
-    for( FuncArgDecl const& a : decl->func.args )
-    {
-        Type* argType = type->func.args[i].type;
-        CompleteType( argType, a.pos );
-
-        if( a.name )
-        {
-            // Create a synthetic Decl
-            TypeSpec* varType = a.type;
-            if( a.isVararg )
-                varType = NewArrayTypeSpec( a.pos, varType, nullptr, true );
-            Decl* varDecl = NewVarDecl( a.pos, a.name, varType, nullptr, BucketArray<NodeDirective>::Empty, 0, decl->func.body );
-            CreateDeclSymbols( varDecl, true );
-        }
-    }
-
-    ASSERT( type->func.returnType && type->func.returnType->kind > Type::Completing );
-
-    if( !IsForeign( decl ) )
-    {
-        bool returns = ResolveStmtBlock( decl->func.body, type->func.returnType );
-        if( !returns && type->func.returnType != voidType )
-            RSLV_ERROR( decl->pos, "Not all control paths return a value" );
-    }
-
-    LeaveScope( scopeIdx );
-}
-
 void CompleteSymbol( Symbol* sym )
 {
     ResolveSymbol( sym );
@@ -2941,7 +2970,14 @@ void CompleteSymbol( Symbol* sym )
     if( sym->kind == Symbol::Type )
         CompleteType( sym->type, sym->decl->pos );
     else if( sym->kind == Symbol::Func )
-        ResolveFuncBody( sym );
+    {
+        ASSERT( sym->state == Symbol::Resolved );
+
+        Decl* decl = sym->decl;
+        ASSERT( decl->resolvedType == sym->type );
+
+        ResolveFuncBody( decl );
+    }
 }
 
 void BuildQualifiedNameTmp( StringBuilder* sb, Symbol* parentSymbol, char const* name )
@@ -3038,7 +3074,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
                 CompleteSymbol( sym );
 
             if( stmt->decl->kind == Decl::Enum )
-                globalInnerDecls.Push( stmt->decl );
+                globalForwardDecls.Push( stmt->decl );
         } break;
         case Stmt::Assign:
         {
@@ -3398,7 +3434,8 @@ void InitResolver( int globalSymbolsCount )
     // TODO Make a generic type comparator so we can turn this into a hashtable
     INIT( globalCachedTypes ) BucketArray<Type*>( &globalArena, 256 );
 
-    INIT( globalInnerDecls ) BucketArray<Decl*>( &globalArena, 16 );
+    INIT( globalForwardDecls ) BucketArray<Decl*>( &globalArena, 16 );
+    INIT( globalForwardTypes ) BucketArray<Type*>( &globalArena, 16 );
 
     InitErrorBuffer();
 
