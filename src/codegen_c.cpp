@@ -338,8 +338,8 @@ ArgExpr const* FindByName( Type* funcType, int wantedIndex, Array<ArgExpr> const
 
     // TODO Same issue here as in ResolveArgNameExpr()
     Decl* funcDecl = funcType->func.resolvedDecl;
-    // Assert so we find out where this doesn't hold
-    ASSERT( funcDecl );
+    // Assert to find out where this doesn't hold
+    //ASSERT( funcDecl );
 
     if( funcDecl )
     {
@@ -459,8 +459,10 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 int varargLen;
             };
             // Copy given args array to house the final args we'll emit
-            Array<EmittedArgExpr> emittedArgs( &globalTmpArena, wantedArgs.count );
+            Array<EmittedArgExpr> emittedArgs( &globalTmpArena, wantedArgs.count, NoClear() );
             emittedArgs.ResizeToCapacity();
+            for( int i = 0; i < emittedArgs.count; ++i )
+                emittedArgs[i] = { &wantedArgs[i], nullptr, 0 };
 
             // TODO Test thoroughly
             int varargCount = 0;
@@ -479,6 +481,13 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 {
                     if( !varargCount )
                         emittedArgs[wantedIndex] = { &wantedArg, givenArg, 0 };
+
+                    if( !isForeign )
+                    {
+                        // Use the base type for the conversion
+                        ASSERT( wantedType->kind == Type::Buffer );
+                        wantedType = wantedType->array.base;
+                    }
 
                     // Keep adding the given args to the vararg until the type doesn't match anymore
                     ResolvedExpr const& givenExpr = givenArg->expr->resolvedExpr;
@@ -505,12 +514,16 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                 wantedIndex++;
             }
             // If the last one is a vararg, fix the count
-            FuncArg const& lastWantedArg = wantedArgs.Last();
-            if( lastWantedArg.isVararg )
-                emittedArgs[wantedArgs.count - 1].varargLen = varargCount;
+            if( wantedArgs )
+            {
+                FuncArg const& lastWantedArg = wantedArgs.Last();
+                if( lastWantedArg.isVararg )
+                    emittedArgs[wantedArgs.count - 1].varargLen = varargCount;
+            }
 
             ASSERT( givenIndex == givenArgs.count );
-            ASSERT( wantedIndex == wantedArgs.count );
+            // TODO We're relying on C++'s varargs and optionals here, but this won't be enough
+            //ASSERT( wantedIndex == wantedArgs.count );
 
 
             // Emit resulting args
@@ -520,6 +533,9 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
 
             for( EmittedArgExpr const& a : emittedArgs )
             {
+                if( !a.givenArg )
+                    continue;
+
                 if( &a != emittedArgs.begin() )
                     OUTSTR( ", " );
 
@@ -529,7 +545,7 @@ void EmitExpr( Expr* expr, Type* expectedType /*= nullptr*/, StmtList* parentBlo
                     if( !isForeign )
                     {
                         OUTSTR( "BUFFER( " );
-                        Out( TypeToCdecl( wantedType, "" ) );
+                        Out( TypeToCdecl( wantedType->array.base, "" ) );
                         OUTSTR( ", " );
                     }
 
