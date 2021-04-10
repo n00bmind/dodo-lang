@@ -1,6 +1,7 @@
 R"~~~(#include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ARGS(...) __VA_ARGS__  
@@ -14,15 +15,20 @@ R"~~~(#include <stdio.h>
 #define INLINE inline __attribute__((always_inline))
 #endif
 
-// TODO Only debugbreak if there's a debugger present, otherwise exit and print stack trace
-#define HALT() (__debugbreak(), 1)
-#if !CONFIG_RELEASE
+#if CONFIG_RELEASE
+#define HALT() ((void)0)
+#else
+#define HALT() (exit(1), 1)
+#endif
+
+// TODO Stack trace
+#if CONFIG_RELEASE
+#define expect(expr, ...) ((void)0)
+#else
 #define expect(expr, ...) \
     ((void)( !(expr) \
              && (globalAssertHandler( __FILE__, __LINE__, #expr " " ##__VA_ARGS__ ), 1) \
              && HALT()))
-#else
-#define expect(expr, ...) ((void)0)
 #endif
 
 #define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )

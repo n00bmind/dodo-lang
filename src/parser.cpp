@@ -992,7 +992,7 @@ Decl* ParseDecl( Lexer* lexer, StmtList* parentBlock )
 
     BucketArray<NodeDirective> directives = ParseDirectives( lexer );
     if( ContainsDirective( directives, Directive::DebugBreak ) )
-        __debugbreak();
+        DEBUGBREAK( true );
     else if( ContainsDirective( directives, Directive::ExpectError ) )
         flags |= Node::SkipCodegen;
 
@@ -1259,7 +1259,7 @@ Stmt* ParseStmt( Lexer* lexer, StmtList* parentBlock )
 
     BucketArray<NodeDirective> directives = ParseDirectives( lexer );
     if( ContainsDirective( directives, Directive::DebugBreak ) )
-        __debugbreak();
+        DEBUGBREAK( true );
     else if( ContainsDirective( directives, Directive::ExpectError ) )
         flags |= Node::SkipCodegen;
 

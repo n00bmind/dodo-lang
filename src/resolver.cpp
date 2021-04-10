@@ -1761,19 +1761,23 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
             maxIndex = Max( maxIndex, index );
         }
 
-        ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
-
-        if( !ConvertType( &field, expectedFieldType ) )
+        if( expectedFieldType )
         {
-            // For buffers, if the first field is not a pointer, try again as an array literal instead
-            if( type->kind == Type::Buffer && !parseArrayLiteral )
-            {
-                parseArrayLiteral = true;
-                continue;
-            }
+            ResolvedExpr field = ResolveExpr( f.initValue, expectedFieldType );
 
-            RSLV_ERROR( f.pos, "No implicit conversion available in compound literal field (expected '%s', got '%s')",
-                        expectedFieldType->name, field.type->name );
+            if( !ConvertType( &field, expectedFieldType ) )
+            {
+                // For buffers, if the first field is not a pointer, try again as an array literal instead
+                if( type->kind == Type::Buffer && !parseArrayLiteral )
+                {
+                    parseArrayLiteral = true;
+                    // NOTE Parse same index!
+                    continue;
+                }
+
+                RSLV_ERROR( f.pos, "No implicit conversion available in compound literal field (expected '%s', got '%s')",
+                            expectedFieldType->name, field.type->name );
+            }
         }
 
         index++;
@@ -2828,7 +2832,7 @@ void ResolveSymbol( Symbol* sym )
 
     Decl* decl = sym->decl;
     if( ContainsDirective( decl, Directive::DebugBreak ) )
-        __debugbreak();
+        DEBUGBREAK( true );
 
     SourcePos const& pos = decl->pos;
     if( sym->state == Symbol::Resolving )
@@ -2893,6 +2897,9 @@ void ResolveSymbol( Symbol* sym )
             if( initExpr )
             {
                 ResolvedExpr init = ResolveExpr( initExpr, result );
+                if( IsValid( init.type ) )
+                    CompleteType( init.type, initExpr->pos );
+
                 if( result && IsValid( init.type ) && !ConvertType( &init, result ) )
                 {
                     // Make an exception for empty-size arrays
@@ -2942,6 +2949,7 @@ void ResolveSymbol( Symbol* sym )
         INVALID_DEFAULT_CASE
     }
 
+    ASSERT( result && result->kind > Type::Completing );
     decl->resolvedType = sym->type = result;
 
     if( sym->type && sym->type->kind != Type::None )
@@ -3055,7 +3063,7 @@ bool ResolveStmt( Stmt* stmt, Type* returnType )
 
     if( ContainsDirective( stmt, Directive::DebugBreak ) ||
         (stmt->kind == Stmt::Decl && ContainsDirective( stmt->decl, Directive::DebugBreak )) )
-        __debugbreak();
+        DEBUGBREAK( true );
 
     PushNode( stmt );
 
@@ -3293,7 +3301,7 @@ Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol
     ASSERT( decl->names );
 
     if( ContainsDirective( decl, Directive::DebugBreak ) )
-        __debugbreak();
+        DEBUGBREAK( true );
 
     Symbol::Kind kind = Symbol::None;
     switch( decl->kind )
@@ -3483,8 +3491,5 @@ void ResolveAll( Array<Decl*> const& globalDecls )
             globalErrorCount++;
     }
 
-#if !RELEASE
-    if( globalErrorCount )
-        __debugbreak();
-#endif
+    DEBUGBREAK( globalErrorCount );
 }

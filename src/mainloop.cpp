@@ -608,8 +608,8 @@ bool Run( int argCount, char const* args[] )
             globalPlatform.Print( "C compilation: %.3f s.\n", compileTime * 0.001f );
             globalPlatform.Print( "\nDONE." );
         }
-        else if( globalBreakOnError )
-            __debugbreak();
+        else
+            DEBUGBREAK( globalBreakOnError );
 
         return exitCode == 0;
     }

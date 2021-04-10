@@ -8,6 +8,6 @@ bin/
 *.exe
 *.obj
 *.pdb
-test/*.cpp
+tests/*.cpp
 *.diagsession
 examples/*.cpp

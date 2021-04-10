@@ -14,14 +14,16 @@
 #define persistent static
 
 
-#define HALT() (__debugbreak(), 1)
-#if !CONFIG_RELEASE
+// TODO Some POSIX version of this
+#define HALT() ((IsDebuggerPresent() && (__debugbreak(), 1)) || (exit(1), 1))
+
+#if CONFIG_RELEASE
+#define ASSERT(expr, ...) ((void)0)
+#else
 #define ASSERT(expr, ...) \
     ((void)( !(expr) \
              && (globalAssertHandler( __FILE__, __LINE__, IF_ELSE( HAS_ARGS(__VA_ARGS__) )( __VA_ARGS__ )( #expr ) ), 1) \
-             && HALT()))
-#else
-#define ASSERT(expr, ...) ((void)0)
+             && HALT() ))
 #endif
 
 #define ASSERT_HANDLER(name) void name( const char* file, int line, const char* msg, ... )
@@ -39,6 +41,11 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 #define INVALID_CODE_PATH ASSERT(!"InvalidCodePath");
 #define INVALID_DEFAULT_CASE default: { INVALID_CODE_PATH; } break;
 
+#if CONFIG_RELEASE
+#define DEBUGBREAK(expr) ((void)0)
+#else
+#define DEBUGBREAK(expr) ((void)(expr && HALT()))
+#endif
 
 #define SIZEOF(s) Sz( sizeof(s) )
 #define OFFSETOF(type, member) Sz( (uintptr_t)&(((type *)0)->member) )

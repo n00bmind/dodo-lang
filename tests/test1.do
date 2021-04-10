@@ -1,4 +1,5 @@
 
+// TODO Why is this an i32?
 n :: 1 + sizeof(p);
 p : *T;
 u := *p;
@@ -32,20 +33,20 @@ U :: struct
     a: [3] int;
 }
 
-uu: U = { { 0 } };
+uu: U = { .a = { 0 } };
 a, b, c :: 0;
 //b := 1;                                  // Redeclared
-add :: (v: Vector, w: Vector) -> Vector { return { v.x + w.x, v.y + w.y }; }
-vecResult := add_func( { 1, 2 }, { 3, 4 } );
+add :: (v: Vector, w: Vector) -> Vector { return { .x = v.x + w.x, .y = v.y + w.y }; }
+vecResult := add_func( { .x = 1, .y = 2 }, { .x = 3, .y = 4 } );
 add_func := add;
 Vector :: struct { x, y: int; }
 // TODO Check this actually works for all cond types
 three := 1 ? 2 : 3;
 ptr := &s[1 + 1];
 // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
-ptrItem := ptr[-1];
+ptrItem := ptr - 1;
 bin := 1000 / (2 + 3 * 5) << 10;
-aptr: *int = <*int> -s[3];
+aptr: *int = <*int> &s[3];
 
 f :: ()
 {
@@ -64,3 +65,5 @@ h :: (y: int) -> int
     }
 }
 
+main :: ()
+{}

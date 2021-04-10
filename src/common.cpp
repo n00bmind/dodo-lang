@@ -34,6 +34,8 @@ bool ContainsDirective( BucketArray<NodeDirective> const& directives, Directive:
 }
 
 
+bool globalBreakOnError = false;
+
 void ParseError( Lexer* lexer, char const* fmt, ... )
 {
     va_list arg_list;
@@ -45,9 +47,7 @@ void ParseError( Lexer* lexer, char const* fmt, ... )
     lexer->error = true;
     globalErrorCount++;
 
-#if  CONFIG_DEBUG
-    __debugbreak();
-#endif
+    DEBUGBREAK( globalBreakOnError );
 }
 
 
@@ -61,8 +61,6 @@ internal MemoryArena globalErrorArena;
 RingBuffer<ErrorInfo> globalErrorBuffer;
 internal ErrorInfo* globalLastError;
 internal bool globalSilenceInfos;
-
-bool globalBreakOnError = false;
 
 
 void Error( char const* fmt, ... )
@@ -90,8 +88,7 @@ void Error( char const* fmt, ... )
     globalLastError = globalErrorBuffer.Push( error );
     globalSilenceInfos = false;
 
-    if( globalBreakOnError )
-        __debugbreak();
+    DEBUGBREAK( globalBreakOnError );
 }
 
 void Info( char const* fmt, ... )

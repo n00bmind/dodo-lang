@@ -200,20 +200,6 @@ PLATFORM_SHELL_EXECUTE(Win32ShellExecute)
 #define ASSERT_U32( value ) \
     (ASSERT( 0 <= (value) && (value) <= U32MAX ), (u32)(value))
 
-ASSERT_HANDLER(DefaultAssertHandler)
-{
-    // TODO Logging
-    // TODO Stacktrace
-    char buffer[256] = {};
-
-    va_list args;
-    va_start( args, msg );
-    vsnprintf( buffer, ASSERT_SIZE( ARRAYCOUNT(buffer) ), msg, args );
-    va_end( args );
-
-    fprintf( stderr, "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
-}
-
 DWORD Win32GetLastError( char* result_string = nullptr, sz result_string_len = 0 )
 {
     DWORD result = ::GetLastError();
@@ -227,17 +213,25 @@ DWORD Win32GetLastError( char* result_string = nullptr, sz result_string_len = 0
 
     CHAR msg_buffer[2048] = {};
     CHAR* out = result_string ? result_string : msg_buffer;
-    DWORD out_len = ASSERT_U32( result_string ? result_string_len : ARRAYCOUNT(msg_buffer) );
+    DWORD max_out_len = ASSERT_U32( result_string ? result_string_len : ARRAYCOUNT(msg_buffer) );
 
     DWORD msg_size = FormatMessageA( FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                                      NULL,
                                      result,
                                      MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ),
                                      out,
-                                     out_len,
+                                     max_out_len,
                                      NULL );
     if( msg_size )
     {
+        // Remove trailing newline
+        for( int i = 0; i < 2; ++i )
+            if( out[msg_size - 1] == '\n' || out[msg_size - 1] == '\r' )
+            {
+                msg_size--;
+                out[msg_size] = 0;
+            }
+
         if( !result_string )
             Win32Print( "ERROR [%08x] : %s\n", result, out );
     }
@@ -251,8 +245,6 @@ DWORD Win32GetLastError( char* result_string = nullptr, sz result_string_len = 0
 void TraceToBuffer( char* buffer, sz buffer_length, int ignore_number_of_frames = 0 )
 {
     char* buffer_end = buffer + buffer_length;
-
-    APPEND_TO_BUFFER( "UNHANDLED EXCEPTION\n" );
 
     HANDLE hProcess = GetCurrentProcess();
 
@@ -375,12 +367,31 @@ void TraceToBuffer( char* buffer, sz buffer_length, int ignore_number_of_frames 
 }
 #undef APPEND_TO_BUFFER
 
+ASSERT_HANDLER(DefaultAssertHandler)
+{
+    // TODO Logging
+    char buffer[256] = {};
+
+    va_list args;
+    va_start( args, msg );
+    vsnprintf( buffer, ASSERT_SIZE( ARRAYCOUNT(buffer) ), msg, args );
+    va_end( args );
+
+    Win32Error( "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
+
+    char callstack[16384];
+    TraceToBuffer( callstack, ARRAYCOUNT(callstack), 2 );
+
+    Win32Error( "%s", callstack );
+}
+
 internal LONG WINAPI Win32ExceptionHandler( LPEXCEPTION_POINTERS exception_pointers )
 {
-    char callstack[32768];
+    char callstack[16384];
     TraceToBuffer( callstack, ARRAYCOUNT(callstack), 8 );
 
-    printf( "%s", callstack );
+    Win32Error( "UNHANDLED EXCEPTION\n" );
+    Win32Error( "%s", callstack );
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
