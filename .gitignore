@@ -1,4 +1,4 @@
-rr.time
+*.time
 bin/
 .vs/
 .session.vim

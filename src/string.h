@@ -66,6 +66,26 @@ INLINE void StringCopy( char const* src, char* dst, sz dstSize )
     strncpy( dst, src, Size( dstSize ) );
 }
 
+INLINE bool StringStartsWith( char const* str, char const* find) { return str && find && strstr(str, find) == str; }
+
+// In-place conversion to lowercase. Use length if provided or just advance until a null terminator is found
+inline char* StringToLowercase( char* str, int len = 0 )
+{
+    ASSERT( str, "No string" );
+
+    char* c = str;
+    int remaining = len;
+    while( (len && remaining) || (!len && *c) )
+    {
+        int c2 = tolower( *c );
+        *c++ = (char)c2;
+
+        remaining--;
+    }
+
+    return str;
+}
+
 
 struct String;
 

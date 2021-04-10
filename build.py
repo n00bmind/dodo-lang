@@ -23,7 +23,7 @@
 
 
 
-import os, sys, subprocess, atexit, random, argparse, shutil
+import os, sys, subprocess, atexit, random, argparse, shutil, fnmatch
 from collections import namedtuple
 
 
@@ -60,7 +60,7 @@ platform_win = Platform(
             '-wd5027',          # Move assignment implicitly deleted
             '-wd5045'          # Spectre mitigations
             ],
-        libs                  = [], #'user32.lib', 'gdi32.lib', 'winmm.lib', 'ole32.lib', 'opengl32.lib', 'shlwapi.lib'],
+        libs                  = ['dbghelp.lib'], #'user32.lib', 'gdi32.lib', 'winmm.lib', 'ole32.lib', 'opengl32.lib', 'shlwapi.lib'],
         common_linker_flags   = ['/opt:ref', '/incremental:no']
 )
 
@@ -116,10 +116,9 @@ default_platform = platform_win
 
 class colors:
     GRAY = '\033[1;30m'
+    RED = '\033[1;31m'
+    GREEN = '\033[1;32m'
     END = '\033[0m'
-# print '\033[1;30mGray like Ghost\033[1;m'
-# print '\033[1;31mRed like Radish\033[1;m'
-# print '\033[1;32mGreen like Grass\033[1;m'
 # print '\033[1;33mYellow like Yolk\033[1;m'
 # print '\033[1;34mBlue like Blood\033[1;m'
 # print '\033[1;35mMagenta like Mimosa\033[1;m'
@@ -142,11 +141,11 @@ def print_color(text, color_string):
 
 
 def begin_time():
-    subprocess.call(['ctime', '-begin', 'rr.time'])
+    subprocess.call(['ctime', '-begin', 'do.time'])
 
 def end_time():
     # TODO Check this picks up failures etc.
-    subprocess.call(['ctime', '-end', 'rr.time'])
+    subprocess.call(['ctime', '-end', 'do.time'])
 
     
 if __name__ == '__main__':
@@ -160,6 +159,7 @@ if __name__ == '__main__':
     config_group.add_argument('-r', '--release', help='Create Release build', action='store_true')
     parser.add_argument('-c', '--clean', help='Delete contents of the bin folder before building', action='store_true')
     parser.add_argument('-v', '--verbose', help='Increase verbosity', action='store_true')
+    parser.add_argument('-t', '--runtests', help='Run all tests found in subfolders', action='store_true')
     in_args = parser.parse_args()
 
     atexit.register(end_time)
@@ -171,16 +171,6 @@ if __name__ == '__main__':
 
     if not os.path.exists(binpath):
         os.mkdir(binpath)
-    else:
-        for file in os.listdir(binpath):
-            filelow = file.lower()
-            if filelow.startswith('robotrider') and filelow.endswith('.pdb'):
-                try:
-                    pdbpath = os.path.join(binpath, file)
-                    os.remove(pdbpath)
-                except WindowsError:
-                    # print('Couldn\'t remove {} (probably in use)'.format(pdbpath))
-                    pass
 
     if in_args.clean:
         print(f'Removing contents of \'{binpath}\'..')
@@ -251,5 +241,37 @@ if __name__ == '__main__':
 
         else:
             sys.exit('Unsupported toolset')
+
+    if ret == 0 and in_args.runtests:
+        exepath = os.path.join(binpath, 'do.exe')
+
+        test_folders = ['tests', 'examples']
+        for folder in test_folders:
+            folder = os.path.join(cwd, folder)
+            test_files = fnmatch.filter(os.listdir(folder), '*.do')
+
+            for file in test_files:
+                print(f'Testing {file:<30}... ', end='')
+
+                # Compile it
+                out_args = [exepath]
+                out_args.append(file)
+                # Capture all output
+                proc = subprocess.run(out_args, cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+                if proc.returncode == 0:
+                    file = os.path.join(folder, file)
+                    file = os.path.splitext(file)[0] + '.exe'
+
+                    # Run it
+                    out_args = [file]
+                    proc = subprocess.run(out_args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+                ok = proc.returncode == 0
+                print_color('[ OK ]' if ok else '[FAIL]', colors.GREEN if ok else colors.RED)
+
+                if not ok:
+                    print(proc.stdout.decode())
+                    print('\n')
 
     sys.exit(ret)

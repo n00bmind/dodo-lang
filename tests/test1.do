@@ -45,7 +45,7 @@ ptr := &s[1 + 1];
 // TODO Do we want to disallow indexing pointers (unchecked) so it feels less safe than indexing arrays (always checked)?
 ptrItem := ptr[-1];
 bin := 1000 / (2 + 3 * 5) << 10;
-aptr: *int = -s[3] as *int;
+aptr: *int = <*int> -s[3];
 
 f :: ()
 {
