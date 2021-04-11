@@ -7,7 +7,7 @@ main :: ( argc: int, argv: **i8 ) -> int
     {
         printf( '-----\n' );
         for( i in 0 .. b.length )
-            printf( 'Item %d is %d\n', i, b[i] );
+            printf( 'Item %lld is %d\n', i, b[i] );
         printf( '\n' );
     }
 
@@ -30,14 +30,14 @@ main :: ( argc: int, argv: **i8 ) -> int
     PrintBuffer( nums4 );
 
     // Open ranges do require an explicitly sized array
-    #expecterror
+    #expect_error
     { nums5: []int = { [..] = 100 }; }
-    #expecterror
+    #expect_error
     { nums5: [*]int = { [..] = 100 }; }
 
-    #expecterror
+    #expect_error
     {
-        int bla = nums2[10];
+        bla: int = nums2[10];
     }
 
     // Creating a buffer view from an array

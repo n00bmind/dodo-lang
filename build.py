@@ -253,6 +253,7 @@ if __name__ == '__main__':
             for file in test_files:
                 print(f'Testing {file:<30}... ', end='')
 
+                phase = 'Compilation'
                 # Compile it
                 out_args = [exepath]
                 out_args.append(file)
@@ -263,6 +264,7 @@ if __name__ == '__main__':
                     file = os.path.join(folder, file)
                     file = os.path.splitext(file)[0] + '.exe'
 
+                    phase = 'Execution'
                     # Run it
                     out_args = [file]
                     proc = subprocess.run(out_args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -271,7 +273,8 @@ if __name__ == '__main__':
                 print_color('[ OK ]' if ok else '[FAIL]', colors.GREEN if ok else colors.RED)
 
                 if not ok:
+                    print(f'{phase} returned {proc.returncode}')
                     print(proc.stdout.decode())
-                    print('\n')
+                    print()
 
     sys.exit(ret)

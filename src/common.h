@@ -44,7 +44,8 @@ AssertHandlerFunc* globalAssertHandler = DefaultAssertHandler;
 #if CONFIG_RELEASE
 #define DEBUGBREAK(expr) ((void)0)
 #else
-#define DEBUGBREAK(expr) ((void)(expr && HALT()))
+// TODO Some POSIX version of this
+#define DEBUGBREAK(expr) ((void)(expr && IsDebuggerPresent() && (__debugbreak(), 1)))
 #endif
 
 #define SIZEOF(s) Sz( sizeof(s) )

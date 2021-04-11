@@ -4,6 +4,8 @@ main :: ()
     ////////////////////////////////////////////
     // FOR
 
+    // TODO 
+/*
     // Integer range (open end), default step
     for( i := 0..array.count! )
     {
@@ -52,6 +54,6 @@ main :: ()
         if( SomeCondition() )
             break;
     }
-
+*/
     // TODO Gather more examples from actual code
 }

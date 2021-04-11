@@ -54,7 +54,7 @@ main :: ()
     printf( "a + y = %f \n", z );
 
     // Conversion back to integer requires a cast though
-    #expecterror { c = x - b; }
+    #expect_error { c = x - b; }
     c = <int> ( x - b );
     expect( c == 8 );
 

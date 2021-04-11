@@ -20,7 +20,10 @@ internal InternString* Intern( String const& string, u32 flags = 0 )
 
     InternString* entry = globalInternStrings.entries.Get( string );
     if( entry )
+    {
+        entry->flags |= flags;
         result = entry;
+    }
     else
     {
         // Copy string data to permanent arena
@@ -52,6 +55,8 @@ Lexer::Lexer( String const& input, char const* filename_ )
     token = {};
 
     // Intern keywords & directives
+    // TODO At the moment we allow keywords and non-keywords with the same name (we just set the corresponding flags
+    // in the keyword's InternString but I wonder if this may cause any unexpected problems)
     for( Keyword::Item const& k : Keyword::items )
     {
         InternString* intern = Intern( String( k.name ), InternString::Keyword );

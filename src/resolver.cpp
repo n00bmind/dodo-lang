@@ -376,21 +376,21 @@ Type* NewMultiType( Array<Type*> const& types )
         Type* t = *idx;
         if( t->kind == Type::Multi )
         {
-            if( t->multi.types.count != types.count )
-                continue;
-
-            bool match = true;
-            for( int i = 0; i < types.count; ++i )
+            if( t->multi.types.count == types.count )
             {
-                if( t->multi.types[i] != types[i] )
+                bool match = true;
+                for( int i = 0; i < types.count; ++i )
                 {
-                    match = false;
-                    break;
+                    if( t->multi.types[i] != types[i] )
+                    {
+                        match = false;
+                        break;
+                    }
                 }
-            }
 
-            if( match )
-                return t;
+                if( match )
+                    return t;
+            }
         }
         idx.Next();
     }
@@ -918,7 +918,7 @@ ResolvedExpr ResolveMetaFieldExpr( Expr* base, char const* name, SourcePos const
             result = NewResolvedConst( i64Type, field->offset, pos );
         } break;
 
-    // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
+    // TODO This is different between arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
         case MetaAttr::Length:
         {
             if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
@@ -978,8 +978,8 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
     if( expr->field.isMeta )
         return ResolveMetaFieldExpr( expr->field.base, expr->field.name, expr->pos );
 
-#if 0
-    // TODO This is different for arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
+    // TODO Clarify whether we want to use this or the meta version for arrays & buffers
+    // TODO This is different between arrays and buffers, as this could be considered an actual "field" in buffers (and it's not a constant)
     if( MatchKeyword( Keyword::Length, expr->field.name ) )
     {
         if( !(baseType->kind == Type::Array || baseType->kind == Type::Buffer || baseType->kind == Type::String) )
@@ -997,7 +997,6 @@ ResolvedExpr ResolveFieldExpr( Expr* expr )
 
         return result;
     }
-#endif
 
     // 'Normal' field access of aggregates or pointers to such
     if( baseType->kind == Type::Pointer )
@@ -1364,7 +1363,8 @@ void UnifyArithmeticOperands( ResolvedExpr* left, ResolvedExpr* right )
             CastType( right, leftType );
         else if( leftType->kind == Type::Int && rightType->kind == Type::Bits )
             CastType( left, rightType );
-        else
+
+        // Promote sizes
         {
             ASSERT( (leftType->kind == Type::Int && rightType->kind == Type::Int ) ||
                     (leftType->kind == Type::Bits && rightType->kind == Type::Bits) );
@@ -1718,7 +1718,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
 
             if( type->kind == Type::Buffer && !parseArrayLiteral )
             {
-                expectedFieldType = index == 0 ? NewPtrType( type->array.base ) : intType;
+                expectedFieldType = index == 0 ? NewPtrType( type->array.base ) : i64Type;
                 if( index >= 2 )
                     RSLV_ERROR( f.pos, "Buffer initializer must have only pointer and length fields" );
             }
@@ -1729,27 +1729,30 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
             {
                 ResolvedExpr indexExpr = ResolveExpr( f.index );
 
-                if( indexExpr.type->kind == Type::Int )
+                if( IsValid( indexExpr ) )
                 {
-                    if( !indexExpr.isConst )
-                        RSLV_ERROR( f.pos, "Indexed initializer must be a constant expression" );
-
-                    index = indexExpr.constValue.intValue;
-                    if( index < 0 )
-                        RSLV_ERROR( f.pos, "Indexed initializer in compound literal cannot be negative" );
-                }
-
-                if( f.index->kind == Expr::Range )
-                {
-                    if( !indexExpr.isConst )
-                        RSLV_ERROR( f.pos, "Ranged initializer must be a constant expression" );
-
-                    if( f.index->range.lowerBound == nullptr && f.index->range.upperBound == nullptr )
+                    if( indexExpr.type->kind == Type::Int )
                     {
-                        if( flexibleArray )
-                            RSLV_ERROR( f.pos, "Arrays with unknown size cannot be given a full range initializer" );
-                        else if( type->kind == Type::Buffer )
-                            RSLV_ERROR( f.pos, "Buffer views cannot be given a full range initializer" );
+                        if( !indexExpr.isConst )
+                            RSLV_ERROR( f.pos, "Indexed initializer must be a constant expression" );
+
+                        index = indexExpr.constValue.intValue;
+                        if( index < 0 )
+                            RSLV_ERROR( f.pos, "Indexed initializer in compound literal cannot be negative" );
+                    }
+
+                    if( f.index->kind == Expr::Range )
+                    {
+                        if( !indexExpr.isConst )
+                            RSLV_ERROR( f.pos, "Ranged initializer must be a constant expression" );
+
+                        if( f.index->range.lowerBound == nullptr && f.index->range.upperBound == nullptr )
+                        {
+                            if( flexibleArray )
+                                RSLV_ERROR( f.pos, "Arrays of unknown size cannot be given a full range initializer" );
+                            else if( type->kind == Type::Buffer )
+                                RSLV_ERROR( f.pos, "Buffer views cannot be given a full range initializer" );
+                        }
                     }
                 }
             }
@@ -1758,7 +1761,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
                 RSLV_ERROR( f.pos, "Field initializer in compound literal out of range" );
 
             // TODO Remember which indices have been defined, and show an error in case a slot is specified more than once
-            maxIndex = Max( maxIndex, index );
+            //maxIndex = Max( maxIndex, index );
         }
 
         if( expectedFieldType )
@@ -1786,7 +1789,7 @@ ResolvedExpr ResolveCompoundExpr( Expr* expr, Type* expectedType )
     if( flexibleArray || parseArrayLiteral )
     {
         // Substitute type by a new one with correct sizing info (need to fetch any cached types again)
-        type = NewArrayType( type->array.base, maxIndex );
+        type = NewArrayType( type->array.base, index );
     }
 
     return NewResolvedRvalue( type );
@@ -2004,7 +2007,7 @@ ResolvedExpr ResolveIndexExpr( Expr* expr )
 
     ResolvedExpr base = ResolveExpr( expr->index.base );
     ResolvedExpr index = ResolveExpr( expr->index.index );
-    if( !ConvertType( &index, intType ) )
+    if( !ConvertType( &index, i64Type ) )
         RSLV_ERROR( expr->pos, "Index expression must have integer type" );
 
     if( base.type->kind == Type::Array && index.isConst )
@@ -2186,15 +2189,20 @@ ResolvedExpr ResolveRangeExpr( Expr* expr )
             if( !lowerBoundExpr )
                 RSLV_ERROR( expr->pos, "Non-iterator range expression must have a lower bound" );
 
-            if( !ConvertType( &upperBound, lowerBound.type ) )
+            if( !ConvertType( &upperBound, lowerBound.type ) &&
+                !ConvertType( &lowerBound, upperBound.type ) )
                 RSLV_ERROR( expr->pos, "Upper bound and lower bound in scalar range expression must have the same type" );
 
             resolvedType = upperBound.type;
         }
     }
 
+    bool emptyRange = (lowerBoundExpr == nullptr && upperBoundExpr == nullptr);
+    if( emptyRange )
+        resolvedType = i64Type;
+
     ResolvedExpr result = NewResolvedRvalue( resolvedType );
-    result.isConst = (lowerBoundExpr == nullptr && upperBoundExpr == nullptr) || (lowerBound.isConst && upperBound.isConst);
+    result.isConst = emptyRange || (lowerBound.isConst && upperBound.isConst);
 
     return result;
 }
@@ -2261,6 +2269,14 @@ void LeaveScope( BucketArray<Symbol>::Idx<false> const& scopeStartIdx )
 bool ResolveStmtBlock( StmtList const* block, Type* returnType );
 Array<Symbol*> CreateDeclSymbols( Decl* decl, bool isLocal, Symbol* parentSymbol = nullptr );
 
+void AssertTypeResolved( Type* type )
+{
+    if( globalErrorCount || globalErrorBuffer.Count() || globalSilenceInfos )
+        ASSERT( !IsValid( type ) || type->kind > Type::Completing );
+    else
+        ASSERT( IsValid( type ) && type->kind > Type::Completing );
+}
+
 void ResolveFuncBody( Decl* decl )
 {
     // FIXME How do we mark this body as fully resolved so we don't ever do this more than once?
@@ -2287,7 +2303,7 @@ void ResolveFuncBody( Decl* decl )
         }
     }
 
-    ASSERT( type->func.returnType && type->func.returnType->kind > Type::Completing );
+    AssertTypeResolved( type->func.returnType );
 
     if( !IsForeign( decl ) )
     {
@@ -2305,11 +2321,27 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
     switch( expr->kind )
     {
         case Expr::Int:
-            result = NewResolvedConst( intType, expr->literal.intValue, expr->pos );
-            break;
+        {
+            Type* type = i32Type;
+            if( expectedType && expectedType->kind == Type::Bits )
+            {
+                type = expectedType;
+                result = NewResolvedConst( type, (u64)expr->literal.intValue, expr->pos );
+            }
+            else
+            {
+                if( expectedType && expectedType->kind == Type::Int )
+                    type = expectedType;
+                result = NewResolvedConst( type, expr->literal.intValue, expr->pos );
+            }
+        } break;
         case Expr::Float:
-            result = NewResolvedConst( floatType, expr->literal.floatValue, expr->pos );
-            break;
+        {
+            Type* type = f32Type;
+            if( expectedType && expectedType->kind == Type::Float )
+                type = expectedType;
+            result = NewResolvedConst( type, expr->literal.floatValue, expr->pos );
+        } break;
         case Expr::Str:
             result = NewResolvedConst( stringType, expr->literal.strValue, expr->pos );
             break;
@@ -2352,7 +2384,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
             if( !CompleteType( type, expr->pos ) )
                 return resolvedNull;
 
-            result = NewResolvedConst( intType, TypeSize( type ), expr->pos );
+            result = NewResolvedConst( i64Type, TypeSize( type ), expr->pos );
         } break;
         // TODO Typeof
 
@@ -2418,7 +2450,7 @@ ResolvedExpr ResolveExpr( Expr* expr, Type* expectedType /*= nullptr*/ )
         INVALID_DEFAULT_CASE
     }
 
-    ASSERT( result.type );
+    AssertTypeResolved( result.type );
     expr->resolvedExpr = result;
 
     return result;
@@ -2440,7 +2472,7 @@ void CompleteStructType( Type* type, Array<TypeField>& fields )
         if( !IsValid( f.type ) )
             continue;
 
-        ASSERT( f.type->kind > Type::Completing );
+        AssertTypeResolved( f.type );
         ASSERT( IsPowerOf2( f.type->align ) );
 
         // TODO Unnamed aggregate members
@@ -2471,7 +2503,7 @@ void CompleteUnionType( Type* type, Array<TypeField>& fields )
         if( !IsValid( f.type ) )
             continue;
 
-        ASSERT( f.type->kind > Type::Completing );
+        AssertTypeResolved( f.type );
         ASSERT( IsPowerOf2( f.type->align ) );
 
         // TODO Unnamed aggregate members
@@ -2949,7 +2981,7 @@ void ResolveSymbol( Symbol* sym )
         INVALID_DEFAULT_CASE
     }
 
-    ASSERT( result && result->kind > Type::Completing );
+    AssertTypeResolved( result );
     decl->resolvedType = sym->type = result;
 
     if( sym->type && sym->type->kind != Type::None )
@@ -2964,9 +2996,14 @@ void ResolveSymbol( Symbol* sym )
 ResolvedExpr ResolveConditionalExpr( Expr* expr )
 {
     ResolvedExpr cond = ResolveExpr( expr );
-    // TODO
-    if( cond.type != intType )
-        RSLV_ERROR( expr->pos, "Condition must have integer type" );
+    // TODO Is this equivalent to C semantics for all cases?
+    if( false ) //cond.type != boolType )
+    {
+        RSLV_ERROR( expr->ternary.cond->pos, "Conditional expression must have type bool" );
+        return resolvedNull;
+    }
+
+    // TODO Review callers and think about what should happen for constant expressions here
 
     return cond;
 }

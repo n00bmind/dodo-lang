@@ -34,7 +34,11 @@ bool ContainsDirective( BucketArray<NodeDirective> const& directives, Directive:
 }
 
 
+#if 1
+bool globalBreakOnError = true;
+#else
 bool globalBreakOnError = false;
+#endif
 
 void ParseError( Lexer* lexer, char const* fmt, ... )
 {

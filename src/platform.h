@@ -11,7 +11,7 @@ typedef PLATFORM_FREE(PlatformFreeFunc);
 typedef PLATFORM_GET_ABSOLUTE_PATH(PlatformGetAbsolutePathFunc);
 #define PLATFORM_READ_ENTIRE_FILE(name) buffer name( char const* filename, MemoryArena* arena )
 typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
-#define PLATFORM_WRITE_ENTIRE_FILE(name) bool name( char const* filename, Array<buffer> const& chunks )
+#define PLATFORM_WRITE_ENTIRE_FILE(name) bool name( char const* filename, Array<buffer> const& chunks, bool overwrite )
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 
 #define PLATFORM_CURRENT_TIME_MILLIS(name) f64 name()

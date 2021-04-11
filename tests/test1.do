@@ -2,7 +2,6 @@
 // TODO Why is this an i32?
 n :: 1 + sizeof(p);
 p : *T;
-u := *p;
 T :: struct
 {
     a: [n] int;

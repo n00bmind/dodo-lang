@@ -506,7 +506,8 @@ Expr* ParsePostfixExpr( Lexer* lexer )
         else if( MatchToken( TokenKind::Pound, lexer->token ) )
         {
             Token field = NextToken( lexer );
-            if( field.kind == TokenKind::Name )
+            // Allow keywords too as there may be some shared names (and they're lexed as a separate token type)
+            if( field.kind == TokenKind::Name || field.kind == TokenKind::Keyword )
             {
                 InternString* intern = FindIntern( field.ident );
                 if( !intern || (intern->flags & InternString::MetaAttr) == 0 )
@@ -579,6 +580,9 @@ Expr* ParseRangeExpr( Lexer* lexer )
 Expr* ParseMulExpr( Lexer* lexer )
 {
     Expr* expr = ParseRangeExpr( lexer );
+
+    if( !expr )
+        return nullptr;
 
     // NOTE Range expressions cannot really be combined (for now at least!)
     if( expr->kind == Expr::Range )
@@ -1047,6 +1051,13 @@ Stmt* ParseSimpleStmt( SourcePos const& pos, Lexer* lexer, StmtList* parentBlock
     bool consumeSemicolon = true;
 
     Expr* expr = ParseCommaExpr( lexer );
+    if( !lexer->IsValid() )
+    {
+        while( !MatchToken( TokenKind::Semicolon, lexer->token ) )
+            NextToken( lexer );
+        RequireTokenAndAdvance( TokenKind::Semicolon, lexer );
+        return nullptr;
+    }
 
     if( (expr->kind == Expr::Comma || expr->kind == Expr::Name) &&
         MatchToken( TokenKind::Colon, lexer->token ) )

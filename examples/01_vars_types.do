@@ -17,7 +17,7 @@ main :: ()
     // (buffers will be explained better in a later example)
     greeting :string = "Hello Sailor!";
     // Oh, and they're also readonly
-    #expecterror{ greeting[6] = 'T'; }
+    #expect_error{ greeting[6] = 'T'; }
     ch = greeting[6];
     printf( "ch = '%c' (%d)\n", ch, ch );
 
@@ -39,7 +39,7 @@ main :: ()
 
     // They all need to either have a explicit typespec, or be given a value
     // (anything not given an explicit initial value is zero initialized)
-    #expecterror { x, y, z := 0, 1; }
+    #expect_error { x, y, z := 0, 1; }
     x, y, z :int = 0, 1;
     printf( "x = %d, y = %d, z = %d\n", x, y, z );
 
@@ -54,7 +54,7 @@ main :: ()
     printf( "hash = %x (%u)\n", hash, hash );
 
     // Conversion to integer and back is only allowed via casting (although literals of any sign auto convert to both)
-    #expecterror { noCanDo :i32 = hash; }
+    #expect_error { noCanDo :i32 = hash; }
     yesCanDo :i32 = <i32>hash;
 
     // Booleans are a special kind of bits type. Its natural size is 8 bits, although only the least significant is used

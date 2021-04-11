@@ -129,9 +129,9 @@ PLATFORM_READ_ENTIRE_FILE(Win32ReadEntireFile)
 PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
 {
     DWORD creationMode = CREATE_NEW;
-#if CONFIG_DEBUG
-    creationMode = CREATE_ALWAYS;
-#endif
+    if( overwrite ) 
+        creationMode = CREATE_ALWAYS;
+
     HANDLE outFile = CreateFile( filename, GENERIC_WRITE, 0, NULL,
                                  creationMode, FILE_ATTRIBUTE_NORMAL, NULL ); 
     if( outFile == INVALID_HANDLE_VALUE )
@@ -140,6 +140,7 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
         return false;
     }
 
+    bool error = false;
     for( int i = 0; i < chunks.count; ++i )
     {
         buffer const& chunk = chunks[i];
@@ -149,13 +150,14 @@ PLATFORM_WRITE_ENTIRE_FILE(Win32WriteEntireFile)
         if( !WriteFile( outFile, chunk.data, U32( chunk.length ), &bytesWritten, NULL ) )
         {
             globalPlatform.Error( "Failed writing %d bytes to '%s'", chunk.length, filename );
-            return false;
+            error = true;
+            break;
         }
     }
 
     CloseHandle( outFile );
 
-    return true;
+    return !error;
 }
 
 PLATFORM_CURRENT_TIME_MILLIS(Win32CurrentTimeMillis)

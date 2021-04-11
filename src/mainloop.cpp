@@ -522,6 +522,7 @@ bool Run( int argCount, char const* args[] )
         char cppFilePath[256] = {};
         inputFilename.CopyTo( cppFilePath );
 
+        // TODO At some point the intermediate cpp should go to a temp folder
         int extIndex = inputFilename.FindLast( '.' );
         if( extIndex == -1 )
             extIndex = inputFilename.length;
@@ -530,7 +531,7 @@ bool Run( int argCount, char const* args[] )
         ASSERT( available >= sizeof(".cpp") );
         StringCopy( ".cpp", cppFilePath + extIndex, available );
 
-        if( !globalPlatform.WriteEntireFile( cppFilePath, pages ) )
+        if( !globalPlatform.WriteEntireFile( cppFilePath, pages, true ) )
             return false;
 
         // Execute C compiler
@@ -609,7 +610,7 @@ bool Run( int argCount, char const* args[] )
             globalPlatform.Print( "\nDONE." );
         }
         else
-            DEBUGBREAK( globalBreakOnError );
+            DEBUGBREAK( true );
 
         return exitCode == 0;
     }
