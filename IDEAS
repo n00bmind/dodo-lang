@@ -76,6 +76,21 @@ ________________________________________________________________________________
       - Sometimes we might want to use an sbuffer during a process but then 'fix' the final result and signal it's not going to change any more. This provides an idiom to do so, although
         it's clearly a minor thing.
 
+- Have a think about the pseudo rant Casey makes in https://www.twitch.tv/videos/999392183?t=03h27m43s about how our concept of buffers is no good and how they should be "intrusive" instead.
+    The gist of it, in case the video goes away, is that a buffer should instead be a "pointer with markup", where you are essentially augmenting the pointer with an indication of where to find
+    the range's limit, and not have it be part of the type itself and copied all around. To be clear, the way I understand it, the indication itself is a constexpr, so I guess something like:
+
+    A :: struct
+    {
+        array: [count]int;
+        count: int;
+    }
+
+    where 'count' inside the brackets is not saying the buffer is declared as having as many elements as the value of count at that point. It's saying that's where to find the number of elements _at all times_.
+    I don't immediately see how you'd extend this concept generally for a count that's not defined next to the array itself (which is just equivalent to just having both things be a new type), but it sounds intriguing,
+    so have a think about it.
+
+
 - Precedence table, like in Bitwise's Ion, highest to lowest:
   · postfix: () [] .
   · unary: ! + - ~ &(addr) *(deref)
@@ -134,6 +149,8 @@ ________________________________________________________________________________
 
 - Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default
   for all instances), or when declaring each instance.
+  Something to think about is what happens with padding when a struct is specified as not even zero-initialized? The current C++ approach of leaving that out of the spec prevents defining a simple equality condition for structs as simple bit comparison, which I want to have
+  (likewise for assignment).  Once you force padding to be zero-initialized regardless though.. what advantage there is to being able to not initialize the members?
 
 - Do we want to disallow indexing pointers with [] (unchecked) so it feels less safe than indexing arrays (always checked)? (still allow pointer arithmetic ofc)
 
@@ -168,6 +185,8 @@ ________________________________________________________________________________
 - Investigate how to support hot code reloading at the binary level
 
 - Add a directive for enums that forces you to provide values for each item ('explicit'?)
+
+- Support data overloads in a struct for attributes of type function? This makes a lot of sense for function pointer tables, and in a sense it's just an extension of normal function overloading.
 ________________________________________________________________________________ 
 
 

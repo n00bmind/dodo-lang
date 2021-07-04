@@ -243,7 +243,7 @@ DWORD Win32GetLastError( char* result_string = nullptr, sz result_string_len = 0
 // Leave at least one byte for the terminator
 #define APPEND_TO_BUFFER( fmt, ... ) { int msg_len = snprintf( buffer, ASSERT_SIZE( buffer_end - buffer - 1 ), fmt, ##__VA_ARGS__ ); buffer += msg_len; }
 
-void TraceToBuffer( char* buffer, sz buffer_length, int ignore_number_of_frames = 0 )
+void DumpCallstackToBuffer( char* buffer, sz buffer_length, int ignore_number_of_frames = 0 )
 {
     char* buffer_end = buffer + buffer_length;
 
@@ -381,7 +381,7 @@ ASSERT_HANDLER(DefaultAssertHandler)
     Win32Error( "ASSERTION FAILED! :: \"%s\" (%s@%d)\n", buffer, file, line );
 
     char callstack[16384];
-    TraceToBuffer( callstack, ARRAYCOUNT(callstack), 2 );
+    DumpCallstackToBuffer( callstack, ARRAYCOUNT(callstack), 2 );
 
     Win32Error( "%s", callstack );
 }
@@ -389,7 +389,7 @@ ASSERT_HANDLER(DefaultAssertHandler)
 internal LONG WINAPI Win32ExceptionHandler( LPEXCEPTION_POINTERS exception_pointers )
 {
     char callstack[16384];
-    TraceToBuffer( callstack, ARRAYCOUNT(callstack), 8 );
+    DumpCallstackToBuffer( callstack, ARRAYCOUNT(callstack), 8 );
 
     Win32Error( "UNHANDLED EXCEPTION\n" );
     Win32Error( "%s", callstack );
