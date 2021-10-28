@@ -187,6 +187,10 @@ ________________________________________________________________________________
 - Add a directive for enums that forces you to provide values for each item ('explicit'?)
 
 - Support data overloads in a struct for attributes of type function? This makes a lot of sense for function pointer tables, and in a sense it's just an extension of normal function overloading.
+
+- Think about adding a compound expr that resolves to bits types, where each individual item is an enum flag or the negation of one.
+    i.e: { YesFlag, ~NoFlag } would automatically resolve to the bits value equivalent to (YesFlag & ~NoFlag) with the appropriate promoted byte size
+
 ________________________________________________________________________________ 
 
 
