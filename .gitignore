@@ -8,6 +8,8 @@ bin/
 *.exe
 *.obj
 *.pdb
+*.log
 tests/*.cpp
 *.diagsession
 examples/*.cpp
+.ccls-cache/

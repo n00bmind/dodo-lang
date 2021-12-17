@@ -1,2 +1,4 @@
 
 - Detect all identifiers equal to keywords (https://www.tutorialspoint.com/Reserved-keywords-in-Cplusplus) and rename them
+- Try using mainCRTStartup instead of main and see if that reduces the amount of garbage linked from the C runtime, as explained in https://github.com/cmuratori/refterm/issues/37
+

@@ -19,6 +19,10 @@ ________________________________________________________________________________
   Recover that idea in one of the early JAI videos about being able to slowly promote functions from quick anonymous lambdas to full blown
   independent functions while using the same exact syntax all along. Go find that video and write down the details.
 
+- Have some syntax to support function signatures that must change in sync in several places in the code: i.e. platform interfaces, plugins, all kinds of interfaces really.
+  What we'd want to do here is still be able to actually _see_ what the signature is while dealing with the various declarations/definitions.
+  The current #define trick in C++ makes that all very opaque.
+
 - Carefully consider NOT supporting function overloading?
   Pros:
     · It's just very convenient!
@@ -136,6 +140,7 @@ ________________________________________________________________________________
   - Provide many pieces of real working code that can be easily converted into automated tests that can be added to a testsuite to continuously run during the whole language development and beyond.
 
 - A way to declare an enum as a "flags" bitfield, with correct automatic values and convenient operations to test/set
+  https://preshing.com/20150324/safe-bitfields-in-cpp/
 
 - A way to tag pure functions? (see captures below)
 
@@ -143,12 +148,13 @@ ________________________________________________________________________________
   which means their internals are available inside the function scope directly, without qualifying them. Also, we could extend that so
   that if a function has a first argument with using, we could invoke it with the 'object.func()' syntax, ALTHOUGH that may be
   dangerous already? (promotes the mental model of "this function belongs to this object")
+- What about initializers ('constructors') though?
 
 - Think about the "sticky error" pattern for error handling explained in https://youtu.be/0WpCnd9E-eg?t=5864 and how to apply it to
   the standard library, or even through language constructs.
 
-- Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default
-  for all instances), or when declaring each instance.
+- Initializers (both to provide an initial value and to indicate no initialization) can be specified in a struct declaration (default for all instances), or when declaring each instance.
+  Anything not explicitly initialized, is automatically zero-initialized (unless marked to not do so, for example, by initializing to 'void').
   Something to think about is what happens with padding when a struct is specified as not even zero-initialized? The current C++ approach of leaving that out of the spec prevents defining a simple equality condition for structs as simple bit comparison, which I want to have
   (likewise for assignment).  Once you force padding to be zero-initialized regardless though.. what advantage there is to being able to not initialize the members?
 
@@ -187,12 +193,21 @@ ________________________________________________________________________________
 - Add a directive for enums that forces you to provide values for each item ('explicit'?)
 
 - Support data overloads in a struct for attributes of type function? This makes a lot of sense for function pointer tables, and in a sense it's just an extension of normal function overloading.
+  (example?)
+
+- Support some form of vectorization in the syntax (Casey mentioned the RiscV spec as a good example of how it should go)
+  Have a look at what ISPC is doing
 
 - Think about adding a compound expr that resolves to bits types, where each individual item is an enum flag or the negation of one.
     i.e: { YesFlag, ~NoFlag } would automatically resolve to the bits value equivalent to (YesFlag & ~NoFlag) with the appropriate promoted byte size
 
 ________________________________________________________________________________ 
 
+More ideas:
+- http://www.c3-lang.org/primer/
+
+
+________________________________________________________________________________ 
 
 Beyond the actual language features, something that I think most languages are quite poor at is debugging support and general dev tools. Several compiler features should strictly exist to aid during the day to day programming tasks, and in general all features, from basic
 error messages to more advanced tools, should be designed with care so as to never be in the way of the programmer.
