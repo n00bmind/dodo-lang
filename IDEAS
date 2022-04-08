@@ -117,6 +117,7 @@ ________________________________________________________________________________
       between these whatsoever, other than a straight cast.
       Interacting with C would convert anything that fits to the next bigger iXX quantity up to i64, and where that's not possible (size_t), a runtime debug check similar to
       array bounds checking would be used.
+- Compare against the overflow problems analyzed in https://graphitemaster.github.io/aau/?s=03
 
 - First class discriminated unions, as a simple subtyping mechanism. Can be switched over in a case statement. Could be defined 'partial' to allow extending with new subtypes?.
 
@@ -200,6 +201,10 @@ ________________________________________________________________________________
 
 - Think about adding a compound expr that resolves to bits types, where each individual item is an enum flag or the negation of one.
     i.e: { YesFlag, ~NoFlag } would automatically resolve to the bits value equivalent to (YesFlag & ~NoFlag) with the appropriate promoted byte size
+
+- Interesting allocation ideas from https://www.youtube.com/watch?v=LIb3L4vKZ7U
+  · When allocating AND deallocating, always pass a buffer for the whole block instead of just a pointer to the beginning, to help reduce the need to keep track of all the block sizes, and simplify freeing (and probably enable patterns that would be hard to do otherwise)
+  · A freelist could be a good companion to an arena allocator, to make it a bit more general. Any buffers freed could be added to several freelists split by size buckets. You could even think of making them an AVL tree instead of a list, to make it trivial to keep them sorted
 
 ________________________________________________________________________________ 
 
