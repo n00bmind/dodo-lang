@@ -8,6 +8,7 @@ It seems logical to have two 'sub-languages':
   The total code surface for this must be really really minimal.
 - A pythonic higher level syntax that builds on top of the previous one, with more advanced (publicly reviewed) data structures in a 'standard library' that is actually good.
   Any abstractions must be really straightforward and easy to 'unravel', code should still be very small.
+  Still this could be fairly opinionated about stuff like how memory is allocated, like for instance having pre-defined allocators to choose from and use handles instead of pointers for everything.
 - A third tier would be a more generic library of useful 'tools' that would be completely optional and offered just to quickly kickstart new programs etc.
 All layers should be pretty independent of one another, specially the last one, but ideally also the second layer would be removable, even though it would be included by default.
 Think where things like polymorphism & generics fall in this division.
@@ -181,6 +182,7 @@ ________________________________________________________________________________
 - Can we do a reliable almonst-equal operator for floats? (~=)
 
 - Have a concept of scopes (file, module, global) for global declarations like in Jai, AND allow specifying them for aggregate members too. This allows for something like private attributes without the OOP stupidity.
+- Other markers for attributes could be #private & #readonly. These would be paired with '#access Type', or '#access Type.attr', for explicitly marking code that can override that access (a la 'friend')
 
 - I think the general idea of having constructor/destructor like we do in Glowmade allows for a lot of agility for everyday code compared to having to constantly be thinking about all the lifetimes and scopes etc.
   Think how this could be integrated in the language without bringing any of the RAII garbage along with it.
@@ -206,6 +208,9 @@ ________________________________________________________________________________
   · When allocating AND deallocating, always pass a buffer for the whole block instead of just a pointer to the beginning, to help reduce the need to keep track of all the block sizes, and simplify freeing (and probably enable patterns that would be hard to do otherwise)
   · A freelist could be a good companion to an arena allocator, to make it a bit more general. Any buffers freed could be added to several freelists split by size buckets. You could even think of making them an AVL tree instead of a list, to make it trivial to keep them sorted
 
+- For directives that can be specified as scopes (affecting several lines of code), support two styles: #dir { ... } and #begin dir ... #end dir (which are checked against their pair at compile time ofc).
+  The first one is super quick and convenient, the second one is self-documenting.
+
 ________________________________________________________________________________ 
 
 More ideas:
@@ -217,7 +222,17 @@ ________________________________________________________________________________
 Beyond the actual language features, something that I think most languages are quite poor at is debugging support and general dev tools. Several compiler features should strictly exist to aid during the day to day programming tasks, and in general all features, from basic
 error messages to more advanced tools, should be designed with care so as to never be in the way of the programmer.
 
-:: TOOLING ::
+Second thing would be to make SIMD programming a first-class citizen in the language from the get-go. Writing SIMD code should be basically as intuitive as writing scalar code. For this, look for inspiration for a good portable model in stuff like HLSL, Agner Fog's vec library
+and the Google Highway library. Main problem here ofc is how to provide good coverage and efficiency for all the available instruction sets under a common syntax.
+Good interoperability with each platform's assembly is of course essential (meaning easy to use #asm blocks). For this learn a bit about the functionality and weird tricks & extensions to bare C provided by the AVR-GCC syntax
+( https://www.felixcloutier.com/documents/gcc-asm.html & https://gcc.gnu.org/onlinedocs/gcc/Using-Assembly-Language-with-C.html#Using-Assembly-Language-with-C ).
+**Even better**, have a #bytecode directive that allows inputting IRL blocks of vectorized code directly, which will be properly translated to native by the backend.
+
+Of course, same thing to be said about multi-threading. No language should be designed anymore with single-threaded execution in mind, so all basic features from creating a thread or fiber to lock-free programming should be a basic part of the language (with more elaborated
+facilities being provided in the standard library).
+
+
+.. TOOLING ..
 
 - Debuggers are very very poor at visualizing complex data in general, so there's tons to be improved here, from directly previewing images or other media, to graph-like representations of relationships between different parts of the data in memory.
   Some ideas on this regard: http://worrydream.com/#!/LearnableProgramming (see the adaptive visualization right before "Eliminate hidden state", for example)
@@ -238,4 +253,11 @@ ________________________________________________________________________________
 Interesting reads:
  - The death of optimizing compilers :: https://cr.yp.to/talks/2015.04.16/slides-djb-20150416-a4.pdf
  - Branch Prediction and the Performance of Interpreters -Don't Trust Folklore :: https://hal.inria.fr/hal-01100647/document
+
+
+.. NAMES ..
+I like the idea of having a composed name to represent the two major levels of abstraction / layers. For example:
+
+- make/do :: .mk for when you really need to build stuff from the ground up / .do for when you're more focused on achieving and getting things done
+  (although this makes it sound like there's two distinct syntaxes / compilers.. how would that even work?)
 
