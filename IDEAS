@@ -9,6 +9,7 @@ It seems logical to have two 'sub-languages':
 - A pythonic higher level syntax that builds on top of the previous one, with more advanced (publicly reviewed) data structures in a 'standard library' that is actually good.
   Any abstractions must be really straightforward and easy to 'unravel', code should still be very small.
   Still this could be fairly opinionated about stuff like how memory is allocated, like for instance having pre-defined allocators to choose from and use handles instead of pointers for everything.
+  https://floooh.github.io/2018/06/17/handles-vs-pointers.html
 - A third tier would be a more generic library of useful 'tools' that would be completely optional and offered just to quickly kickstart new programs etc.
 All layers should be pretty independent of one another, specially the last one, but ideally also the second layer would be removable, even though it would be included by default.
 Think where things like polymorphism & generics fall in this division.
@@ -38,6 +39,7 @@ ________________________________________________________________________________
 - Bake the concept of _handles_ in the type system, as a better pointer anywhere it makes sense (with the possibility of obtaining the actual pointer for speed when desired)
   In fact lately I've been thinking that on 64 bit machines specially, using 32 bit handles where possible would not only be safer, but also save a lot of memory!
   Think of ways in which the language could promote handles and "discourage" straight pointer use.
+  https://floooh.github.io/2018/06/17/handles-vs-pointers.html
 
   There are interesting ways in which several bits of a 64-bit pointer could be reused:
   https://en.wikipedia.org/wiki/Tagged_pointer
@@ -192,6 +194,8 @@ ________________________________________________________________________________
 - Think of a sane way of implementing functors
 
 - Investigate how to support hot code reloading at the binary level
+  See what Zig does, and learn about the techniques used in Live++
+  THIS IS A MUST!
 
 - Add a directive for enums that forces you to provide values for each item ('explicit'?)
 
@@ -211,10 +215,31 @@ ________________________________________________________________________________
 - For directives that can be specified as scopes (affecting several lines of code), support two styles: #dir { ... } and #begin dir ... #end dir (which are checked against their pair at compile time ofc).
   The first one is super quick and convenient, the second one is self-documenting.
 
+- For expressing the loop ranges, we want to easily express the [closed, open) range that is typical in Python, as that's what you want 99% of the time (and not only for loops), however I don't like the idea of making that implicit as it is in Python.
+  The explicit way of doing it would be just create an expression that means 'x - 1', as that's also something that comes up really often ('x + 1' too btw).
+  Maybe something as simple as '0 .. size-' would do (correspondingly we could have 'pointer+' or something)
+
+- Both #assert & #expect can be made even more useful if we make them be able to accept runtime conditions too.. so they'd replace the runtime equivalents AND could then be used to direct the optimizer to make assumptions about the subsequent code (similar to [[assume]] in
+  "modern" C++, only this also then integrates the runtime check in case the assumption is ever violated).
+  This could also in principle be used to implement the restrict / [[noalias]] features, but again, with actual checking!
+
+- For SIMD, we want automatic dispatch of specialised functions by the compiler, which would work by writing different overloads of the same function with the same parameters and addint an #arch(x) directive to each one, or something similar
+
+- I think macro _expressions_ could be useful to have (besides macro functions), specially in data scopes, but explore simple code expression too.
+  i.e. they would be a nice way of defining field _aliases_ in structs:
+
+  Button :: struct
+  {
+      flags: u32;
+      clicked :: #expand flags & .CLICKED;
+  }
+
 ________________________________________________________________________________ 
 
-More ideas:
-- http://www.c3-lang.org/primer/
+.. BACKEND ..
+
+- Pay close attention and investigate the Tilde backend (handmade llvm alternative). The guy developing it seems like he really knows his shit, and seems to be drawing from really interesting ideas which I'd also like to explore further.
+  See Cliff Click and the Sea of Nodes idea (resources).
 
 
 ________________________________________________________________________________ 
@@ -222,7 +247,8 @@ ________________________________________________________________________________
 Beyond the actual language features, something that I think most languages are quite poor at is debugging support and general dev tools. Several compiler features should strictly exist to aid during the day to day programming tasks, and in general all features, from basic
 error messages to more advanced tools, should be designed with care so as to never be in the way of the programmer.
 
-Second thing would be to make SIMD programming a first-class citizen in the language from the get-go. Writing SIMD code should be basically as intuitive as writing scalar code. For this, look for inspiration for a good portable model in stuff like HLSL, Agner Fog's vec library
+Second thing would be to make SIMD and parallel programming first-class citizens in the language from the get-go.
+Writing SIMD code should be basically as intuitive as writing scalar code. For this, look for inspiration for a good portable model in stuff like HLSL, Agner Fog's vec library
 and the Google Highway library. Main problem here ofc is how to provide good coverage and efficiency for all the available instruction sets under a common syntax.
 Good interoperability with each platform's assembly is of course essential (meaning easy to use #asm blocks). For this learn a bit about the functionality and weird tricks & extensions to bare C provided by the AVR-GCC syntax
 ( https://www.felixcloutier.com/documents/gcc-asm.html & https://gcc.gnu.org/onlinedocs/gcc/Using-Assembly-Language-with-C.html#Using-Assembly-Language-with-C ).
@@ -230,6 +256,7 @@ Good interoperability with each platform's assembly is of course essential (mean
 
 Of course, same thing to be said about multi-threading. No language should be designed anymore with single-threaded execution in mind, so all basic features from creating a thread or fiber to lock-free programming should be a basic part of the language (with more elaborated
 facilities being provided in the standard library).
+Learn from any current technologies like CUDA which are targeted to true parallelism and adapt their ideas.
 
 
 .. TOOLING ..
@@ -237,6 +264,15 @@ facilities being provided in the standard library).
 - Debuggers are very very poor at visualizing complex data in general, so there's tons to be improved here, from directly previewing images or other media, to graph-like representations of relationships between different parts of the data in memory.
   Some ideas on this regard: http://worrydream.com/#!/LearnableProgramming (see the adaptive visualization right before "Eliminate hidden state", for example)
   Also the Whitebox tool being developed by azmr (Handmade Net).
+
+- A list of features for a debugger that would be the *baseline* for what we'd need to achieve: https://werat.dev/blog/what-a-good-debugger-can-do/
+  Some more advanced stuff that would be extremely cool to generalize and make available effortlessly: https://www.youtube.com/watch?v=72y2EC5fkcE
+
+- More debugging links for info / inspiration:
+  https://msrc.microsoft.com/blog/2019/05/time-travel-debugging-its-a-blast-from-the-past/
+  https://www.hytradboi.com/2022/debugging-by-querying-a-database-of-all-program-state
+  https://www.youtube.com/watch?v=yCK0-vWmAsk
+  https://pernos.co/
 
 - One of the reasons profilers are incredibly useful is they allow to easily graph historical data, and debuggers have never tried something like that. There's probably a way to augment the debugged code directly so it can sample all kinds of stuff about the runtime behaviour
   of the code that can then be plotted directly in the debugger (maybe even provide a socket so that interesting data can be piped back to the app or to be viewed remotely).
@@ -247,17 +283,22 @@ facilities being provided in the standard library).
   would mean when breaking into the debugger during a crash or parse/resolve error or whatever, we'd have the full graphical display of
   all the internal info available besides the debugger's watch window.
 
+- Adding some sort of code coverage test mode, maybe a more refined version of https://fgiesen.wordpress.com/2012/04/08/metaprogramming-for-madmen/ sounds like it could unlock possibilities for other tools
 
 ________________________________________________________________________________
 
-Interesting reads:
+.. RESOURCES ..
+
  - The death of optimizing compilers :: https://cr.yp.to/talks/2015.04.16/slides-djb-20150416-a4.pdf
  - Branch Prediction and the Performance of Interpreters -Don't Trust Folklore :: https://hal.inria.fr/hal-01100647/document
 
+ - Sea of Nodes :: https://www.youtube.com/watch?v=9epgZ-e6DUU
+ - https://www.oracle.com/technetwork/java/javase/tech/c2-ir95-150110.pdf
+ - https://assets.ctfassets.net/oxjq45e8ilak/12JQgkvXnnXcPoAGoxB6le/5481932e755600401d607e20345d81d4/100752_1543361625_Cliff_Click_The_Sea_of_Nodes_and_the_HotSpot_JIT.pdf
+ - https://github.com/RealNeGate/tilde-backend
+ - https://youtu.be/FN9hZcTB16g?si=tUKqM1a9flCK9cWU
 
-.. NAMES ..
-I like the idea of having a composed name to represent the two major levels of abstraction / layers. For example:
+________________________________________________________________________________ 
 
-- make/do :: .mk for when you really need to build stuff from the ground up / .do for when you're more focused on achieving and getting things done
-  (although this makes it sound like there's two distinct syntaxes / compilers.. how would that even work?)
-
+More ideas:
+- http://www.c3-lang.org/primer/
