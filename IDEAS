@@ -233,6 +233,23 @@ ________________________________________________________________________________
       flags: u32;
       clicked :: #expand flags & .CLICKED;
   }
+  
+- When dealing with 'ownership' semantics, i.e. for container-type datatypes where the type 'owns' some chunk of memory and is responsible for freeing it up upon being destroyed,
+  I think the concept of 'move semantics' can make a lot of sense, but not opposed to an expensive 'copy' operation like in C++ (which is almost NEVER what you want, and when you do
+  want it, it should be extremely explicit, basically just a function call), just as a convenient way to express the idea that this ownership is being transferred. Something like:
+        
+        a <- b;
+
+  could simply mean that after this operation a is equal to what b was, and b has now been reset to its default initialization value.
+  This simply and cheaply conveys the idea that ownership of the contents of b has now been transferred to a, and b is no longer something we need to worry about, while at the same time,
+  if applied diligently, avoids all ambiguity about who needs to deal with that memory at the end of its lifetime. This may also useful in other contexts like returning from a 'builder'
+  type of function that is creating this kind of datatype anew, although in this case it wouldn't actually translate to any additional ops:
+    {
+        Array aTmp = [...];
+        // Add stuff to it or whatever
+
+        return <- aTmp;
+    }
 
 ________________________________________________________________________________ 
 
