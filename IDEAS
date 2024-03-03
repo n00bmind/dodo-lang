@@ -194,7 +194,7 @@ ________________________________________________________________________________
 - Think of a sane way of implementing functors
 
 - Investigate how to support hot code reloading at the binary level
-  See what Zig does, and learn about the techniques used in Live++
+  See what Zig does, and learn about the techniques used in Live++, and that Tomorrow Corporation tech demo 
   THIS IS A MUST!
 
 - Add a directive for enums that forces you to provide values for each item ('explicit'?)
@@ -225,8 +225,8 @@ ________________________________________________________________________________
 
 - For SIMD, we want automatic dispatch of specialised functions by the compiler, which would work by writing different overloads of the same function with the same parameters and addint an #arch(x) directive to each one, or something similar
 
-- I think macro _expressions_ could be useful to have (besides macro functions), specially in data scopes, but explore simple code expression too.
-  i.e. they would be a nice way of defining field _aliases_ in structs:
+- I think macro _expressions_ could be useful to have (besides macro functions), specially in data scopes, but explore simple code expressions too.
+  i.e. they would be a nice way of defining field _aliases_ in structs, where the field doesnt actually occupy memory (signified also by the use of ::), but it simply represents an expression that gets expanded in any code that mentions it:
 
   Button :: struct
   {
@@ -250,6 +250,15 @@ ________________________________________________________________________________
 
         return <- aTmp;
     }
+
+- For a more production-ready lexer, switch the basic approach of switching on the first char of a token to a state-machine driven approach, to minimize branch misprediction, as Mr. Nothings explains in https://nothings.org/computer/lexing.html
+
+- Check out how Hare integrates simple tagged unions into the core language syntax (https://harelang.org/tutorials/introduction/), which seems to open up a number of intriguing possibilities. I'm specially interested in how this is used for error handling, together with
+  the 'match', 'is' & 'as' keywords. Essentially error handling there works by having functions return a tuple of the "normal" value together with any error values that may happen during that function body. This sounds more generally useful than returning a tuple of values
+  with one of them being a boolean indicating success/error, as many times there is additional useful info associated with an error condition.
+  I don't particularly care for their special treatment of "error types" and other mechanisms associated with that, but the previous idea only requires having first class tagged unions, which are also useful in many other contexts, and also is something that could be regarded
+  as simple convention as it doesn't require any particular enforcement or other special language features.
+  This could even be extended further by providing syntax for functions that return tuples of values, any of which could be a tagged union, for maximum expressiblity in how error conditions are handled and the kind of info that can be returned in them.
 
 ________________________________________________________________________________ 
 
@@ -306,14 +315,17 @@ ________________________________________________________________________________
 
 .. RESOURCES ..
 
- - The death of optimizing compilers :: https://cr.yp.to/talks/2015.04.16/slides-djb-20150416-a4.pdf
- - Branch Prediction and the Performance of Interpreters -Don't Trust Folklore :: https://hal.inria.fr/hal-01100647/document
+- The death of optimizing compilers :: https://cr.yp.to/talks/2015.04.16/slides-djb-20150416-a4.pdf
+- Branch Prediction and the Performance of Interpreters -Don't Trust Folklore :: https://hal.inria.fr/hal-01100647/document
 
- - Sea of Nodes :: https://www.youtube.com/watch?v=9epgZ-e6DUU
- - https://www.oracle.com/technetwork/java/javase/tech/c2-ir95-150110.pdf
- - https://assets.ctfassets.net/oxjq45e8ilak/12JQgkvXnnXcPoAGoxB6le/5481932e755600401d607e20345d81d4/100752_1543361625_Cliff_Click_The_Sea_of_Nodes_and_the_HotSpot_JIT.pdf
- - https://github.com/RealNeGate/tilde-backend
- - https://youtu.be/FN9hZcTB16g?si=tUKqM1a9flCK9cWU
+- Sea of Nodes :: https://www.youtube.com/watch?v=9epgZ-e6DUU
+  https://darksi.de/d.sea-of-nodes/
+  https://www.oracle.com/technetwork/java/javase/tech/c2-ir95-150110.pdf
+  https://assets.ctfassets.net/oxjq45e8ilak/12JQgkvXnnXcPoAGoxB6le/5481932e755600401d607e20345d81d4/100752_1543361625_Cliff_Click_The_Sea_of_Nodes_and_the_HotSpot_JIT.pdf
+- https://github.com/RealNeGate/tilde-backend
+  https://youtu.be/FN9hZcTB16g?si=tUKqM1a9flCK9cWU
+
+- Tomorrow Corporation tech demo :: https://youtu.be/72y2EC5fkcE?si=F06ne_te8Fx-T7Rj
 
 ________________________________________________________________________________ 
 
